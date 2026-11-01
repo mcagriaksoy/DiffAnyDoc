@@ -138,7 +138,9 @@ comparison the toolbar keeps both files, so:
   window it picks up changes saved on disk; in a browser the original upload
   is resent, because a web page cannot read the file again.
 - **Copy** copies all changes, the left text, the right text, or both sides
-  side by side.
+  side by side. Changed rows also get a small arrow next to the line number:
+  `→` on the left copies that line for the right side, `←` on the right copies
+  it for the left side (to the clipboard).
 
 Whitespace-only edits are highlighted in blue instead of the red/green used for
 real content changes.

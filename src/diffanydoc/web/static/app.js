@@ -634,6 +634,14 @@ async function copyView(kind) {
   showToast(copied ? i18n.t("copy.done") : i18n.t("copy.failed"), !copied);
 }
 
+async function copyLine(text) {
+  const copied = await copyText(text);
+  showToast(
+    copied ? i18n.t("copy.lineDone") : i18n.t("copy.failed"),
+    !copied
+  );
+}
+
 /* ---------- toast ---------- */
 let toastTimer = 0;
 function showToast(message, isError = false) {
@@ -782,8 +790,20 @@ function renderText() {
           }`,
         },
         [
-          buildCell(row.left, row.left_inline, lastPage.left),
-          buildCell(row.right, row.right_inline, lastPage.right),
+          buildCell(
+            row.left,
+            row.left_inline,
+            lastPage.left,
+            "left",
+            row.kind !== "equal"
+          ),
+          buildCell(
+            row.right,
+            row.right_inline,
+            lastPage.right,
+            "right",
+            row.kind !== "equal"
+          ),
         ]
       )
     );
@@ -793,7 +813,13 @@ function renderText() {
   container.append(rows);
 }
 
-function buildCell(line, inline, previousPage = -1) {
+function buildCell(
+  line,
+  inline,
+  previousPage = -1,
+  side = "left",
+  copyable = false
+) {
   if (!line) return el("div", { class: "cell" });
   const text = el("span", { class: "text" });
   if (inline && inline.length) {
@@ -814,8 +840,27 @@ function buildCell(line, inline, previousPage = -1) {
   } else {
     text.textContent = line.text;
   }
+  const gutter = el("span", { class: "gutter" });
+  if (copyable) {
+    const label = i18n.t(
+      side === "left" ? "copy.lineToRight" : "copy.lineToLeft"
+    );
+    gutter.append(
+      el("button", {
+        class: "gutter-copy",
+        type: "button",
+        title: label,
+        "aria-label": label,
+        text: side === "left" ? "\u2192" : "\u2190",
+        onclick: () => copyLine(line.text),
+      })
+    );
+  }
+  gutter.append(
+    el("span", { class: "gutter-number", text: String(line.number) })
+  );
   return el("div", { class: "cell" }, [
-    el("span", { class: "gutter", text: String(line.number) }),
+    gutter,
     el("span", {
       class: "page-tag",
       text: line.page === previousPage ? "" : i18n.t("page.label", { n: line.page + 1 }),

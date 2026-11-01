@@ -689,7 +689,11 @@ a {
 
 .gutter {
   flex: none;
-  width: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  width: 58px;
   padding: 2px 8px 2px 0;
   border-right: 1px solid var(--border-color);
   color: var(--dim-label-color);
@@ -698,6 +702,38 @@ a {
   font-size: 11px;
   text-align: right;
   user-select: none;
+}
+
+.gutter-number {
+  min-width: 14px;
+  text-align: right;
+}
+
+.gutter-copy {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--dim-label-color);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.gutter-copy:hover,
+.gutter-copy:focus-visible {
+  background: var(--hover-tint);
+  color: var(--text-color);
+  opacity: 1;
+}
+
+.gutter-copy:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: -1px;
 }
 
 .page-tag {
