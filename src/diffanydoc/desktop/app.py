@@ -1,0 +1,264 @@
+"""Native desktop shell.
+
+The UI is a normal web app served by a local uvicorn instance; pywebview wraps
+it in an OS window. Nothing else changes: same engine, same API, same HTML.
+
+Backend note: pywebview uses GTK/WebKit2GTK when available and Qt otherwise.
+Neither is bundled, so packaging stays small and no GPL-licensed UI toolkit is
+linked in.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import socket
+import threading
+import time
+import webbrowser
+from pathlib import Path
+from typing import Any, Iterable, Sequence
+from urllib.error import URLError
+from urllib.request import urlopen
+
+from .. import __version__
+from ..i18n import resolve_language, t
+from ..session import SessionServer
+from ..web.server import STATIC_DIR, create_app
+
+HOST = "127.0.0.1"
+_WINDOW_MIN = (900, 620)
+
+
+# --------------------------------------------------------------------------- #
+# Local server
+# --------------------------------------------------------------------------- #
+
+
+def free_port() -> int:
+    """Ask the OS for an unused loopback port."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind((HOST, 0))
+        return int(sock.getsockname()[1])
+
+
+class ServerThread(threading.Thread):
+    """Uvicorn in a daemon thread, stoppable from the window's closing hook."""
+
+    def __init__(self, port: int, host: str = HOST) -> None:
+        super().__init__(daemon=True, name="diffanydoc-http")
+        self.host = host
+        self.port = port
+        self._server: Any = None
+
+    def run(self) -> None:  # pragma: no cover - needs a socket
+        import uvicorn
+
+        config = uvicorn.Config(
+            create_app(),
+            host=self.host,
+            port=self.port,
+            log_level="warning",
+            # The app has no websocket endpoints; "auto" would pick up a stale
+            # system websockets package and fail at import time.
+            ws="none",
+        )
+        self._server = uvicorn.Server(config)
+        self._server.run()
+
+    def stop(self) -> None:
+        if self._server is not None:
+            self._server.should_exit = True
+
+    @property
+    def url(self) -> str:
+        return f"http://{self.host}:{self.port}"
+
+
+def wait_until_ready(url: str, timeout: float = 20.0) -> bool:
+    """Poll the health endpoint until the API answers."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with urlopen(f"{url}/api/health", timeout=1.0) as response:
+                if response.status == 200:
+                    return True
+        except (URLError, OSError):
+            time.sleep(0.08)
+    return False
+
+
+# --------------------------------------------------------------------------- #
+# JavaScript bridge
+# --------------------------------------------------------------------------- #
+
+
+class DesktopApi:
+    """Methods exposed to JS as ``window.pywebview.api.*``."""
+
+    def __init__(
+        self,
+        startup_paths: Sequence[str | Path] = (),
+        startup_slots: Sequence[str | None] | None = None,
+    ) -> None:
+        self._selection: dict[str, str | None] = {"left": None, "right": None}
+        slots = list(startup_slots or ())
+        for index, path in enumerate(startup_paths):
+            if index < len(slots) and slots[index] in self._selection:
+                slot = str(slots[index])
+            else:
+                slot = "left" if index == 0 else "right"
+            self._selection[slot] = _resolve(path)
+        self._window: Any = None
+        self._loaded = False
+        self._pending: list[dict[str, str]] = []
+
+    def attach(self, window: Any) -> None:
+        self._window = window
+
+    # -- called by the frontend ------------------------------------------- #
+
+    def app_info(self) -> dict[str, Any]:
+        return {"version": __version__, "desktop": True}
+
+    def startup_files(self) -> list[str]:
+        """Files passed on the command line, e.g. ``diffanydoc desktop a.pdf b.pdf``."""
+        return [path for path in self._selection.values() if path]
+
+    def startup_selection(self) -> dict[str, str | None]:
+        """Slot-aware startup state, used by the left/right context menu entries."""
+        return dict(self._selection)
+
+    def deliver_selection(self, slot: str, path: str) -> None:
+        """Called from the session thread when another process sends a file."""
+        if slot not in self._selection:
+            return
+        payload = {"slot": slot, "path": _resolve(path)}
+        if not self._loaded or self._window is None:
+            self._pending.append(payload)
+            return
+        self._push(payload)
+
+    def on_loaded(self, *_args: Any) -> None:
+        """Flush selections that arrived while the webview was still loading."""
+        self._loaded = True
+        pending, self._pending = self._pending, []
+        for payload in pending:
+            self._push(payload)
+
+    def _push(self, payload: dict[str, str]) -> None:
+        if self._window is None:
+            return
+        script = (
+            "window.diffanydocReceive && "
+            f"window.diffanydocReceive({json.dumps(payload)});"
+        )
+        try:
+            self._window.evaluate_js(script)
+        except Exception:
+            # The window may be closing; a lost hand-off is not worth a crash.
+            pass
+
+    def pick_file(self, language: str = "en") -> str | None:
+        if self._window is None:
+            return None
+        import webview
+
+        lang = resolve_language(language)
+        dialog_type = getattr(getattr(webview, "FileDialog", None), "OPEN", None)
+        if dialog_type is None:  # older pywebview
+            dialog_type = webview.OPEN_DIALOG
+        selected = self._window.create_file_dialog(
+            dialog_type,
+            allow_multiple=False,
+            file_types=(
+                f"{t('dialog.documents', lang)} (*.pdf;*.txt;*.md;*.csv;*.json;*.docx;*.xlsx)",
+                f"{t('dialog.allFiles', lang)} (*.*)",
+            ),
+        )
+        if not selected:
+            return None
+        return str(selected[0])
+
+    def open_external(self, url: str) -> bool:
+        """Open a link in the system browser instead of navigating the webview."""
+        if not str(url).startswith(("http://", "https://", "file://")):
+            return False
+        return webbrowser.open(url)
+
+
+def _resolve(path: str | Path) -> str:
+    return str(Path(path).expanduser().resolve())
+
+
+# --------------------------------------------------------------------------- #
+# Entry point
+# --------------------------------------------------------------------------- #
+
+
+def has_display() -> bool:
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
+def window_icon() -> str | None:
+    name = "icon.ico" if os.name == "nt" else "icon.png"
+    path = STATIC_DIR / name
+    return str(path) if path.is_file() else None
+
+
+def run_desktop(
+    paths: Iterable[str | Path] = (),
+    width: int = 1280,
+    height: int = 860,
+    debug: bool = False,
+    language: str | None = None,
+    slots: Sequence[str | None] | None = None,
+) -> int:
+    try:
+        import webview
+    except ImportError:
+        print(
+            "the desktop window needs an extra dependency:\n"
+            "  pip install 'diffanydoc[desktop]'\n"
+            "On Linux, GTK/WebKit2GTK or Qt must also be installed.",
+        )
+        return 2
+
+    if not has_display():
+        print(
+            "no graphical session found (DISPLAY/WAYLAND_DISPLAY is not set).\n"
+            "Use the browser UI instead:  diffanydoc serve",
+        )
+        return 2
+
+    port = free_port()
+    server = ServerThread(port)
+    server.start()
+
+    if not wait_until_ready(server.url):
+        server.stop()
+        print("the local server could not start (port conflict?).")
+        return 2
+
+    api = DesktopApi(paths, startup_slots=slots)
+    url = f"{server.url}/?lang={language}" if language else server.url
+    window = webview.create_window(
+        f"DiffAnyDoc {__version__}",
+        url,
+        width=width,
+        height=height,
+        min_size=_WINDOW_MIN,
+        js_api=api,
+        text_select=True,
+    )
+    api.attach(window)
+    window.events.loaded += api.on_loaded
+
+    session = SessionServer(api.deliver_selection)
+    session.start()
+    try:
+        webview.start(debug=debug, icon=window_icon())
+    finally:
+        session.stop()
+        server.stop()
+    return 0

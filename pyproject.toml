@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "diffanydoc"
+version = "0.1.0"
+description = "Compare any document side by side: PDF, DOCX, XLSX and plain text."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Mehmet Cagri Aksoy" }]
+keywords = ["diff", "compare", "pdf", "docx", "document"]
+# Placeholder: the license is decided separately, see README "Lisans stratejisi".
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Text Processing :: General",
+    "Topic :: Utilities",
+]
+
+# All runtime dependencies are permissively licensed, so a closed-source
+# commercial build stays possible. Do not add AGPL/GPL libraries here.
+dependencies = [
+    "pdfplumber>=0.11",   # MIT  - text + coordinates
+    "pypdfium2>=4",       # Apache-2.0/BSD-3 - PDF rendering
+    "Pillow>=10",         # MIT-CMU - image handling
+]
+
+[project.optional-dependencies]
+web = [
+    "fastapi>=0.110",      # MIT
+    "uvicorn>=0.29",       # BSD-3
+    "python-multipart>=0.0.9",  # Apache-2.0
+]
+desktop = [
+    "pywebview>=5",        # BSD-3 - native window, uses the system webview
+]
+dev = [
+    "pytest>=8",
+]
+
+[project.scripts]
+diffanydoc = "diffanydoc.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+diffanydoc = ["locales/*.json", "web/static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

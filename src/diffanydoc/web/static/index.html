@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Compare PDF, DOCX, XLSX and text documents side by side. Runs entirely on your machine.">
+<meta name="color-scheme" content="light dark">
+<title>DiffAnyDoc</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="icon" href="/static/icon-32.png" type="image/png" sizes="32x32">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-start">
+    <div class="brand">
+      <img class="mark" src="/static/icon.svg" alt="">
+      <span class="brand-name">DiffAnyDoc</span>
+    </div>
+  </div>
+
+  <div class="topbar-center">
+    <div class="tabs" id="view-tabs" role="tablist" hidden>
+      <button class="tab active" data-mode="text" role="tab" data-i18n="tab.text">Text</button>
+      <button class="tab" data-mode="pages" role="tab" id="tab-pages" data-i18n="tab.pages">Pages</button>
+    </div>
+  </div>
+
+  <div class="topbar-end">
+    <label class="switch" id="only-diff-wrap" hidden>
+      <input type="checkbox" id="only-diff">
+      <span data-i18n="filter.onlyDiff">Differences only</span>
+    </label>
+
+    <div class="zoom" id="zoom-wrap" hidden>
+      <button id="zoom-out" data-i18n-title="zoom.out" data-i18n-aria-label="zoom.out">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </button>
+      <span id="zoom-label">%100</span>
+      <button id="zoom-in" data-i18n-title="zoom.in" data-i18n-aria-label="zoom.in">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+
+    <div class="menu-wrap">
+      <button class="flat icon" id="lang-button" data-menu="lang-menu" aria-haspopup="menu" aria-expanded="false" data-i18n-title="lang.label" data-i18n-aria-label="lang.label">
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.3"/>
+          <path d="M2 8h12M8 2c1.8 1.7 1.8 10.3 0 12M8 2c-1.8 1.7-1.8 10.3 0 12" fill="none" stroke="currentColor" stroke-width="1.1"/>
+        </svg>
+        <span id="lang-current">EN</span>
+      </button>
+      <div class="menu" id="lang-menu" role="menu" hidden></div>
+    </div>
+
+    <div class="menu-wrap">
+      <button class="flat icon" id="more-button" data-menu="more-menu" aria-haspopup="menu" aria-expanded="false" data-i18n-title="menu.more" data-i18n-aria-label="menu.more">
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="3.5" cy="8" r="1.2" fill="currentColor"/>
+          <circle cx="8" cy="8" r="1.2" fill="currentColor"/>
+          <circle cx="12.5" cy="8" r="1.2" fill="currentColor"/>
+        </svg>
+      </button>
+      <div class="menu" id="more-menu" role="menu" hidden>
+        <a class="menu-item" id="export" target="_blank" rel="noopener" data-result-only data-i18n="action.report" hidden>HTML report</a>
+        <button class="menu-item" id="restart" type="button" data-result-only data-i18n="app.newComparison" hidden>New comparison</button>
+        <div class="menu-sep" id="more-sep" data-result-only hidden></div>
+        <button class="menu-item" id="about" type="button" data-i18n="menu.about">About DiffAnyDoc</button>
+        <button class="menu-item" id="license" type="button" data-i18n="menu.license">License Agreement</button>
+        <button class="menu-item" id="updates" type="button" data-i18n="menu.updates">Check for Updates</button>
+        <div class="menu-sep"></div>
+        <div class="menu-note" id="version"></div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <!-- Empty state: AdwStatusPage -->
+  <section id="upload-view" class="upload-view">
+    <div class="status">
+      <svg class="status-icon" viewBox="0 0 48 48" aria-hidden="true">
+        <path d="M7 9h12l5 5v14H7z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        <path d="M18 19h13l5 5v15H18z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        <path d="M21 28h10M21 33h10M21 38h6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <h2 class="status-title" data-i18n="upload.title">Compare two documents</h2>
+      <p class="status-body" data-i18n="upload.subtitle">Drag and drop your files, or click to choose. Everything runs on your machine; nothing is uploaded.</p>
+    </div>
+
+    <div class="drops">
+      <label class="drop" data-side="left" role="button" tabindex="0" data-i18n-aria-label="drop.ariaLeft">
+        <input type="file" id="file-left" hidden>
+        <span class="drop-side">A</span>
+        <svg class="drop-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 16V4m0 0L8 8m4-4 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+        </svg>
+        <strong class="drop-title" data-i18n="drop.leftTitle">Left file</strong>
+        <span class="drop-hint" data-i18n="drop.hint">Drop a file or click</span>
+        <span class="file-chip" hidden></span>
+      </label>
+
+      <label class="drop" data-side="right" role="button" tabindex="0" data-i18n-aria-label="drop.ariaRight">
+        <input type="file" id="file-right" hidden>
+        <span class="drop-side">B</span>
+        <svg class="drop-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 16V4m0 0L8 8m4-4 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+        </svg>
+        <strong class="drop-title" data-i18n="drop.rightTitle">Right file</strong>
+        <span class="drop-hint" data-i18n="drop.hint">Drop a file or click</span>
+        <span class="file-chip" hidden></span>
+      </label>
+    </div>
+
+    <div class="options">
+      <label class="check"><input type="checkbox" id="opt-case"> <span data-i18n="opt.ignoreCase">Ignore letter case</span></label>
+      <label class="check"><input type="checkbox" id="opt-space" checked> <span data-i18n="opt.ignoreWhitespace">Ignore extra whitespace</span></label>
+    </div>
+
+    <div class="actions">
+      <button class="suggested" id="compare" disabled>
+        <span class="spinner" hidden></span>
+        <span data-i18n="action.compare">Compare</span>
+      </button>
+      <span class="supported" data-i18n="upload.supported">Supported: PDF, TXT, MD, CSV, JSON, source code</span>
+    </div>
+    <p class="error" id="error" hidden></p>
+  </section>
+
+  <!-- Result view -->
+  <section id="result-view" hidden>
+    <div class="result-head">
+      <div class="files">
+        <div class="file"><span class="side-badge">A</span><b id="name-left"></b><span class="meta" id="meta-left"></span></div>
+        <span class="arrow">↔</span>
+        <div class="file"><span class="side-badge">B</span><b id="name-right"></b><span class="meta" id="meta-right"></span></div>
+      </div>
+
+      <div class="head-end">
+        <div class="change-nav" id="change-nav" hidden>
+          <button class="flat icon" id="prev-change" data-i18n-title="nav.prev" data-i18n-aria-label="nav.prev">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <span class="change-count" id="change-count" aria-live="polite">0 / 0</span>
+          <button class="flat icon" id="next-change" data-i18n-title="nav.next" data-i18n-aria-label="nav.next">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+        <div class="stats" id="stats"></div>
+      </div>
+    </div>
+
+    <div class="panes" id="text-view"></div>
+    <div class="pages" id="page-view" hidden></div>
+  </section>
+</main>
+
+<dialog id="about-dialog" class="dialog" aria-labelledby="about-title">
+  <div class="dialog-head">
+    <img class="dialog-icon" src="/static/icon.svg" alt="">
+    <div>
+      <h2 class="dialog-title" id="about-title" data-i18n="about.title">About DiffAnyDoc</h2>
+      <p class="dialog-meta" id="about-version"></p>
+    </div>
+  </div>
+  <div class="dialog-body">
+    <p data-i18n="about.description">Compare PDF and text documents side by side. Everything runs on your machine.</p>
+  </div>
+  <div class="dialog-actions">
+    <button class="flat" id="about-license" type="button" data-i18n="menu.license">License Agreement</button>
+    <button class="suggested" type="button" data-close data-i18n="action.close">Close</button>
+  </div>
+</dialog>
+
+<dialog id="license-dialog" class="dialog dialog-wide" aria-labelledby="license-title">
+  <div class="dialog-head">
+    <div>
+      <h2 class="dialog-title" id="license-title" data-i18n="license.title">License Agreement</h2>
+      <p class="dialog-meta">GNU General Public License v3.0</p>
+    </div>
+  </div>
+  <div class="dialog-body">
+    <p data-i18n="license.notice">This development build is distributed under the GNU General Public License v3.0. The final commercial license is still being decided.</p>
+    <pre class="license-text" id="license-text"></pre>
+  </div>
+  <div class="dialog-actions">
+    <button class="suggested" type="button" data-close data-i18n="action.close">Close</button>
+  </div>
+</dialog>
+
+<dialog id="updates-dialog" class="dialog" aria-labelledby="updates-title">
+  <div class="dialog-head">
+    <div>
+      <h2 class="dialog-title" id="updates-title" data-i18n="updates.title">Check for Updates</h2>
+      <p class="dialog-meta" id="updates-current"></p>
+    </div>
+  </div>
+  <div class="dialog-body">
+    <p data-i18n="updates.todo">Update checks are not available yet. This will be added before release.</p>
+  </div>
+  <div class="dialog-actions">
+    <button class="suggested" type="button" data-close data-i18n="action.close">Close</button>
+  </div>
+</dialog>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
