@@ -196,6 +196,38 @@ def _regions_as_lists(regions: list[BBox]) -> list[list[float]]:
 
 
 @dataclass(slots=True)
+class OcrStats:
+    """What the OCR fallback layer did for one comparison."""
+
+    language: str = "eng"
+    #: Pages that had little or no text and were OCRed (both documents).
+    pages: int = 0
+    #: How many of those pages came from the on-disk cache.
+    cached: int = 0
+    words: int = 0
+    truncated: bool = False
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "available": True,
+            "language": self.language,
+            "pages": self.pages,
+            "cached": self.cached,
+            "words": self.words,
+            "truncated": self.truncated,
+        }
+
+    def merged(self, other: "OcrStats") -> "OcrStats":
+        return OcrStats(
+            language=self.language,
+            pages=self.pages + other.pages,
+            cached=self.cached + other.cached,
+            words=self.words + other.words,
+            truncated=self.truncated or other.truncated,
+        )
+
+
+@dataclass(slots=True)
 class Stats:
     left_lines: int = 0
     right_lines: int = 0
@@ -225,6 +257,7 @@ class DiffResult:
     page_map: list[PagePair] = field(default_factory=list)
     stats: Stats = field(default_factory=Stats)
     visual: VisualDiff | None = None
+    ocr: OcrStats | None = None
     options: dict[str, Any] = field(default_factory=dict)
 
     @property

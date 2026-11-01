@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from ..adapters import adapters, load
-from ..model import DiffResult, Document, Line, Row, Stats
+from ..model import DiffResult, Document, Line, OcrStats, Row, Stats
+from ..ocr import OcrOptions, apply_ocr
 from ..visual import VisualOptions, compare_pdf_pages
 from .align import align_pages
 from .lines import cell_diff, document_lines, inline_diff, line_similarity
@@ -31,6 +32,14 @@ class DiffOptions:
     visual_tolerance: int = 24
     visual_shift_pt: float = 4.0
     visual_max_pages: int = 60
+    #: OCR pages without a text layer (scanned PDFs, needs Tesseract).
+    ocr: bool = False
+    ocr_language: str = "eng"
+    ocr_dpi: int = 300
+    ocr_min_chars: int = 8
+    ocr_max_pages: int = 60
+    #: None = per-user cache directory (``DIFFANYDOC_CACHE_DIR`` overrides).
+    ocr_cache_dir: str | None = None
 
 
 def compare(
@@ -42,6 +51,21 @@ def compare(
     options = options or DiffOptions()
     left_doc = _coerce(left)
     right_doc = _coerce(right)
+
+    ocr: OcrStats | None = None
+    if options.ocr:
+        ocr_options = OcrOptions(
+            language=options.ocr_language,
+            dpi=options.ocr_dpi,
+            min_text_chars=options.ocr_min_chars,
+            max_pages=options.ocr_max_pages,
+            cache_dir=options.ocr_cache_dir,
+        )
+        for document in (left_doc, right_doc):
+            page_stats = apply_ocr(document, ocr_options)
+            if page_stats is None:
+                continue
+            ocr = page_stats if ocr is None else ocr.merged(page_stats)
 
     left_lines = document_lines(
         left_doc,
@@ -83,6 +107,7 @@ def compare(
         page_map=page_map,
         stats=stats,
         visual=visual,
+        ocr=ocr,
         options=asdict(options),
     )
 

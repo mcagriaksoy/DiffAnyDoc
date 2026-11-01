@@ -158,6 +158,7 @@ def render_html(
     del_class = " del" if stats.removed else ""
     mod_class = " mod" if stats.changed else ""
     visual_stats = _visual_stats(result, lang)
+    ocr_stats = _ocr_stats(result, lang)
     return f"""<!doctype html>
 <html lang="{lang}">
 <head>
@@ -187,6 +188,7 @@ def render_html(
     <span class="stat{mod_class}"><b>~{stats.changed}</b> {html.escape(t("stats.changed", lang))}</span>
     <span class="stat">{html.escape(t("report.lines", lang, left=stats.left_lines, right=stats.right_lines))}</span>
     <span class="stat">{html.escape(t("report.pageMap", lang, n=len(result.page_map)))}</span>
+    {ocr_stats}
     {visual_stats}
   </div>
 </header>
@@ -208,6 +210,20 @@ def render_html(
 </body>
 </html>
 """
+
+
+def _ocr_stats(result: DiffResult, lang: str) -> str:
+    ocr = result.ocr
+    if ocr is None or not ocr.pages:
+        return ""
+    parts = [
+        f'<span class="stat">{html.escape(t("report.ocr", lang, pages=ocr.pages, lang=ocr.language))}</span>'
+    ]
+    if ocr.truncated:
+        parts.append(
+            f'<span class="stat">{html.escape(t("report.ocrTruncated", lang))}</span>'
+        )
+    return "".join(parts)
 
 
 def _visual_stats(result: DiffResult, lang: str) -> str:

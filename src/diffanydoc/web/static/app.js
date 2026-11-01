@@ -11,6 +11,7 @@ const state = {
   changeIndex: -1,
   comparing: false,
   visual: null,
+  ocr: null,
 };
 
 /* Present when the page runs inside the native pywebview shell. */
@@ -414,6 +415,7 @@ async function runComparison() {
     let response;
     const caseSensitive = !$("#opt-case").checked;
     const collapseWhitespace = $("#opt-space").checked;
+    const ocr = $("#opt-ocr").checked;
     if (desktop.available && desktop.paths.left && desktop.paths.right) {
       response = await fetch("/api/compare-paths", {
         method: "POST",
@@ -425,6 +427,8 @@ async function runComparison() {
           collapse_whitespace: collapseWhitespace,
           fold_equal: false,
           context: 3,
+          ocr,
+          ocr_language: "eng",
         }),
       });
     } else {
@@ -435,6 +439,8 @@ async function runComparison() {
       form.append("collapse_whitespace", String(collapseWhitespace));
       form.append("fold_equal", "false");
       form.append("context", "3");
+      form.append("ocr", String(ocr));
+      form.append("ocr_language", "eng");
       response = await fetch("/api/compare", { method: "POST", body: form });
     }
     if (!response.ok) throw new Error(await readError(response));
@@ -480,6 +486,7 @@ function renderResult() {
   $("#meta-right").textContent = `${data.right.kind} · ${i18n.t("meta.pages", { n: data.right.pages })}`;
 
   state.visual = data.visual && data.visual.available ? data.visual : null;
+  state.ocr = data.ocr && data.ocr.available ? data.ocr : null;
   renderStats(data.stats);
 
   const canRender = data.renderable.left || data.renderable.right;
@@ -521,6 +528,14 @@ function renderStats(stats) {
       el("span", { class: "stat" }, [
         `${i18n.t("stats.visual")} `,
         el("b", { text: `${(state.visual.stats.similarity * 100).toFixed(1)}%` }),
+      ])
+    );
+  }
+  if (state.ocr && state.ocr.pages) {
+    nodes.push(
+      el("span", { class: "stat" }, [
+        `${i18n.t("stats.ocr")} `,
+        el("b", { text: String(state.ocr.pages) }),
       ])
     );
   }
@@ -838,6 +853,7 @@ function reset() {
   document.body.classList.remove("only-diff");
   $("#opt-visual").checked = true;
   document.body.classList.remove("visual-off");
+  $("#opt-ocr").checked = false;
   showUploadView();
   updateCompareButton();
 }

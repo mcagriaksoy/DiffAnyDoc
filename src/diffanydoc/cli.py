@@ -18,6 +18,7 @@ from pathlib import Path
 from . import __version__
 from .core.adapters import AdapterError, adapters, load, supported_extensions
 from .core.diff import DiffOptions, compare, supported_formats
+from .core.ocr import OcrError
 from .core.report.html import render_html, write_html_report
 from .core.report.json import result_to_dict
 from .i18n import available_languages, resolve_language, t
@@ -59,6 +60,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--visual",
         action="store_true",
         help="also compare rendered PDF pages pixel by pixel",
+    )
+    diff.add_argument(
+        "--ocr",
+        action="store_true",
+        help="OCR pages without a text layer (scanned PDFs; needs Tesseract)",
+    )
+    diff.add_argument(
+        "--ocr-lang",
+        default="eng",
+        metavar="LANG",
+        help="Tesseract language(s), e.g. eng or tur+eng (eng)",
     )
     diff.add_argument(
         "--fail-on-diff",
@@ -115,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
             return _select(args, language)
         if args.command == "integrate":
             return _integrate(args, language)
-    except (AdapterError, FileNotFoundError) as exc:
+    except (AdapterError, FileNotFoundError, OcrError) as exc:
         print(t("cli.error", language, message=exc), file=sys.stderr)
         return 2
     return 0
@@ -136,6 +148,8 @@ def _diff(args: argparse.Namespace, language: str) -> int:
         case_sensitive=not args.ignore_case,
         fold_equal=not args.full,
         visual=args.visual,
+        ocr=args.ocr,
+        ocr_language=args.ocr_lang,
     )
     result = compare(args.left, args.right, options)
     fmt = args.format or _infer_format(args.output)
@@ -193,6 +207,20 @@ def _render_text(result, language: str) -> str:
         )
     )
     lines.append("")
+
+    ocr = result.ocr
+    if ocr is not None and ocr.pages:
+        lines.append(
+            t(
+                "cli.ocr",
+                language,
+                pages=ocr.pages,
+                cached=ocr.cached,
+                words=ocr.words,
+                lang=ocr.language,
+            )
+        )
+        lines.append("")
 
     visual = result.visual
     if visual is not None and visual.compared:

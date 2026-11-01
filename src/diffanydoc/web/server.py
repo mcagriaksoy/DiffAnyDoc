@@ -20,6 +20,7 @@ from .. import __version__
 from ..core.adapters import AdapterError, load, supported_extensions
 from ..core.diff import DiffOptions, compare
 from ..core.model import DiffResult
+from ..core.ocr import OcrError
 from ..core.render import render_page_png
 from ..core.report.html import render_html
 from ..core.report.json import result_to_dict
@@ -100,6 +101,8 @@ def create_app() -> FastAPI:
         collapse_whitespace: bool = Form(True),
         fold_equal: bool = Form(False),
         visual: bool = Form(True),
+        ocr: bool = Form(False),
+        ocr_language: str = Form("eng"),
     ) -> JSONResponse:
         directory = Path(tempfile.mkdtemp(prefix="diffanydoc-"))
         try:
@@ -114,6 +117,8 @@ def create_app() -> FastAPI:
                 fold_equal,
                 collapse_whitespace,
                 visual,
+                ocr,
+                ocr_language,
             )
         except Exception:
             shutil.rmtree(directory, ignore_errors=True)
@@ -135,6 +140,8 @@ def create_app() -> FastAPI:
             bool(body.get("fold_equal", False)),
             bool(body.get("collapse_whitespace", True)),
             bool(body.get("visual", True)),
+            bool(body.get("ocr", False)),
+            str(body.get("ocr_language") or "eng"),
         )
         return JSONResponse(_summary(comparison))
 
@@ -164,6 +171,10 @@ def create_app() -> FastAPI:
             headers={"Cache-Control": "private, max-age=3600"},
         )
 
+    @app.exception_handler(OcrError)
+    async def _ocr_error(_request: Any, exc: OcrError) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+
     return app
 
 
@@ -191,6 +202,8 @@ def _run_compare(
     fold_equal: bool,
     collapse_whitespace: bool = True,
     visual: bool = True,
+    ocr: bool = False,
+    ocr_language: str = "eng",
 ) -> Comparison:
     options = DiffOptions(
         context=context,
@@ -198,6 +211,8 @@ def _run_compare(
         fold_equal=fold_equal,
         collapse_whitespace=collapse_whitespace,
         visual=visual,
+        ocr=ocr,
+        ocr_language=ocr_language,
     )
     result = compare(left_path, right_path, options)
     left_doc = load(left_path)

@@ -90,6 +90,12 @@ def build_pdf(pages: list[list[str]], width: float = 595, height: float = 842) -
     return bytes(out)
 
 
-def write_pdf(path: Path, pages: list[list[str]]) -> Path:
-    path.write_bytes(build_pdf(pages))
+def write_pdf(
+    path: Path,
+    pages: list[list[str]],
+    *,
+    width: float = 595,
+    height: float = 842,
+) -> Path:
+    path.write_bytes(build_pdf(pages, width=width, height=height))
     return path
