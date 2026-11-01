@@ -314,14 +314,15 @@ function setupDropZones() {
     );
 
     zone.addEventListener("drop", (e) => {
-      const file = e.dataTransfer && e.dataTransfer.files[0];
-      if (!file) return;
+      const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
+      if (!files.length) return;
+      e.preventDefault();
       try {
         input.files = e.dataTransfer.files;
       } catch (_) {
         /* some browsers refuse programmatic assignment; state is what matters */
       }
-      setFile(side, file);
+      assignDroppedFiles(files, side);
     });
 
     // Keyboard access: the drop zone behaves like a button.
@@ -339,6 +340,61 @@ function setupDropZones() {
       chooseFile(side);
     });
   });
+
+  // Files dropped anywhere else used to open in the webview and lose the
+  // comparison. Catch them at document level: two files fill both sides, one
+  // file goes to the first empty side (or the zone it was dropped on).
+  let dragDepth = 0;
+  document.addEventListener("dragenter", (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth += 1;
+    document.body.classList.add("dragging");
+  });
+  document.addEventListener("dragover", (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+  });
+  document.addEventListener("dragleave", (e) => {
+    if (dragDepth === 0) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) document.body.classList.remove("dragging");
+  });
+  // The pointer may leave the window without a final dragleave.
+  window.addEventListener("dragend", () => {
+    dragDepth = 0;
+    document.body.classList.remove("dragging");
+  });
+  document.addEventListener("drop", (e) => {
+    document.body.classList.remove("dragging");
+    dragDepth = 0;
+    if (e.defaultPrevented) return; // a drop zone already handled it
+    const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
+    if (!files.length) return;
+    e.preventDefault();
+    assignDroppedFiles(files, null);
+  });
+}
+
+function hasFiles(event) {
+  const types = event.dataTransfer && event.dataTransfer.types;
+  return Boolean(types && Array.from(types).includes("Files"));
+}
+
+function assignDroppedFiles(files, preferredSide) {
+  if (!files.length) return;
+  if (files.length >= 2) {
+    setFile("left", files[0]);
+    setFile("right", files[1]);
+  } else {
+    const side =
+      preferredSide ||
+      (!state.files.left ? "left" : !state.files.right ? "right" : "left");
+    setFile(side, files[0]);
+  }
+  if (!$("#result-view").hidden) showUploadView();
+  updateCompareButton();
 }
 
 function basename(path) {
@@ -346,6 +402,7 @@ function basename(path) {
 }
 
 function showPath(side, path) {
+  state.files[side] = null;
   const zone = document.querySelector(`.drop[data-side="${side}"]`);
   if (!zone) return;
   zone.classList.add("filled");
@@ -373,6 +430,7 @@ async function chooseFile(side) {
 
 function setFile(side, file) {
   state.files[side] = file;
+  desktop.paths[side] = null;
   const zone = document.querySelector(`.drop[data-side="${side}"]`);
   zone.classList.add("filled");
   const chip = zone.querySelector(".file-chip");
@@ -387,7 +445,7 @@ function isReady() {
 }
 
 function updateCompareButton() {
-  $("#compare").disabled = !isReady();
+  $("#compare").disabled = state.comparing || !isReady();
 }
 
 function showError(message) {
@@ -401,58 +459,193 @@ function hideError() {
 }
 
 /* ---------- comparison ---------- */
-async function runComparison() {
-  if (!isReady() || state.comparing) return;
-  state.comparing = true;
-  hideError();
+async function comparisonRequest() {
+  const caseSensitive = !$("#opt-case").checked;
+  const collapseWhitespace = $("#opt-space").checked;
+  const ocr = $("#opt-ocr").checked;
 
+  if (desktop.available && desktop.paths.left && desktop.paths.right) {
+    return fetch("/api/compare-paths", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        left: desktop.paths.left,
+        right: desktop.paths.right,
+        case_sensitive: caseSensitive,
+        collapse_whitespace: collapseWhitespace,
+        fold_equal: false,
+        context: 3,
+        visual: true,
+        ocr,
+        ocr_language: "eng",
+      }),
+    });
+  }
+
+  const form = new FormData();
+  form.append("left", state.files.left);
+  form.append("right", state.files.right);
+  form.append("case_sensitive", String(caseSensitive));
+  form.append("collapse_whitespace", String(collapseWhitespace));
+  form.append("fold_equal", "false");
+  form.append("context", "3");
+  form.append("visual", "true");
+  form.append("ocr", String(ocr));
+  form.append("ocr_language", "eng");
+  return fetch("/api/compare", { method: "POST", body: form });
+}
+
+function canReload() {
+  if (desktop.available && desktop.paths.left && desktop.paths.right) return true;
+  return Boolean(state.files.left && state.files.right);
+}
+
+function setComparing(active) {
+  state.comparing = active;
   const button = $("#compare");
   const spinner = button.querySelector(".spinner");
-  button.disabled = true;
-  spinner.hidden = false;
+  button.disabled = active || !isReady();
+  spinner.hidden = !active;
+  const reload = $("#reload");
+  if (reload) reload.disabled = active;
+}
+
+async function runComparison() {
+  if (!isReady() || state.comparing) return;
+  hideError();
+  setComparing(true);
 
   try {
-    let response;
-    const caseSensitive = !$("#opt-case").checked;
-    const collapseWhitespace = $("#opt-space").checked;
-    const ocr = $("#opt-ocr").checked;
-    if (desktop.available && desktop.paths.left && desktop.paths.right) {
-      response = await fetch("/api/compare-paths", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          left: desktop.paths.left,
-          right: desktop.paths.right,
-          case_sensitive: caseSensitive,
-          collapse_whitespace: collapseWhitespace,
-          fold_equal: false,
-          context: 3,
-          ocr,
-          ocr_language: "eng",
-        }),
-      });
-    } else {
-      const form = new FormData();
-      form.append("left", state.files.left);
-      form.append("right", state.files.right);
-      form.append("case_sensitive", String(caseSensitive));
-      form.append("collapse_whitespace", String(collapseWhitespace));
-      form.append("fold_equal", "false");
-      form.append("context", "3");
-      form.append("ocr", String(ocr));
-      form.append("ocr_language", "eng");
-      response = await fetch("/api/compare", { method: "POST", body: form });
-    }
+    const response = await comparisonRequest();
     if (!response.ok) throw new Error(await readError(response));
     state.comparison = await response.json();
     renderResult();
   } catch (error) {
     showError(error.message || i18n.t("error.generic"));
   } finally {
-    spinner.hidden = true;
-    state.comparing = false;
+    setComparing(false);
     updateCompareButton();
   }
+}
+
+async function reloadComparison() {
+  if (!state.comparison || state.comparing || !canReload()) return;
+  const scroll = window.scrollY;
+  const mode = state.mode;
+  const reload = $("#reload");
+  state.comparing = true;
+  reload.disabled = true;
+  reload.classList.add("busy");
+
+  try {
+    const response = await comparisonRequest();
+    if (!response.ok) throw new Error(await readError(response));
+    state.comparison = await response.json();
+    renderResult();
+    if (!$("#tab-pages").disabled) setMode(mode);
+    window.scrollTo({ top: scroll });
+    showToast(i18n.t("reload.done"));
+  } catch (error) {
+    showToast(error.message || i18n.t("error.generic"), true);
+  } finally {
+    state.comparing = false;
+    reload.disabled = false;
+    reload.classList.remove("busy");
+    updateCompareButton();
+  }
+}
+
+/* ---------- copy ---------- */
+function buildCopyText(kind) {
+  const data = state.comparison;
+  if (!data) return "";
+  const rows = data.rows || [];
+
+  if (kind === "left" || kind === "right") {
+    return rows
+      .map((row) => (kind === "left" ? row.left : row.right))
+      .filter(Boolean)
+      .map((line) => line.text)
+      .join("\n");
+  }
+
+  if (kind === "both") {
+    const lines = [`A: ${data.left.name}`, `B: ${data.right.name}`, ""];
+    for (const row of rows) {
+      if (!row.left && !row.right) continue;
+      lines.push(`${row.left ? row.left.text : ""}\t${row.right ? row.right.text : ""}`);
+    }
+    return lines.join("\n");
+  }
+
+  const out = [`A: ${data.left.name}`, `B: ${data.right.name}`, ""];
+  let changed = 0;
+  for (const row of rows) {
+    if (row.kind === "equal") continue;
+    changed += 1;
+    if (row.hidden_before) out.push(`... ${row.hidden_before} unchanged lines ...`);
+    if (row.kind === "replace" && row.left && row.right) {
+      out.push(`~ ${row.left.number} -> ${row.right.number}`);
+      out.push(`- ${row.left.text}`);
+      out.push(`+ ${row.right.text}`);
+    } else if (row.kind === "insert" && row.right) {
+      out.push(`+ ${row.right.number}: ${row.right.text}`);
+    } else if (row.kind === "delete" && row.left) {
+      out.push(`- ${row.left.number}: ${row.left.text}`);
+    }
+  }
+  return changed ? out.join("\n") : "";
+}
+
+async function copyText(text) {
+  if (!text) return false;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (_) {
+    /* fall back to execCommand below */
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.append(area);
+  area.select();
+  let copied = false;
+  try {
+    copied = document.execCommand("copy");
+  } catch (_) {
+    copied = false;
+  }
+  area.remove();
+  return copied;
+}
+
+async function copyView(kind) {
+  closeMenus();
+  const text = buildCopyText(kind);
+  if (!text) {
+    showToast(i18n.t("copy.none"), true);
+    return;
+  }
+  const copied = await copyText(text);
+  showToast(copied ? i18n.t("copy.done") : i18n.t("copy.failed"), !copied);
+}
+
+/* ---------- toast ---------- */
+let toastTimer = 0;
+function showToast(message, isError = false) {
+  const node = $("#toast");
+  if (!node) return;
+  node.textContent = message;
+  node.classList.toggle("error", isError);
+  node.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    node.hidden = true;
+  }, 2400);
 }
 
 async function readError(response) {
@@ -495,6 +688,7 @@ function renderResult() {
 
   $("#visual-wrap").hidden = !state.visual;
   $("#opt-visual").checked = !document.body.classList.contains("visual-off");
+  $("#reload").hidden = !canReload();
 
   $("#export").href = `/api/compare/${data.id}/report?lang=${i18n.lang}`;
 
@@ -608,7 +802,11 @@ function buildCell(line, inline, previousPage = -1) {
       else
         text.append(
           el("span", {
-            class: segment.kind === "delete" ? "seg-del" : "seg-ins",
+            class: segment.text.trim() === ""
+              ? "seg-minor"
+              : segment.kind === "delete"
+                ? "seg-del"
+                : "seg-ins",
             text: segment.text,
           })
         );
@@ -832,6 +1030,7 @@ function showUploadView() {
   $("#change-nav").hidden = true;
   $("#stats").replaceChildren();
   state.visual = null;
+  state.ocr = null;
   for (const node of $$("[data-result-only]")) node.hidden = true;
   closeMenus();
   hideError();
@@ -854,6 +1053,7 @@ function reset() {
   $("#opt-visual").checked = true;
   document.body.classList.remove("visual-off");
   $("#opt-ocr").checked = false;
+  document.body.classList.remove("dragging");
   showUploadView();
   updateCompareButton();
 }
@@ -928,6 +1128,11 @@ setupDialogs();
 loadTheme();
 $("#compare").addEventListener("click", runComparison);
 $("#restart").addEventListener("click", reset);
+$("#reload").addEventListener("click", reloadComparison);
+$("#copy-changes").addEventListener("click", () => copyView("changes"));
+$("#copy-left").addEventListener("click", () => copyView("left"));
+$("#copy-right").addEventListener("click", () => copyView("right"));
+$("#copy-both").addEventListener("click", () => copyView("both"));
 
 $$(".tab").forEach((tab) =>
   tab.addEventListener("click", () => {

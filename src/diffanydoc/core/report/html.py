@@ -19,6 +19,7 @@ _CSS = """
   --diff-add-bg:rgba(38,162,105,.12); --diff-del-bg:rgba(224,27,36,.10);
   --diff-mod-bg:rgba(232,168,0,.14); --diff-add-strong:rgba(38,162,105,.24);
   --diff-del-strong:rgba(224,27,36,.20);
+  --diff-minor-strong:rgba(53,132,228,.26);
   --font-ui:system-ui,-apple-system,"Segoe UI Variable Text","Segoe UI",Cantarell,
     Ubuntu,Roboto,"Noto Sans",sans-serif;
   --font-mono:ui-monospace,"Cascadia Mono","SF Mono","JetBrains Mono",Menlo,Consolas,
@@ -33,6 +34,7 @@ _CSS = """
     --diff-add-bg:rgba(46,194,126,.16); --diff-del-bg:rgba(255,99,99,.14);
     --diff-mod-bg:rgba(255,212,121,.14); --diff-add-strong:rgba(46,194,126,.30);
     --diff-del-strong:rgba(255,99,99,.26);
+    --diff-minor-strong:rgba(120,174,237,.34);
   }
 }
 *{box-sizing:border-box}
@@ -95,6 +97,8 @@ tr.mod td{background:var(--diff-mod-bg);
 del{background:var(--diff-del-strong);color:inherit;border-radius:2px;
   text-decoration:line-through;text-decoration-thickness:1px}
 ins{background:var(--diff-add-strong);color:inherit;border-radius:2px;text-decoration:none}
+del.minor,ins.minor{background:var(--diff-minor-strong);text-decoration:none;
+  box-shadow:inset 0 0 0 1px rgba(53,132,228,.35)}
 .gap td{background:var(--window-bg-color);border-top:1px solid var(--border-color);
   border-bottom:1px solid var(--border-color);color:var(--dim-label-color);
   font-family:inherit;font-size:12px;text-align:center;padding:4px}
@@ -109,6 +113,7 @@ footer{color:var(--dim-label-color);font-size:12px;text-align:center;padding:18p
     --border-color:rgba(0,0,0,.15); --text-color:#1d1d20; --dim-label-color:#4b5563;
     --diff-add-bg:#e6f7ec; --diff-del-bg:#fdeaea; --diff-mod-bg:#fff7e0;
     --diff-add-strong:#bfe8cf; --diff-del-strong:#f5c9c9;
+    --diff-minor-strong:#cfe4fb;
     --success-color:#0f6b36; --warning-color:#7a5200; --error-color:#a11a1a;
   }
   body{background:#fff}
@@ -279,13 +284,19 @@ def _inline_html(segments: list[Segment]) -> str:
     out: list[str] = []
     for segment in segments:
         text = html.escape(segment.text, quote=False)
+        minor = ' class="minor"' if _is_minor(segment.text) else ""
         if segment.kind == "delete":
-            out.append(f"<del>{text}</del>")
+            out.append(f"<del{minor}>{text}</del>")
         elif segment.kind == "insert":
-            out.append(f"<ins>{text}</ins>")
+            out.append(f"<ins{minor}>{text}</ins>")
         else:
             out.append(text)
     return "".join(out)
+
+
+def _is_minor(text: str) -> bool:
+    """Whitespace-only edits get a calm blue instead of red/green."""
+    return bool(text) and not text.strip()
 
 
 def _row_number(line: Any) -> str:

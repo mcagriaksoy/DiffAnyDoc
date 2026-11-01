@@ -130,6 +130,19 @@ diffanydoc serve --port 8765
 # http://127.0.0.1:8765
 ```
 
+Drop files on either box, or anywhere on the page: two files fill the left
+and right side at once, one file goes to the first empty side. After a
+comparison the toolbar keeps both files, so:
+
+- **Reload** re-reads both files and re-runs the comparison. In the desktop
+  window it picks up changes saved on disk; in a browser the original upload
+  is resent, because a web page cannot read the file again.
+- **Copy** copies all changes, the left text, the right text, or both sides
+  side by side.
+
+Whitespace-only edits are highlighted in blue instead of the red/green used for
+real content changes.
+
 ### Command line
 
 ```bash

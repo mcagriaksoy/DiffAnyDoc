@@ -145,6 +145,23 @@
       </div>
 
       <div class="head-end">
+        <div class="result-tools">
+          <button class="flat icon" id="reload" type="button" data-i18n-title="action.reload" data-i18n-aria-label="action.reload">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 3v3.5H9.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <div class="menu-wrap">
+            <button class="flat" id="copy-button" type="button" data-menu="copy-menu" aria-haspopup="menu" aria-expanded="false" data-i18n-title="action.copy" data-i18n-aria-label="action.copy">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M10.5 5.5V3.9A1.4 1.4 0 0 0 9.1 2.5H3.9A1.4 1.4 0 0 0 2.5 3.9v5.2a1.4 1.4 0 0 0 1.4 1.4h1.6" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
+              <span data-i18n="action.copy">Copy</span>
+            </button>
+            <div class="menu" id="copy-menu" role="menu" hidden>
+              <button class="menu-item" id="copy-changes" type="button" role="menuitem" data-i18n="copy.changes">Copy all changes</button>
+              <button class="menu-item" id="copy-left" type="button" role="menuitem" data-i18n="copy.left">Copy left text</button>
+              <button class="menu-item" id="copy-right" type="button" role="menuitem" data-i18n="copy.right">Copy right text</button>
+              <button class="menu-item" id="copy-both" type="button" role="menuitem" data-i18n="copy.both">Copy both sides</button>
+            </div>
+          </div>
+        </div>
         <div class="change-nav" id="change-nav" hidden>
           <button class="flat icon" id="prev-change" data-i18n-title="nav.prev" data-i18n-aria-label="nav.prev">
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -162,6 +179,8 @@
     <div class="pages" id="page-view" hidden></div>
   </section>
 </main>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
 <dialog id="about-dialog" class="dialog" aria-labelledby="about-title">
   <div class="dialog-head">

@@ -7,6 +7,7 @@ import pytest
 from diffanydoc.core.adapters import load
 from diffanydoc.core.diff import DiffOptions, compare
 from diffanydoc.core.normalize import normalize_line
+from diffanydoc.core.report.html import render_html
 
 from .pdfgen import write_pdf
 
@@ -162,3 +163,17 @@ def test_full_output_can_disable_folding(tmp_path: Path) -> None:
     right.write_text("\n".join(reversed(lines)) + "\n", encoding="utf-8")
     result = compare(left, right, DiffOptions(fold_equal=False))
     assert all(row.hidden_before == 0 for row in result.rows)
+
+
+def test_whitespace_edits_render_as_minor_in_html(tmp_path: Path) -> None:
+    left = tmp_path / "space-a.txt"
+    right = tmp_path / "space-b.txt"
+    left.write_text("alpha beta\n", encoding="utf-8")
+    right.write_text("alpha  beta\n", encoding="utf-8")
+
+    result = compare(left, right, DiffOptions(collapse_whitespace=False))
+    report = render_html(result, language="en")
+
+    assert '<del class="minor"> </del>' in report
+    assert '<ins class="minor">  </ins>' in report
+    assert "--diff-minor-strong" in report
