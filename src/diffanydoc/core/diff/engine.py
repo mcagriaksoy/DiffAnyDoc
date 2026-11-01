@@ -11,7 +11,7 @@ from ..adapters import adapters, load
 from ..model import DiffResult, Document, Line, Row, Stats
 from ..visual import VisualOptions, compare_pdf_pages
 from .align import align_pages
-from .lines import document_lines, inline_diff, line_similarity
+from .lines import cell_diff, document_lines, inline_diff, line_similarity
 
 
 @dataclass(slots=True)
@@ -133,7 +133,10 @@ def _single_row(left: Line | None, right: Line | None, kind: str) -> Row:
 
 
 def _replace_row(left: Line, right: Line) -> Row:
-    left_inline, right_inline = inline_diff(left.text, right.text)
+    if left.cells is not None and right.cells is not None:
+        left_inline, right_inline = cell_diff(left.cells, right.cells)
+    else:
+        left_inline, right_inline = inline_diff(left.text, right.text)
     return Row(
         kind="replace",
         left=left,

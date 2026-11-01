@@ -11,10 +11,14 @@ from .base import (
     register,
     supported_extensions,
 )
+from .docx import DocxAdapter
 from .pdf import PdfAdapter
 from .text import TextAdapter
+from .xlsx import XlsxAdapter
 
 register(PdfAdapter())
+register(DocxAdapter())
+register(XlsxAdapter())
 register(TextAdapter())
 
 __all__ = [

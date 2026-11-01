@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-BlockKind = Literal["text", "table", "image", "vector"]
+BlockKind = Literal["text", "table", "table_row", "cell", "image", "vector"]
 ChangeKind = Literal["equal", "insert", "delete", "replace"]
 
 BBox = tuple[float, float, float, float]  # x0, top, x1, bottom (points)
@@ -42,7 +42,9 @@ class Page:
     blocks: list[Block] = field(default_factory=list)
 
     def text(self, sep: str = "\n") -> str:
-        return sep.join(b.text for b in self.blocks if b.kind == "text")
+        return sep.join(
+            b.text for b in self.blocks if b.kind in ("text", "table")
+        )
 
 
 @dataclass(slots=True)
@@ -80,6 +82,9 @@ class Line:
     number: int = 0
     bbox: BBox | None = None
     style: dict[str, Any] = field(default_factory=dict)
+    #: Cell texts when the line comes from a table row, so changed cells can
+    #: be aligned and highlighted individually instead of as one long string.
+    cells: list[str] | None = None
 
 
 @dataclass(slots=True)

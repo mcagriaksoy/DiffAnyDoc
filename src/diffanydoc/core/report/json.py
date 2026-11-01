@@ -8,13 +8,16 @@ from ..model import DiffResult, Line, Row, Segment
 
 
 def _line_to_dict(line: Line, number: int) -> dict[str, Any]:
-    return {
+    payload = {
         "text": line.text,
         "page": line.page,
         "bbox": list(line.bbox) if line.bbox else None,
         "number": number,
         "style": line.style or None,
     }
+    if line.cells is not None:
+        payload["cells"] = list(line.cells)
+    return payload
 
 
 def _segments_to_dict(segments: list[Segment] | None) -> list[dict[str, str]] | None:

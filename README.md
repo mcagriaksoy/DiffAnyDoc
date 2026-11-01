@@ -7,19 +7,22 @@ It shows text differences and marks changed lines with boxes on PDF pages.
 
 ## Status
 
-This repository contains **M0 + M1 + M2** in working order:
+This repository contains **M0 + M1 + M2 + M3** in working order:
 
-- Adapter layer for PDF and text files
+- Adapter layer for PDF, DOCX, XLSX and text files
 - Line alignment plus word-level inline differences
 - Page matching (inserting a page no longer makes every later page look changed)
 - Visual (pixel) page diff: rendered pages, small registration offsets, noise
   tolerance and changed regions
+- Structural DOCX/XLSX diff: paragraphs, table rows and individual cells, so a
+  changed price is one cell, not a rewritten row
 - Self-contained HTML report and stable JSON output
 - `diff`, `info`, `formats`, `serve`, `desktop`, `select`, `integrate` commands
 - Web UI and a **native desktop window** (pywebview / GTK)
-- 72 tests (`pytest`)
+- 89 tests (`pytest`)
 
-Not there yet: DOCX/XLSX adapters, OCR, table-cell diffing.
+Not there yet: OCR, merged-cell expansion, embedded-object diffing, formatting
+(style/font) comparison.
 
 English is the default for the app, CLI messages and reports. Turkish ships as a
 second locale and can be selected in the app, or with `--lang tr` /
@@ -146,7 +149,8 @@ src/diffanydoc/
   core/
     model.py          # Document / Page / Block + DiffResult / Row
     normalize.py      # NFKC, typography, soft hyphen, whitespace normalisation
-    adapters/         # base.py (registry), pdf.py, text.py
+    adapters/         # base.py (registry), pdf.py, docx.py, xlsx.py, text.py,
+                      # ooxml.py (shared ZIP/XML helpers, no third-party parser)
     diff/             # align.py (pages), lines.py (lines + inline), engine.py
     render.py         # pdfium page rasterisation (shared, cached, locked)
     visual.py         # pixel comparison, registration, region boxes
@@ -164,7 +168,7 @@ desktop share the same code and the engine is tested separately.
 | Layer | Status | Note |
 |---|---|---|
 | Byte (sha256) | missing | fast path for identical files |
-| Structure (docx XML, pdf objects) | planned | M3 |
+| Structure (docx/xlsx XML, table cells) | **done** | M3, stdlib `zipfile` + `ElementTree` |
 | Text (line + word) | **done** | M0 |
 | Page mapping | **done** | LCS + similarity for leftover pages |
 | Visual (pixel) | **done** | M2, opt-in in the engine, on by default in the UI |
@@ -205,7 +209,7 @@ These would require extra licensing for a closed-source commercial release.
 - **M0 — engine + CLI** ✅ IR, PDF/text adapters, line + inline diff, HTML/JSON report
 - **M1 — viewer** ✅ web UI + native window, change boxes on PDF pages
 - **M2 — visual diff** ✅ page-render comparison, tolerance, registration
-- **M3 — DOCX/XLSX** structural diff, table-cell alignment
+- **M3 — DOCX/XLSX** ✅ structural diff, table-cell alignment
 - **M4 — OCR** fallback layer for scanned PDFs + cache
 - **M5 — distribution** PyInstaller/Tauri packaging, auto-update, licensing
 
@@ -215,14 +219,17 @@ These would require extra licensing for a closed-source commercial release.
 pytest
 ```
 
-Test fixtures generate PDFs at runtime (`tests/pdfgen.py`); no binaries are kept
-in the repository. Files under `samples/` are there for manual testing.
+Test fixtures generate the documents at runtime (`tests/pdfgen.py`,
+`tests/docxgen.py`, `tests/xlsxgen.py`); no binaries are kept in the repository.
+Files under `samples/` are there for manual testing.
 
 ## Known limitations
 
-- DOCX/XLSX are not supported yet → those files are read as plain text and give
-  meaningless results.
+- DOCX/XLSX are read without layout information: page breaks come from explicit
+  breaks only, merged cells keep their top-left value, and comments, tracked
+  change markup and embedded objects are ignored.
 - Scanned PDFs (no text layer) have no text to compare; the visual layer still
   reports which regions changed, but not what they say.
 - Line-based alignment can be noisy when paragraphs are reflowed.
-- Tables are read as single lines of text (no column alignment).
+- PDF tables are read as single lines of text; DOCX/XLSX tables get row and
+  cell alignment.
