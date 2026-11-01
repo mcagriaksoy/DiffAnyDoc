@@ -107,10 +107,21 @@ The entries hand the chosen file to the running window, or open one if needed:
 
 The two files are compared automatically. On Windows this uses per-user registry
 entries (no administrator rights); on Windows 11 the entries may appear under
-**Show more options**. On Linux both Nautilus scripts and a Dolphin/KDE service
-menu are installed, because GNOME Files has no cross-desktop context-menu API.
-Menu labels follow `--lang`, e.g. `diffanydoc --lang tr integrate install`.
-Restart Nautilus once (`nautilus -q`) if the scripts do not show up immediately.
+**Show more options**. On Linux the installer writes Nautilus scripts, Nemo
+(Cinnamon) actions and a Dolphin/KDE service menu, because there is no
+cross-desktop context-menu API. Menu labels follow `--lang`, e.g.
+`diffanydoc --lang tr integrate install`.
+
+Restart the file manager once after installing or changing the language:
+
+```bash
+nautilus -q        # GNOME Files
+nemo -q            # Cinnamon / Nemo, then open a folder again
+```
+
+If the entries use a virtualenv Python, keep that virtualenv where it is:
+the generated commands point at `<venv>/bin/python`. Re-run
+`diffanydoc integrate install` after moving the checkout or the environment.
 
 ### Browser (local server / on-prem team use)
 
