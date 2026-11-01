@@ -6,11 +6,9 @@ frontend later without touching the engine.
 
 from __future__ import annotations
 
-import io
 import shutil
 import sys
 import tempfile
-import threading
 import uuid
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -22,6 +20,7 @@ from .. import __version__
 from ..core.adapters import AdapterError, load, supported_extensions
 from ..core.diff import DiffOptions, compare
 from ..core.model import DiffResult
+from ..core.render import render_page_png
 from ..core.report.html import render_html
 from ..core.report.json import result_to_dict
 from ..i18n import available_languages, resolve_language, strings
@@ -49,9 +48,6 @@ class Comparison:
 
 
 _COMPARISONS: "OrderedDict[str, Comparison]" = OrderedDict()
-_PAGE_CACHE: dict[tuple[str, int, int], bytes] = {}
-#: pdfium is not safe to call from several request threads at once.
-_PAGE_LOCK = threading.Lock()
 
 
 # --------------------------------------------------------------------------- #
@@ -103,6 +99,7 @@ def create_app() -> FastAPI:
         case_sensitive: bool = Form(True),
         collapse_whitespace: bool = Form(True),
         fold_equal: bool = Form(False),
+        visual: bool = Form(True),
     ) -> JSONResponse:
         directory = Path(tempfile.mkdtemp(prefix="diffanydoc-"))
         try:
@@ -116,6 +113,7 @@ def create_app() -> FastAPI:
                 case_sensitive,
                 fold_equal,
                 collapse_whitespace,
+                visual,
             )
         except Exception:
             shutil.rmtree(directory, ignore_errors=True)
@@ -136,6 +134,7 @@ def create_app() -> FastAPI:
             bool(body.get("case_sensitive", True)),
             bool(body.get("fold_equal", False)),
             bool(body.get("collapse_whitespace", True)),
+            bool(body.get("visual", True)),
         )
         return JSONResponse(_summary(comparison))
 
@@ -156,8 +155,7 @@ def create_app() -> FastAPI:
         if path.suffix.lower() != ".pdf":
             raise HTTPException(status_code=404, detail="this file cannot be rendered as pages")
         try:
-            with _PAGE_LOCK:
-                data = _render_page(path, index, max(60, min(dpi, 300)))
+            data = render_page_png(path, index, max(60, min(dpi, 300)))
         except Exception as exc:  # pragma: no cover - renderer specific
             raise HTTPException(status_code=500, detail=f"render failed: {exc}") from exc
         return Response(
@@ -192,12 +190,14 @@ def _run_compare(
     case_sensitive: bool,
     fold_equal: bool,
     collapse_whitespace: bool = True,
+    visual: bool = True,
 ) -> Comparison:
     options = DiffOptions(
         context=context,
         case_sensitive=case_sensitive,
         fold_equal=fold_equal,
         collapse_whitespace=collapse_whitespace,
+        visual=visual,
     )
     result = compare(left_path, right_path, options)
     left_doc = load(left_path)
@@ -251,36 +251,6 @@ def _rects(result: DiffResult) -> dict[str, dict[str, list[dict[str, Any]]]]:
                 }
             )
     return rects
-
-
-def _render_page(path: Path, index: int, dpi: int) -> bytes:
-    cache_key = (str(path), index, dpi)
-    cached = _PAGE_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
-
-    import pypdfium2 as pdfium
-
-    document = pdfium.PdfDocument(str(path))
-    try:
-        if index < 0 or index >= len(document):
-            raise IndexError(f"sayfa {index} yok")
-        page = document[index]
-        bitmap = page.render(scale=dpi / 72)
-        try:
-            image = bitmap.to_pil()
-            buffer = io.BytesIO()
-            image.save(buffer, format="PNG")
-            data = buffer.getvalue()
-        finally:
-            bitmap.close()
-    finally:
-        document.close()
-
-    if len(_PAGE_CACHE) > 256:
-        _PAGE_CACHE.clear()
-    _PAGE_CACHE[cache_key] = data
-    return data
 
 
 def _remember(comparison: Comparison) -> None:

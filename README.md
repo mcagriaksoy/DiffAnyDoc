@@ -7,17 +7,19 @@ It shows text differences and marks changed lines with boxes on PDF pages.
 
 ## Status
 
-This repository contains **M0 + M1** in working order:
+This repository contains **M0 + M1 + M2** in working order:
 
 - Adapter layer for PDF and text files
 - Line alignment plus word-level inline differences
 - Page matching (inserting a page no longer makes every later page look changed)
+- Visual (pixel) page diff: rendered pages, small registration offsets, noise
+  tolerance and changed regions
 - Self-contained HTML report and stable JSON output
 - `diff`, `info`, `formats`, `serve`, `desktop`, `select`, `integrate` commands
 - Web UI and a **native desktop window** (pywebview / GTK)
-- 58 tests (`pytest`)
+- 72 tests (`pytest`)
 
-Not there yet: DOCX/XLSX adapters, OCR, table-cell diffing, visual (pixel) diff.
+Not there yet: DOCX/XLSX adapters, OCR, table-cell diffing.
 
 English is the default for the app, CLI messages and reports. Turkish ships as a
 second locale and can be selected in the app, or with `--lang tr` /
@@ -114,6 +116,7 @@ diffanydoc serve --port 8765
 
 ```bash
 diffanydoc diff a.pdf b.pdf                       # summary in the terminal
+diffanydoc diff a.pdf b.pdf --visual              # also compare rendered pixels
 diffanydoc diff a.pdf b.pdf -o report.html        # HTML report
 diffanydoc diff a.txt b.txt --format json         # machine-readable output
 diffanydoc diff a.pdf b.pdf --fail-on-diff        # exit code 1 when different
@@ -145,6 +148,8 @@ src/diffanydoc/
     normalize.py      # NFKC, typography, soft hyphen, whitespace normalisation
     adapters/         # base.py (registry), pdf.py, text.py
     diff/             # align.py (pages), lines.py (lines + inline), engine.py
+    render.py         # pdfium page rasterisation (shared, cached, locked)
+    visual.py         # pixel comparison, registration, region boxes
     report/           # html.py, json.py
   cli.py              # reference consumer of every feature
   web/                # FastAPI + build-free SPA
@@ -161,9 +166,16 @@ desktop share the same code and the engine is tested separately.
 | Byte (sha256) | missing | fast path for identical files |
 | Structure (docx XML, pdf objects) | planned | M3 |
 | Text (line + word) | **done** | M0 |
-| Page mapping | **done** | simple LCS; similarity-based in M2 |
-| Visual (pixel) | planned | M2 |
+| Page mapping | **done** | LCS + similarity for leftover pages |
+| Visual (pixel) | **done** | M2, opt-in in the engine, on by default in the UI |
 | OCR layer | planned | M4, only when there is no text |
+
+The visual layer is enabled with `--visual` on the CLI, or by the API
+(`"visual": true`, the default). It renders both PDFs at 96 dpi, searches a
+±4 pt registration offset, ignores per-pixel differences below 24/255 and
+reports changed regions in PDF points. It only runs when both files are PDFs;
+`visual.stats` carries `similarity`, `changed_pages`, `changed_pixels` and the
+region count, and `visual.pages` carries the boxes for each page.
 
 ## Licensing strategy
 
@@ -192,7 +204,7 @@ These would require extra licensing for a closed-source commercial release.
 
 - **M0 — engine + CLI** ✅ IR, PDF/text adapters, line + inline diff, HTML/JSON report
 - **M1 — viewer** ✅ web UI + native window, change boxes on PDF pages
-- **M2 — visual diff** page-render comparison, tolerance, registration
+- **M2 — visual diff** ✅ page-render comparison, tolerance, registration
 - **M3 — DOCX/XLSX** structural diff, table-cell alignment
 - **M4 — OCR** fallback layer for scanned PDFs + cache
 - **M5 — distribution** PyInstaller/Tauri packaging, auto-update, licensing
@@ -210,6 +222,7 @@ in the repository. Files under `samples/` are there for manual testing.
 
 - DOCX/XLSX are not supported yet → those files are read as plain text and give
   meaningless results.
-- Scanned PDFs (no text layer) have no text to compare.
+- Scanned PDFs (no text layer) have no text to compare; the visual layer still
+  reports which regions changed, but not what they say.
 - Line-based alignment can be noisy when paragraphs are reflowed.
 - Tables are read as single lines of text (no column alignment).

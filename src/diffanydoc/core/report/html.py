@@ -157,6 +157,7 @@ def render_html(
     add_class = " add" if stats.added else ""
     del_class = " del" if stats.removed else ""
     mod_class = " mod" if stats.changed else ""
+    visual_stats = _visual_stats(result, lang)
     return f"""<!doctype html>
 <html lang="{lang}">
 <head>
@@ -186,6 +187,7 @@ def render_html(
     <span class="stat{mod_class}"><b>~{stats.changed}</b> {html.escape(t("stats.changed", lang))}</span>
     <span class="stat">{html.escape(t("report.lines", lang, left=stats.left_lines, right=stats.right_lines))}</span>
     <span class="stat">{html.escape(t("report.pageMap", lang, n=len(result.page_map)))}</span>
+    {visual_stats}
   </div>
 </header>
 <main>
@@ -206,6 +208,22 @@ def render_html(
 </body>
 </html>
 """
+
+
+def _visual_stats(result: DiffResult, lang: str) -> str:
+    visual = result.visual
+    if visual is None or not visual.compared:
+        return ""
+    parts = [
+        f'<span class="stat">{html.escape(t("report.visual", lang))} '
+        f"<b>{visual.similarity * 100:.1f}%</b></span>",
+        f'<span class="stat">{html.escape(t("report.visualPages", lang, changed=visual.changed_pages, total=visual.compared))}</span>',
+    ]
+    if visual.truncated:
+        parts.append(
+            f'<span class="stat">{html.escape(t("report.visualTruncated", lang))}</span>'
+        )
+    return "".join(parts)
 
 
 _ROW_CLASS = {"equal": "equal", "insert": "add", "delete": "del", "replace": "mod"}

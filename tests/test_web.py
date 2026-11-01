@@ -7,6 +7,8 @@ import pytest
 
 from diffanydoc import system
 
+from .pdfgen import write_pdf
+
 pytest.importorskip("httpx")
 
 
@@ -85,6 +87,40 @@ def test_path_comparison_is_stored_for_report_and_pages(tmp_path: Path) -> None:
     report = client.get(f"/api/compare/{payload['id']}/report?lang=en")
     assert report.status_code == 200
     assert "DiffAnyDoc" in report.text
+
+
+def test_compare_payload_includes_visual_diff(tmp_path: Path) -> None:
+    left = write_pdf(tmp_path / "api-l.pdf", [["Invoice", "Total: 1000 EUR"]])
+    right = write_pdf(tmp_path / "api-r.pdf", [["Invoice", "Total: 1250 EUR"]])
+
+    client = _client()
+    response = client.post(
+        "/api/compare-paths",
+        json={"left": str(left), "right": str(right)},
+    )
+    assert response.status_code == 200
+    visual = response.json()["visual"]
+    assert visual["available"] is True
+    assert visual["stats"]["compared"] == 1
+    assert visual["stats"]["changed_pages"] == 1
+    assert visual["stats"]["regions"] > 0
+    assert 0 < visual["stats"]["similarity"] < 1
+    page = visual["pages"][0]
+    assert page["left"] == 0 and page["right"] == 0
+    assert page["left_regions"] and page["right_regions"]
+
+
+def test_visual_can_be_disabled_per_request(tmp_path: Path) -> None:
+    left = write_pdf(tmp_path / "off-l.pdf", [["Invoice"]])
+    right = write_pdf(tmp_path / "off-r.pdf", [["Invoice"]])
+
+    client = _client()
+    response = client.post(
+        "/api/compare-paths",
+        json={"left": str(left), "right": str(right), "visual": False},
+    )
+    assert response.status_code == 200
+    assert response.json()["visual"] is None
 
 
 def test_compare_paths_rejects_missing_files(tmp_path: Path) -> None:

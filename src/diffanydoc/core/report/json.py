@@ -66,6 +66,7 @@ def result_to_dict(result: DiffResult, *, include_pages: bool = False) -> dict[s
             {"left": pair.left, "right": pair.right, "similarity": pair.similarity}
             for pair in result.page_map
         ],
+        "visual": result.visual.as_dict() if result.visual is not None else None,
         "options": result.options,
         "rows": rows,
     }

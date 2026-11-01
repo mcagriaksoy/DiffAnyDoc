@@ -56,6 +56,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--full", action="store_true", help="do not fold unchanged lines"
     )
     diff.add_argument(
+        "--visual",
+        action="store_true",
+        help="also compare rendered PDF pages pixel by pixel",
+    )
+    diff.add_argument(
         "--fail-on-diff",
         action="store_true",
         help="exit with code 1 when differences exist (CI / git hooks)",
@@ -130,6 +135,7 @@ def _diff(args: argparse.Namespace, language: str) -> int:
         context=args.context,
         case_sensitive=not args.ignore_case,
         fold_equal=not args.full,
+        visual=args.visual,
     )
     result = compare(args.left, args.right, options)
     fmt = args.format or _infer_format(args.output)
@@ -187,6 +193,21 @@ def _render_text(result, language: str) -> str:
         )
     )
     lines.append("")
+
+    visual = result.visual
+    if visual is not None and visual.compared:
+        lines.append(
+            t(
+                "cli.visual",
+                language,
+                pct=f"{visual.similarity * 100:.1f}",
+                changed=visual.changed_pages,
+                pages=visual.compared,
+                regions=visual.region_count,
+            )
+        )
+        lines.append("")
+
     if result.identical:
         lines.append(t("cli.identical", language))
         return "\n".join(lines) + "\n"

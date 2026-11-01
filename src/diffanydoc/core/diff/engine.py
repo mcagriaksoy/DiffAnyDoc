@@ -9,6 +9,7 @@ from typing import Any, Sequence
 
 from ..adapters import adapters, load
 from ..model import DiffResult, Document, Line, Row, Stats
+from ..visual import VisualOptions, compare_pdf_pages
 from .align import align_pages
 from .lines import document_lines, inline_diff, line_similarity
 
@@ -23,6 +24,13 @@ class DiffOptions:
     pair_threshold: float = 0.4
     #: Fold long unchanged runs (HTML report). The API asks for full rows.
     fold_equal: bool = True
+    #: Render both PDFs and compare pixels, not just extracted text.
+    visual: bool = False
+    #: Visual layer tuning; only used when ``visual`` is true.
+    visual_dpi: int = 96
+    visual_tolerance: int = 24
+    visual_shift_pt: float = 4.0
+    visual_max_pages: int = 60
 
 
 def compare(
@@ -51,14 +59,30 @@ def compare(
     if options.fold_equal:
         rows = _fold_equal_runs(rows, options.context)
 
+    page_map = align_pages(left_doc, right_doc)
+    visual = None
+    if options.visual and left_doc.kind == "pdf" and right_doc.kind == "pdf":
+        visual = compare_pdf_pages(
+            left_doc.path,
+            right_doc.path,
+            page_map,
+            VisualOptions(
+                dpi=options.visual_dpi,
+                tolerance=options.visual_tolerance,
+                max_shift_pt=options.visual_shift_pt,
+                max_pages=options.visual_max_pages,
+            ),
+        )
+
     return DiffResult(
         left_path=left_doc.path,
         right_path=right_doc.path,
         left_kind=left_doc.kind,
         right_kind=right_doc.kind,
         rows=rows,
-        page_map=align_pages(left_doc, right_doc),
+        page_map=page_map,
         stats=stats,
+        visual=visual,
         options=asdict(options),
     )
 

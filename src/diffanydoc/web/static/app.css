@@ -840,6 +840,38 @@ body.only-diff .gap {
   outline: 1px solid var(--warning-color);
 }
 
+/* Pixel-level regions: dashed accent outline, so they read as a second layer
+   over the semantic text boxes instead of competing with them. */
+.rect.visual {
+  background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+  outline: 2px dashed var(--accent-color);
+  outline-offset: -1px;
+}
+
+body.visual-off .rect.visual {
+  display: none;
+}
+
+.visual-bar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 8px var(--space-2);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--dim-label-color);
+  font-size: var(--font-size-caption);
+}
+
+.visual-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 2px;
+  border: 2px dashed var(--accent-color);
+}
+
 /* ---------- toast ---------- */
 .toast {
   position: fixed;

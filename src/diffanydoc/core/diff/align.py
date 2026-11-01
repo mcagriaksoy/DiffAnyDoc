@@ -23,8 +23,7 @@ def align_pages(left: Document, right: Document) -> list[PagePair]:
 
     Uses a longest-common-subsequence over exact page keys, then pairs the
     leftover pages in order and reports their real similarity. This is
-    deliberately cheap; M2 replaces it with an alignment that also survives
-    reflowed pages.
+    deliberately cheap; heavily reflowed pages are the known weak spot.
     """
     left_keys = [_page_key(left, i) for i in range(left.page_count)]
     right_keys = [_page_key(right, i) for i in range(right.page_count)]

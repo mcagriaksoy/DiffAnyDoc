@@ -10,6 +10,7 @@ const state = {
   changes: [],
   changeIndex: -1,
   comparing: false,
+  visual: null,
 };
 
 /* Present when the page runs inside the native pywebview shell. */
@@ -478,11 +479,15 @@ function renderResult() {
   $("#meta-left").textContent = `${data.left.kind} · ${i18n.t("meta.pages", { n: data.left.pages })}`;
   $("#meta-right").textContent = `${data.right.kind} · ${i18n.t("meta.pages", { n: data.right.pages })}`;
 
+  state.visual = data.visual && data.visual.available ? data.visual : null;
   renderStats(data.stats);
 
   const canRender = data.renderable.left || data.renderable.right;
   $("#tab-pages").disabled = !canRender;
   if (!canRender && state.mode === "pages") state.mode = "text";
+
+  $("#visual-wrap").hidden = !state.visual;
+  $("#opt-visual").checked = !document.body.classList.contains("visual-off");
 
   $("#export").href = `/api/compare/${data.id}/report?lang=${i18n.lang}`;
 
@@ -511,6 +516,14 @@ function renderStats(stats) {
       ` ${i18n.t("stats.changed")}`,
     ]),
   ];
+  if (state.visual && state.visual.stats.compared) {
+    nodes.push(
+      el("span", { class: "stat" }, [
+        `${i18n.t("stats.visual")} `,
+        el("b", { text: `${(state.visual.stats.similarity * 100).toFixed(1)}%` }),
+      ])
+    );
+  }
   $("#stats").replaceChildren(...nodes);
 }
 
@@ -604,17 +617,60 @@ function renderPages() {
   const container = $("#page-view");
   container.replaceChildren();
 
+  const visualPages = { left: {}, right: {} };
+  if (state.visual) {
+    for (const page of state.visual.pages) {
+      visualPages.left[page.left] = page;
+      visualPages.right[page.right] = page;
+    }
+    if (state.visual.stats.compared) container.append(buildVisualBar(state.visual));
+  }
+
   for (const pair of data.page_map) {
     container.append(
       el("div", { class: "page-row" }, [
-        buildPageCard("left", pair.left),
-        buildPageCard("right", pair.right),
+        buildPageCard("left", pair.left, visualPages.left[pair.left]),
+        buildPageCard("right", pair.right, visualPages.right[pair.right]),
       ])
     );
   }
 }
 
-function buildPageCard(side, index) {
+function buildVisualBar(visual) {
+  const stats = visual.stats;
+  const parts = [
+    i18n.t("visual.summary", {
+      percent: (stats.similarity * 100).toFixed(1),
+      changed: stats.changed_pages,
+      pages: stats.compared,
+      regions: stats.regions,
+    }),
+  ];
+  if (stats.truncated) parts.push(i18n.t("visual.truncated"));
+  return el("div", { class: "visual-bar" }, [
+    el("span", { class: "visual-dot", "aria-hidden": "true" }),
+    el("span", { text: parts.join(" ") }),
+  ]);
+}
+
+function addRect(canvas, box, kind, title, pageWidth, pageHeight) {
+  const [x0, top, x1, bottom] = box;
+  const width = Math.max(x1 - x0, 0.5);
+  const height = Math.max(bottom - top, 0.5);
+  canvas.append(
+    el("div", {
+      class: `rect ${kind}`,
+      title,
+      style:
+        `left:${(x0 / pageWidth) * 100}%;` +
+        `top:${(top / pageHeight) * 100}%;` +
+        `width:${(width / pageWidth) * 100}%;` +
+        `height:${(height / pageHeight) * 100}%`,
+    })
+  );
+}
+
+function buildPageCard(side, index, visualPage) {
   const data = state.comparison;
   const name = side === "left" ? data.left.name : data.right.name;
   const renderable = side === "left" ? data.renderable.left : data.renderable.right;
@@ -643,21 +699,24 @@ function buildPageCard(side, index) {
 
   const rects = (data.rects[side] && data.rects[side][String(index)]) || [];
   for (const rect of rects) {
-    const width = Math.max(rect.x1 - rect.x0, 1);
-    const height = Math.max(rect.bottom - rect.top, 1);
-    canvas.append(
-      el("div", {
-        class: `rect ${
-          rect.kind === "insert" ? "insert" : rect.kind === "delete" ? "delete" : "replace"
-        }`,
-        title: `${rect.kind}: ${rect.text}`,
-        style:
-          `left:${(rect.x0 / size.width) * 100}%;` +
-          `top:${(rect.top / size.height) * 100}%;` +
-          `width:${(width / size.width) * 100}%;` +
-          `height:${(height / size.height) * 100}%`,
-      })
+    addRect(
+      canvas,
+      [rect.x0, rect.top, rect.x1, rect.bottom],
+      rect.kind === "insert" ? "insert" : rect.kind === "delete" ? "delete" : "replace",
+      `${rect.kind}: ${rect.text}`,
+      size.width,
+      size.height
     );
+  }
+
+  const visualBoxes =
+    visualPage && side === "left"
+      ? visualPage.left_regions
+      : visualPage
+        ? visualPage.right_regions
+        : [];
+  for (const box of visualBoxes || []) {
+    addRect(canvas, box, "visual", i18n.t("visual.region"), size.width, size.height);
   }
 
   card.append(canvas);
@@ -673,7 +732,9 @@ function collectChanges() {
     return;
   }
   if (state.mode === "pages") {
-    state.changes = $$("#page-view .page-row").filter((row) => row.querySelector(".rect"));
+    state.changes = $$("#page-view .page-row").filter((row) =>
+      Array.from(row.querySelectorAll(".rect")).some((rect) => rect.offsetParent !== null)
+    );
   } else {
     state.changes = $$("#text-view .row.add, #text-view .row.del, #text-view .row.mod").filter(
       (row) => row.offsetParent !== null
@@ -751,9 +812,11 @@ function showUploadView() {
   $("#upload-view").hidden = false;
   $("#view-tabs").hidden = true;
   $("#only-diff-wrap").hidden = true;
+  $("#visual-wrap").hidden = true;
   $("#zoom-wrap").hidden = true;
   $("#change-nav").hidden = true;
   $("#stats").replaceChildren();
+  state.visual = null;
   for (const node of $$("[data-result-only]")) node.hidden = true;
   closeMenus();
   hideError();
@@ -773,6 +836,8 @@ function reset() {
   }
   $("#only-diff").checked = false;
   document.body.classList.remove("only-diff");
+  $("#opt-visual").checked = true;
+  document.body.classList.remove("visual-off");
   showUploadView();
   updateCompareButton();
 }
@@ -856,6 +921,11 @@ $$(".tab").forEach((tab) =>
 
 $("#only-diff").addEventListener("change", (event) => {
   document.body.classList.toggle("only-diff", event.target.checked);
+  collectChanges();
+});
+
+$("#opt-visual").addEventListener("change", (event) => {
+  document.body.classList.toggle("visual-off", !event.target.checked);
   collectChanges();
 });
 
