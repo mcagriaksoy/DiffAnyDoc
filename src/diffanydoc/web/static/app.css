@@ -25,6 +25,8 @@
   --diff-mod-bg: rgba(232, 168, 0, 0.14);
   --diff-add-strong: rgba(38, 162, 105, 0.24);
   --diff-del-strong: rgba(224, 27, 36, 0.20);
+  --diff-minor-bg: rgba(53, 132, 228, 0.12);
+  --diff-minor-strong: rgba(53, 132, 228, 0.26);
 
   /* Geometry */
   --space-1: 6px;
@@ -74,6 +76,8 @@
     --diff-mod-bg: rgba(255, 212, 121, 0.14);
     --diff-add-strong: rgba(46, 194, 126, 0.30);
     --diff-del-strong: rgba(255, 99, 99, 0.26);
+    --diff-minor-bg: rgba(120, 174, 237, 0.18);
+    --diff-minor-strong: rgba(120, 174, 237, 0.34);
     --shadow-popover: 0 2px 12px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
   }
 }
@@ -122,7 +126,79 @@ body {
 .topbar-start {
   display: flex;
   align-items: center;
+  gap: var(--space-2);
   min-width: 0;
+}
+
+.session-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.session-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.session-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--dim-label-color);
+  font-size: var(--font-size-caption);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.session-tab:hover {
+  background: var(--hover-tint);
+  color: var(--text-color);
+}
+
+.session-tab.active {
+  background: var(--view-bg-color);
+  color: var(--text-color);
+  font-weight: 600;
+}
+
+.session-tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: -4px;
+  border-radius: 4px;
+  color: var(--dim-label-color);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.session-tab-close:hover {
+  background: var(--active-tint);
+  color: var(--text-color);
+}
+
+.session-tab-add {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  flex: none;
 }
 
 .topbar-center {
@@ -522,6 +598,17 @@ a {
   accent-color: var(--accent-color);
 }
 
+.select {
+  height: 28px;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--view-bg-color);
+  color: var(--text-color);
+  font-size: var(--font-size-caption);
+  cursor: pointer;
+}
+
 .actions {
   display: flex;
   flex-direction: column;
@@ -685,7 +772,11 @@ a {
 
 .gutter {
   flex: none;
-  width: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  width: 58px;
   padding: 2px 8px 2px 0;
   border-right: 1px solid var(--border-color);
   color: var(--dim-label-color);
@@ -694,6 +785,38 @@ a {
   font-size: 11px;
   text-align: right;
   user-select: none;
+}
+
+.gutter-number {
+  min-width: 14px;
+  text-align: right;
+}
+
+.gutter-copy {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--dim-label-color);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.gutter-copy:hover,
+.gutter-copy:focus-visible {
+  background: var(--hover-tint);
+  color: var(--text-color);
+  opacity: 1;
+}
+
+.gutter-copy:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: -1px;
 }
 
 .page-tag {
@@ -725,26 +848,49 @@ a {
   background: var(--diff-add-bg);
 }
 
+.row.add .cell:nth-child(2) {
+  box-shadow: inset 2px 0 0 var(--success-color);
+}
+
 .row.del .cell:nth-child(1),
 .row.del .cell:nth-child(1) .gutter {
   background: var(--diff-del-bg);
 }
 
-.row.mod .cell,
+.row.del .cell:nth-child(1) {
+  box-shadow: inset 2px 0 0 var(--error-color);
+}
+
+/* Modified rows: subtle row tint + left amber marker so only changed words stand out. */
+.row.mod .cell {
+  background: color-mix(in srgb, var(--warning-color) 4%, transparent);
+  box-shadow: inset 2px 0 0 var(--warning-color);
+}
+
 .row.mod .cell .gutter {
-  background: var(--diff-mod-bg);
+  background: color-mix(in srgb, var(--warning-color) 8%, var(--window-bg-color));
 }
 
 .seg-del {
+  padding: 1px 2px;
   background: var(--diff-del-strong);
-  border-radius: 2px;
+  border-radius: 3px;
   text-decoration: line-through;
   text-decoration-thickness: 1px;
 }
 
 .seg-ins {
+  padding: 1px 2px;
   background: var(--diff-add-strong);
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+/* Whitespace-only edits: visible, but not alarming like a red deletion. */
+.seg-minor {
+  background: var(--diff-minor-strong);
   border-radius: 2px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 35%, transparent);
 }
 
 .gap {
@@ -840,18 +986,98 @@ body.only-diff .gap {
   outline: 1px solid var(--warning-color);
 }
 
-/* ---------- toast ---------- */
-.toast {
-  position: fixed;
-  bottom: var(--space-4);
-  left: 50%;
-  transform: translateX(-50%);
+/* Pixel-level regions: dashed accent outline, so they read as a second layer
+   over the semantic text boxes instead of competing with them. */
+.rect.visual {
+  background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+  outline: 2px dashed var(--accent-color);
+  outline-offset: -1px;
+}
+
+body.visual-off .rect.visual {
+  display: none;
+}
+
+.rect.manual {
+  background: color-mix(in srgb, var(--warning-color) 20%, transparent);
+  outline: 2px solid var(--warning-color);
+  outline-offset: -1px;
+  z-index: 4;
+}
+
+.rect-label {
+  position: absolute;
+  top: -18px;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--warning-color);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+
+.rect-del {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.25);
+  color: #ffffff;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.rect-del:hover {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+body.annotating .page-canvas {
+  cursor: crosshair;
+  user-select: none;
+}
+
+body.annotating .page-canvas img {
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.xray-row {
+  grid-template-columns: 1fr;
+  max-width: 920px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.visual-bar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
   padding: 8px var(--space-2);
-  border-radius: var(--radius-md);
-  background: var(--popover-bg-color);
-  box-shadow: var(--shadow-popover);
-  font-size: 13px;
-  z-index: 60;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--dim-label-color);
+  font-size: var(--font-size-caption);
+}
+
+.visual-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 2px;
+  border: 2px dashed var(--accent-color);
 }
 
 /* ---------- small windows ---------- */
@@ -887,6 +1113,54 @@ body.only-diff .gap {
   align-items: center;
   gap: var(--space-3);
   flex-wrap: wrap;
+}
+
+.result-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.result-tools .flat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.result-tools svg {
+  width: 16px;
+  height: 16px;
+}
+
+#reload.busy svg {
+  animation: spin 0.9s linear infinite;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  z-index: 90;
+  transform: translateX(-50%);
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 9px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--popover-bg-color);
+  box-shadow: var(--shadow-popover);
+  color: var(--text-color);
+  font-size: 13px;
+  text-align: center;
+}
+
+.toast.error {
+  border-color: color-mix(in srgb, var(--error-color) 55%, transparent);
+  color: var(--error-color);
+}
+
+body.dragging .drop {
+  border-color: var(--accent-color);
+  background: color-mix(in srgb, var(--accent-color) 8%, var(--view-bg-color));
 }
 
 .change-nav {

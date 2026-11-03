@@ -62,6 +62,10 @@ def dolphin_dir() -> Path:
     return data_home() / "kio" / "servicemenus"
 
 
+def nemo_dir() -> Path:
+    return data_home() / "nemo" / "actions"
+
+
 def nautilus_script(slot: str, language: str) -> str:
     return f"""#!/bin/sh
 # Installed by DiffAnyDoc. Removed by `diffanydoc integrate uninstall`.
@@ -91,8 +95,25 @@ Exec={_posix_command("right")} %f
 """
 
 
+def nemo_action(slot: str, language: str) -> str:
+    """Nemo (Cinnamon) action: an Exec line plus the selected file."""
+    lang = resolve_language(language)
+    return f"""[Nemo Action]
+Name={t(f"integrate.{slot}", lang)}
+Exec={_posix_command(slot)} %F
+Icon-Name=diffanydoc
+Selection=s
+Extensions=nodirs;
+Quote=double
+"""
+
+
 def _nautilus_path(slot: str, language: str) -> Path:
     return nautilus_dir() / t(f"integrate.{slot}", resolve_language(language))
+
+
+def _nemo_path(slot: str) -> Path:
+    return nemo_dir() / f"diffanydoc-select-{slot}.nemo_action"
 
 
 def install(language: str = "en") -> list[str]:
@@ -165,6 +186,12 @@ def _install_linux(language: str) -> list[str]:
         path.chmod(0o755)
         installed.append(str(path))
 
+    nemo_dir().mkdir(parents=True, exist_ok=True)
+    for slot in ("left", "right"):
+        path = _nemo_path(slot)
+        path.write_text(nemo_action(slot, lang), encoding="utf-8")
+        installed.append(str(path))
+
     dolphin_dir().mkdir(parents=True, exist_ok=True)
     service = dolphin_dir() / _DOLPHIN_FILE
     service.write_text(dolphin_service(lang), encoding="utf-8")
@@ -174,7 +201,11 @@ def _install_linux(language: str) -> list[str]:
 
 def _uninstall_linux() -> list[str]:
     removed: list[str] = []
-    candidates: set[Path] = {dolphin_dir() / _DOLPHIN_FILE}
+    candidates: set[Path] = {
+        dolphin_dir() / _DOLPHIN_FILE,
+        _nemo_path("left"),
+        _nemo_path("right"),
+    }
     for language in available_languages():
         for slot in ("left", "right"):
             candidates.add(_nautilus_path(slot, language))

@@ -19,6 +19,7 @@ import webbrowser
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 from urllib.error import URLError
+from urllib.parse import unquote, urlparse
 from urllib.request import urlopen
 
 from .. import __version__
@@ -133,7 +134,9 @@ class DesktopApi:
         """Called from the session thread when another process sends a file."""
         if slot not in self._selection:
             return
-        payload = {"slot": slot, "path": _resolve(path)}
+        resolved = _resolve(path)
+        self._selection[slot] = resolved
+        payload = {"slot": slot, "path": resolved}
         if not self._loaded or self._window is None:
             self._pending.append(payload)
             return
@@ -172,7 +175,7 @@ class DesktopApi:
             dialog_type,
             allow_multiple=False,
             file_types=(
-                f"{t('dialog.documents', lang)} (*.pdf;*.txt;*.md;*.csv;*.json;*.docx;*.xlsx)",
+                f"{t('dialog.documents', lang)} (*.pdf;*.docx;*.doc;*.odt;*.rtf;*.xlsx;*.xlsm;*.png;*.jpg;*.jpeg;*.tif;*.tiff;*.bmp;*.webp;*.txt;*.md;*.csv;*.json)",
                 f"{t('dialog.allFiles', lang)} (*.*)",
             ),
         )
@@ -185,6 +188,25 @@ class DesktopApi:
         if not str(url).startswith(("http://", "https://", "file://")):
             return False
         return webbrowser.open(url)
+
+    def resolve_dropped_uris(self, raw: str) -> list[str]:
+        """Resolve a ``text/uri-list`` or newline-separated path list dropped onto the window."""
+        paths: list[str] = []
+        for line in str(raw or "").splitlines():
+            item = line.strip()
+            if not item or item.startswith("#"):
+                continue
+            if item.startswith("file://"):
+                parsed = urlparse(item)
+                candidate = Path(unquote(parsed.path))
+            else:
+                candidate = Path(item).expanduser()
+            try:
+                if candidate.is_file():
+                    paths.append(str(candidate.resolve()))
+            except OSError:
+                continue
+        return paths
 
 
 def _resolve(path: str | Path) -> str:
@@ -253,6 +275,7 @@ def run_desktop(
     )
     api.attach(window)
     window.events.loaded += api.on_loaded
+    _attach_native_drop(window, api)
 
     session = SessionServer(api.deliver_selection)
     session.start()
@@ -262,3 +285,37 @@ def run_desktop(
         session.stop()
         server.stop()
     return 0
+
+
+def _attach_native_drop(window: Any, api: DesktopApi) -> None:
+    """Attach pywebview native DOM drop listener when supported by the backend."""
+    try:
+        from webview.dom import DOMEventHandler
+    except ImportError:
+        return
+
+    def on_drop(event: Any) -> None:
+        if not isinstance(event, dict):
+            return
+        data_transfer = event.get("dataTransfer") or {}
+        files = data_transfer.get("files") or []
+        paths: list[str] = []
+        for item in files:
+            if isinstance(item, dict):
+                full_path = item.get("pywebviewFullPath") or item.get("path")
+                if full_path and Path(str(full_path)).is_file():
+                    paths.append(str(Path(str(full_path)).resolve()))
+        if len(paths) >= 2:
+            api.deliver_selection("left", paths[0])
+            api.deliver_selection("right", paths[1])
+        elif len(paths) == 1:
+            slot = "left" if not api._selection.get("left") else "right"
+            api.deliver_selection(slot, paths[0])
+
+    def bind_dom() -> None:
+        try:
+            window.dom.document.events.drop += DOMEventHandler(on_drop, True, True)
+        except Exception:
+            pass
+
+    window.events.loaded += bind_dom

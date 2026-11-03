@@ -6,11 +6,9 @@ frontend later without touching the engine.
 
 from __future__ import annotations
 
-import io
 import shutil
 import sys
 import tempfile
-import threading
 import uuid
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -19,11 +17,14 @@ from pathlib import Path
 from typing import Any
 
 from .. import __version__
-from ..core.adapters import AdapterError, load, supported_extensions
-from ..core.diff import DiffOptions, compare
+from ..core.adapters import AdapterError, supported_extensions
+from ..core.diff import DiffOptions, compare, file_sha256, preload_document
 from ..core.model import DiffResult
+from ..core.ocr import OcrError, available as ocr_available, installed_languages
+from ..core.render import is_renderable_path, render_page_png
 from ..core.report.html import render_html
 from ..core.report.json import result_to_dict
+from ..core.visual import render_xray_page_png
 from ..i18n import available_languages, resolve_language, strings
 from ..system import accent_color
 
@@ -49,9 +50,6 @@ class Comparison:
 
 
 _COMPARISONS: "OrderedDict[str, Comparison]" = OrderedDict()
-_PAGE_CACHE: dict[tuple[str, int, int], bytes] = {}
-#: pdfium is not safe to call from several request threads at once.
-_PAGE_LOCK = threading.Lock()
 
 
 # --------------------------------------------------------------------------- #
@@ -79,6 +77,89 @@ def create_app() -> FastAPI:
     def formats() -> dict[str, Any]:
         return {"extensions": supported_extensions()}
 
+    @app.get("/api/ocr/status")
+    def ocr_status() -> dict[str, Any]:
+        return {
+            "available": ocr_available(),
+            "languages": installed_languages(),
+        }
+
+    @app.post("/api/checksum")
+    async def checksum_paths(body: dict[str, Any]) -> JSONResponse:
+        left_path = Path(str(body.get("left", ""))).expanduser()
+        right_path = Path(str(body.get("right", ""))).expanduser()
+        if not left_path.is_file() or not right_path.is_file():
+            raise HTTPException(status_code=400, detail="both files must exist")
+        left_hash = file_sha256(left_path)
+        right_hash = file_sha256(right_path)
+        return JSONResponse(
+            {
+                "left_sha256": left_hash,
+                "right_sha256": right_hash,
+                "byte_identical": left_hash == right_hash,
+            }
+        )
+
+    @app.post("/api/preload-path")
+    async def preload_path_endpoint(body: dict[str, Any]) -> JSONResponse:
+        path = Path(str(body.get("path", ""))).expanduser()
+        if not path.is_file():
+            raise HTTPException(status_code=400, detail="file must exist")
+        other_sha = str(body.get("other_sha256") or "")
+        digest = file_sha256(path)
+        if other_sha and digest == other_sha:
+            return JSONResponse(
+                {
+                    "sha256": digest,
+                    "byte_identical": True,
+                    "skipped_parse": True,
+                }
+            )
+        ocr = bool(body.get("ocr", True))
+        ocr_lang = str(body.get("ocr_language") or "tur+eng")
+        digest, doc, _ = preload_document(path, ocr=ocr, ocr_language=ocr_lang)
+        return JSONResponse(
+            {
+                "sha256": digest,
+                "kind": doc.kind,
+                "pages": len(doc.pages),
+                "byte_identical": False,
+                "skipped_parse": False,
+            }
+        )
+
+    @app.post("/api/preload")
+    async def preload_upload_endpoint(
+        file: UploadFile = File(...),
+        other_sha256: str = Form(""),
+        ocr: bool = Form(True),
+        ocr_language: str = Form("tur+eng"),
+    ) -> JSONResponse:
+        directory = Path(tempfile.mkdtemp(prefix="diffanydoc-pre-"))
+        try:
+            stored = _store_upload(file, directory, "preload")
+            digest = file_sha256(stored)
+            if other_sha256 and digest == other_sha256:
+                return JSONResponse(
+                    {
+                        "sha256": digest,
+                        "byte_identical": True,
+                        "skipped_parse": True,
+                    }
+                )
+            digest, doc, _ = preload_document(stored, ocr=ocr, ocr_language=ocr_language)
+            return JSONResponse(
+                {
+                    "sha256": digest,
+                    "kind": doc.kind,
+                    "pages": len(doc.pages),
+                    "byte_identical": False,
+                    "skipped_parse": False,
+                }
+            )
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
+
     @app.get("/api/system/theme")
     def system_theme() -> dict[str, Any]:
         return {"accent": accent_color(), "platform": sys.platform}
@@ -102,7 +183,11 @@ def create_app() -> FastAPI:
         context: int = Form(3),
         case_sensitive: bool = Form(True),
         collapse_whitespace: bool = Form(True),
+        compare_formatting: bool = Form(False),
         fold_equal: bool = Form(False),
+        visual: bool = Form(True),
+        ocr: bool = Form(True),
+        ocr_language: str = Form("tur+eng"),
     ) -> JSONResponse:
         directory = Path(tempfile.mkdtemp(prefix="diffanydoc-"))
         try:
@@ -116,6 +201,10 @@ def create_app() -> FastAPI:
                 case_sensitive,
                 fold_equal,
                 collapse_whitespace,
+                visual,
+                ocr,
+                ocr_language,
+                compare_formatting,
             )
         except Exception:
             shutil.rmtree(directory, ignore_errors=True)
@@ -136,6 +225,10 @@ def create_app() -> FastAPI:
             bool(body.get("case_sensitive", True)),
             bool(body.get("fold_equal", False)),
             bool(body.get("collapse_whitespace", True)),
+            bool(body.get("visual", True)),
+            bool(body.get("ocr", True)),
+            str(body.get("ocr_language") or "tur+eng"),
+            bool(body.get("compare_formatting", False)),
         )
         return JSONResponse(_summary(comparison))
 
@@ -147,17 +240,44 @@ def create_app() -> FastAPI:
     def get_report(comparison_id: str, lang: str | None = None) -> HTMLResponse:
         return HTMLResponse(render_html(_get(comparison_id).result, language=lang))
 
+    @app.get("/api/compare/{comparison_id}/export/{side}")
+    def export_merged(comparison_id: str, side: str) -> Response:
+        comparison = _get(comparison_id)
+        if side not in ("left", "right"):
+            raise HTTPException(status_code=404, detail="invalid side")
+        rows = comparison.payload.get("rows") or []
+        lines: list[str] = []
+        for row in rows:
+            cell = row.get(side)
+            if cell and cell.get("text") is not None:
+                lines.append(str(cell["text"]))
+        content = "\n".join(lines) + ("\n" if lines else "")
+        source_name = (
+            comparison.payload.get(side, {}).get("name")
+            or f"merged-{side}.txt"
+        )
+        stem = Path(source_name).stem or f"merged-{side}"
+        suffix = Path(source_name).suffix.lower()
+        ext = suffix if suffix in (".txt", ".md", ".csv", ".tsv", ".json", ".py", ".js", ".html", ".css", ".xml", ".yaml", ".yml") else ".txt"
+        filename = f"{stem}-merged{ext}"
+        return Response(
+            content=content.encode("utf-8"),
+            media_type="text/plain; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
+
     @app.get("/api/compare/{comparison_id}/page/{side}/{index}.png")
     def get_page(comparison_id: str, side: str, index: int, dpi: int = 110) -> Response:
         comparison = _get(comparison_id)
         if side not in ("left", "right"):
             raise HTTPException(status_code=404, detail="invalid side")
         path = comparison.left if side == "left" else comparison.right
-        if path.suffix.lower() != ".pdf":
+        if not is_renderable_path(path):
             raise HTTPException(status_code=404, detail="this file cannot be rendered as pages")
         try:
-            with _PAGE_LOCK:
-                data = _render_page(path, index, max(60, min(dpi, 300)))
+            data = render_page_png(path, index, max(60, min(dpi, 300)))
         except Exception as exc:  # pragma: no cover - renderer specific
             raise HTTPException(status_code=500, detail=f"render failed: {exc}") from exc
         return Response(
@@ -165,6 +285,35 @@ def create_app() -> FastAPI:
             media_type="image/png",
             headers={"Cache-Control": "private, max-age=3600"},
         )
+
+    @app.get("/api/compare/{comparison_id}/xray/{left_index}/{right_index}.png")
+    def get_xray_page(
+        comparison_id: str, left_index: int, right_index: int, dpi: int = 110
+    ) -> Response:
+        comparison = _get(comparison_id)
+        if not (is_renderable_path(comparison.left) and is_renderable_path(comparison.right)):
+            raise HTTPException(
+                status_code=404, detail="both files must be renderable for X-Ray view"
+            )
+        try:
+            data = render_xray_page_png(
+                comparison.left,
+                left_index,
+                comparison.right,
+                right_index,
+                dpi=max(60, min(dpi, 300)),
+            )
+        except Exception as exc:  # pragma: no cover - renderer specific
+            raise HTTPException(status_code=500, detail=f"xray render failed: {exc}") from exc
+        return Response(
+            content=data,
+            media_type="image/png",
+            headers={"Cache-Control": "private, max-age=3600"},
+        )
+
+    @app.exception_handler(OcrError)
+    async def _ocr_error(_request: Any, exc: OcrError) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=400)
 
     return app
 
@@ -192,26 +341,32 @@ def _run_compare(
     case_sensitive: bool,
     fold_equal: bool,
     collapse_whitespace: bool = True,
+    visual: bool = True,
+    ocr: bool = False,
+    ocr_language: str = "eng",
+    compare_formatting: bool = False,
 ) -> Comparison:
     options = DiffOptions(
         context=context,
         case_sensitive=case_sensitive,
         fold_equal=fold_equal,
         collapse_whitespace=collapse_whitespace,
+        compare_formatting=compare_formatting,
+        visual=visual,
+        ocr=ocr,
+        ocr_language=ocr_language,
     )
     result = compare(left_path, right_path, options)
-    left_doc = load(left_path)
-    right_doc = load(right_path)
 
     payload = result_to_dict(result)
     payload["id"] = uuid.uuid4().hex if directory else None
     payload["pages"] = {
-        "left": [{"width": p.width, "height": p.height} for p in left_doc.pages],
-        "right": [{"width": p.width, "height": p.height} for p in right_doc.pages],
+        "left": [{"width": w, "height": h} for w, h in result.left_pages],
+        "right": [{"width": w, "height": h} for w, h in result.right_pages],
     }
     payload["renderable"] = {
-        "left": left_doc.kind == "pdf",
-        "right": right_doc.kind == "pdf",
+        "left": result.left_kind in ("pdf", "image"),
+        "right": result.right_kind in ("pdf", "image"),
     }
     payload["rects"] = _rects(result)
 
@@ -251,36 +406,6 @@ def _rects(result: DiffResult) -> dict[str, dict[str, list[dict[str, Any]]]]:
                 }
             )
     return rects
-
-
-def _render_page(path: Path, index: int, dpi: int) -> bytes:
-    cache_key = (str(path), index, dpi)
-    cached = _PAGE_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
-
-    import pypdfium2 as pdfium
-
-    document = pdfium.PdfDocument(str(path))
-    try:
-        if index < 0 or index >= len(document):
-            raise IndexError(f"sayfa {index} yok")
-        page = document[index]
-        bitmap = page.render(scale=dpi / 72)
-        try:
-            image = bitmap.to_pil()
-            buffer = io.BytesIO()
-            image.save(buffer, format="PNG")
-            data = buffer.getvalue()
-        finally:
-            bitmap.close()
-    finally:
-        document.close()
-
-    if len(_PAGE_CACHE) > 256:
-        _PAGE_CACHE.clear()
-    _PAGE_CACHE[cache_key] = data
-    return data
 
 
 def _remember(comparison: Comparison) -> None:

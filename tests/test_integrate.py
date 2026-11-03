@@ -15,12 +15,15 @@ def test_nautilus_scripts_are_installed_and_removed(
     monkeypatch.setattr(sys, "platform", "linux")
 
     installed = integrate.install("en")
-    assert len(installed) == 3
+    assert len(installed) == 5
 
     left = integrate.nautilus_dir() / "Select as left file (DiffAnyDoc)"
     right = integrate.nautilus_dir() / "Select as right file (DiffAnyDoc)"
     service = integrate.dolphin_dir() / "diffanydoc-select.desktop"
+    nemo_left = integrate.nemo_dir() / "diffanydoc-select-left.nemo_action"
+    nemo_right = integrate.nemo_dir() / "diffanydoc-select-right.nemo_action"
     assert left.is_file() and right.is_file() and service.is_file()
+    assert nemo_left.is_file() and nemo_right.is_file()
     assert left.stat().st_mode & 0o111
 
     script = left.read_text(encoding="utf-8")
@@ -31,9 +34,15 @@ def test_nautilus_scripts_are_installed_and_removed(
     assert "Actions=selectLeft;selectRight;" in content
     assert "select right %f" in content
 
+    action = nemo_left.read_text(encoding="utf-8")
+    assert "Name=Select as left file (DiffAnyDoc)" in action
+    assert "select left %F" in action
+    assert "Selection=s" in action and "Quote=double" in action
+
     removed = integrate.uninstall("en")
-    assert len(removed) == 3
+    assert len(removed) == 5
     assert not left.exists() and not right.exists() and not service.exists()
+    assert not nemo_left.exists() and not nemo_right.exists()
 
 
 def test_uninstall_removes_turkish_script_names(

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-BlockKind = Literal["text", "table", "image", "vector"]
+BlockKind = Literal["text", "table", "table_row", "cell", "image", "vector"]
 ChangeKind = Literal["equal", "insert", "delete", "replace"]
 
 BBox = tuple[float, float, float, float]  # x0, top, x1, bottom (points)
@@ -42,7 +42,9 @@ class Page:
     blocks: list[Block] = field(default_factory=list)
 
     def text(self, sep: str = "\n") -> str:
-        return sep.join(b.text for b in self.blocks if b.kind == "text")
+        return sep.join(
+            b.text for b in self.blocks if b.kind in ("text", "table")
+        )
 
 
 @dataclass(slots=True)
@@ -80,6 +82,9 @@ class Line:
     number: int = 0
     bbox: BBox | None = None
     style: dict[str, Any] = field(default_factory=dict)
+    #: Cell texts when the line comes from a table row, so changed cells can
+    #: be aligned and highlighted individually instead of as one long string.
+    cells: list[str] | None = None
 
 
 @dataclass(slots=True)
@@ -113,6 +118,116 @@ class PagePair:
 
 
 @dataclass(slots=True)
+class VisualPage:
+    """Pixel comparison of one aligned page pair.
+
+    Regions are in PDF points relative to their own page, so the viewer can
+    overlay them without knowing the rendering DPI.
+    """
+
+    left: int
+    right: int
+    shift: tuple[float, float] = (0.0, 0.0)
+    changed_pixels: int = 0
+    total_pixels: int = 0
+    left_regions: list[BBox] = field(default_factory=list)
+    right_regions: list[BBox] = field(default_factory=list)
+    error: str | None = None
+
+    @property
+    def changed_ratio(self) -> float:
+        return self.changed_pixels / self.total_pixels if self.total_pixels else 0.0
+
+    def as_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "left": self.left,
+            "right": self.right,
+            "shift": [round(self.shift[0], 3), round(self.shift[1], 3)],
+            "changed_ratio": round(self.changed_ratio, 6),
+            "left_regions": _regions_as_lists(self.left_regions),
+            "right_regions": _regions_as_lists(self.right_regions),
+        }
+        if self.error:
+            payload["error"] = self.error
+        return payload
+
+
+@dataclass(slots=True)
+class VisualDiff:
+    """Result of rendering both documents and comparing pixels page by page."""
+
+    pages: list[VisualPage] = field(default_factory=list)
+    compared: int = 0
+    changed_pages: int = 0
+    changed_pixels: int = 0
+    total_pixels: int = 0
+    max_shift: float = 0.0
+    truncated: bool = False
+
+    @property
+    def similarity(self) -> float:
+        if not self.total_pixels:
+            return 1.0
+        return max(0.0, 1.0 - self.changed_pixels / self.total_pixels)
+
+    @property
+    def region_count(self) -> int:
+        return sum(len(page.left_regions) for page in self.pages)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "available": True,
+            "stats": {
+                "compared": self.compared,
+                "changed_pages": self.changed_pages,
+                "changed_pixels": self.changed_pixels,
+                "total_pixels": self.total_pixels,
+                "similarity": round(self.similarity, 4),
+                "max_shift": round(self.max_shift, 3),
+                "regions": self.region_count,
+                "truncated": self.truncated,
+            },
+            "pages": [page.as_dict() for page in self.pages],
+        }
+
+
+def _regions_as_lists(regions: list[BBox]) -> list[list[float]]:
+    return [[round(value, 2) for value in region] for region in regions]
+
+
+@dataclass(slots=True)
+class OcrStats:
+    """What the OCR fallback layer did for one comparison."""
+
+    language: str = "eng"
+    #: Pages that had little or no text and were OCRed (both documents).
+    pages: int = 0
+    #: How many of those pages came from the on-disk cache.
+    cached: int = 0
+    words: int = 0
+    truncated: bool = False
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "available": True,
+            "language": self.language,
+            "pages": self.pages,
+            "cached": self.cached,
+            "words": self.words,
+            "truncated": self.truncated,
+        }
+
+    def merged(self, other: "OcrStats") -> "OcrStats":
+        return OcrStats(
+            language=self.language,
+            pages=self.pages + other.pages,
+            cached=self.cached + other.cached,
+            words=self.words + other.words,
+            truncated=self.truncated or other.truncated,
+        )
+
+
+@dataclass(slots=True)
 class Stats:
     left_lines: int = 0
     right_lines: int = 0
@@ -141,10 +256,21 @@ class DiffResult:
     rows: list[Row] = field(default_factory=list)
     page_map: list[PagePair] = field(default_factory=list)
     stats: Stats = field(default_factory=Stats)
+    visual: VisualDiff | None = None
+    ocr: OcrStats | None = None
     options: dict[str, Any] = field(default_factory=dict)
+    byte_identical: bool = False
+    left_sha256: str | None = None
+    right_sha256: str | None = None
+    left_pages: list[tuple[float, float]] = field(default_factory=list)
+    right_pages: list[tuple[float, float]] = field(default_factory=list)
 
     @property
     def identical(self) -> bool:
+        if self.byte_identical:
+            return True
+        if self.visual is not None and self.visual.changed_pages > 0:
+            return False
         return not any(r.kind != "equal" for r in self.rows)
 
     @property

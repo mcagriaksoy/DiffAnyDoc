@@ -8,13 +8,16 @@ from ..model import DiffResult, Line, Row, Segment
 
 
 def _line_to_dict(line: Line, number: int) -> dict[str, Any]:
-    return {
+    payload = {
         "text": line.text,
         "page": line.page,
         "bbox": list(line.bbox) if line.bbox else None,
         "number": number,
         "style": line.style or None,
     }
+    if line.cells is not None:
+        payload["cells"] = list(line.cells)
+    return payload
 
 
 def _segments_to_dict(segments: list[Segment] | None) -> list[dict[str, str]] | None:
@@ -53,25 +56,33 @@ def result_to_dict(result: DiffResult, *, include_pages: bool = False) -> dict[s
             "name": result.left_path.name,
             "kind": result.left_kind,
             "pages": _page_count(result, "left"),
+            "sha256": result.left_sha256,
         },
         "right": {
             "path": str(result.right_path),
             "name": result.right_path.name,
             "kind": result.right_kind,
             "pages": _page_count(result, "right"),
+            "sha256": result.right_sha256,
         },
         "identical": result.identical,
+        "byte_identical": result.byte_identical,
         "stats": result.stats.as_dict(),
         "page_map": [
             {"left": pair.left, "right": pair.right, "similarity": pair.similarity}
             for pair in result.page_map
         ],
+        "visual": result.visual.as_dict() if result.visual is not None else None,
+        "ocr": result.ocr.as_dict() if result.ocr is not None else None,
         "options": result.options,
         "rows": rows,
     }
 
 
 def _page_count(result: DiffResult, side: str) -> int:
+    pages = result.left_pages if side == "left" else result.right_pages
+    if pages:
+        return len(pages)
     indexes = {
         getattr(row.left if side == "left" else row.right, "page", None)
         for row in result.rows

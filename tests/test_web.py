@@ -7,6 +7,8 @@ import pytest
 
 from diffanydoc import system
 
+from .pdfgen import write_pdf
+
 pytest.importorskip("httpx")
 
 
@@ -87,6 +89,40 @@ def test_path_comparison_is_stored_for_report_and_pages(tmp_path: Path) -> None:
     assert "DiffAnyDoc" in report.text
 
 
+def test_compare_payload_includes_visual_diff(tmp_path: Path) -> None:
+    left = write_pdf(tmp_path / "api-l.pdf", [["Invoice", "Total: 1000 EUR"]])
+    right = write_pdf(tmp_path / "api-r.pdf", [["Invoice", "Total: 1250 EUR"]])
+
+    client = _client()
+    response = client.post(
+        "/api/compare-paths",
+        json={"left": str(left), "right": str(right)},
+    )
+    assert response.status_code == 200
+    visual = response.json()["visual"]
+    assert visual["available"] is True
+    assert visual["stats"]["compared"] == 1
+    assert visual["stats"]["changed_pages"] == 1
+    assert visual["stats"]["regions"] > 0
+    assert 0 < visual["stats"]["similarity"] < 1
+    page = visual["pages"][0]
+    assert page["left"] == 0 and page["right"] == 0
+    assert page["left_regions"] and page["right_regions"]
+
+
+def test_visual_can_be_disabled_per_request(tmp_path: Path) -> None:
+    left = write_pdf(tmp_path / "off-l.pdf", [["Invoice"]])
+    right = write_pdf(tmp_path / "off-r.pdf", [["Invoice"]])
+
+    client = _client()
+    response = client.post(
+        "/api/compare-paths",
+        json={"left": str(left), "right": str(right), "visual": False},
+    )
+    assert response.status_code == 200
+    assert response.json()["visual"] is None
+
+
 def test_compare_paths_rejects_missing_files(tmp_path: Path) -> None:
     client = _client()
     response = client.post(
@@ -94,3 +130,104 @@ def test_compare_paths_rejects_missing_files(tmp_path: Path) -> None:
         json={"left": str(tmp_path / "yok-a.txt"), "right": str(tmp_path / "yok-b.txt")},
     )
     assert response.status_code == 400
+
+
+def test_checksum_and_ocr_status_endpoints(tmp_path: Path) -> None:
+    left = tmp_path / "a.txt"
+    right = tmp_path / "b.txt"
+    left.write_text("aynı içerik\n", encoding="utf-8")
+    right.write_text("aynı içerik\n", encoding="utf-8")
+
+    client = _client()
+    chk = client.post(
+        "/api/checksum",
+        json={"left": str(left), "right": str(right)},
+    )
+    assert chk.status_code == 200
+    data = chk.json()
+    assert data["byte_identical"] is True
+    assert data["left_sha256"] == data["right_sha256"]
+
+    ocr = client.get("/api/ocr/status")
+    assert ocr.status_code == 200
+    assert isinstance(ocr.json()["languages"], list)
+
+
+def test_export_merged_side_endpoint(tmp_path: Path) -> None:
+    left = tmp_path / "sol.txt"
+    right = tmp_path / "sag.txt"
+    left.write_text("satır 1\nsatır 2 sol\n", encoding="utf-8")
+    right.write_text("satır 1\nsatır 2 sağ\n", encoding="utf-8")
+
+    client = _client()
+    comp = client.post(
+        "/api/compare-paths",
+        json={"left": str(left), "right": str(right), "fold_equal": False},
+    ).json()
+
+    exp_left = client.get(f"/api/compare/{comp['id']}/export/left")
+    assert exp_left.status_code == 200
+    assert "satır 2 sol" in exp_left.text
+
+    exp_right = client.get(f"/api/compare/{comp['id']}/export/right")
+    assert exp_right.status_code == 200
+    assert "satır 2 sağ" in exp_right.text
+
+
+def test_xray_page_endpoint_returns_composite_png(tmp_path: Path) -> None:
+    left = write_pdf(tmp_path / "x-l.pdf", [["Invoice", "Total: 1000 EUR"]])
+    right = write_pdf(tmp_path / "x-r.pdf", [["Invoice", "Total: 1250 EUR"]])
+
+    client = _client()
+    comp = client.post(
+        "/api/compare-paths",
+        json={"left": str(left), "right": str(right)},
+    ).json()
+
+    xray = client.get(f"/api/compare/{comp['id']}/xray/0/0.png?dpi=96")
+    assert xray.status_code == 200
+    assert xray.headers["content-type"] == "image/png"
+    assert xray.content.startswith(b"\x89PNG")
+
+
+def test_preload_endpoints_warm_cache_and_detect_identical_second_file(tmp_path: Path) -> None:
+    first = tmp_path / "p1.txt"
+    second = tmp_path / "p2.txt"
+    same = tmp_path / "same.txt"
+    first.write_text("merhaba dünya\n", encoding="utf-8")
+    second.write_text("merhaba evren\n", encoding="utf-8")
+    same.write_text("merhaba dünya\n", encoding="utf-8")
+
+    client = _client()
+    r1 = client.post(
+        "/api/preload-path",
+        json={"path": str(first), "ocr": False},
+    )
+    assert r1.status_code == 200
+    d1 = r1.json()
+    assert d1["skipped_parse"] is False
+    assert d1["kind"] == "text"
+    assert d1["sha256"]
+
+    # If the 2nd selected file has the same SHA-256, parsing is skipped immediately
+    r_same = client.post(
+        "/api/preload-path",
+        json={"path": str(same), "other_sha256": d1["sha256"], "ocr": False},
+    )
+    assert r_same.status_code == 200
+    assert r_same.json()["byte_identical"] is True
+    assert r_same.json()["skipped_parse"] is True
+
+    # Upload preload endpoint also works
+    r_up = client.post(
+        "/api/preload",
+        files={"file": ("p2.txt", second.read_bytes())},
+        data={"other_sha256": d1["sha256"], "ocr": "false"},
+    )
+    assert r_up.status_code == 200
+    assert r_up.json()["byte_identical"] is False
+    assert r_up.json()["skipped_parse"] is False
+
+
+
+

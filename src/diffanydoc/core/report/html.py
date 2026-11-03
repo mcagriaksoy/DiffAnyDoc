@@ -19,6 +19,7 @@ _CSS = """
   --diff-add-bg:rgba(38,162,105,.12); --diff-del-bg:rgba(224,27,36,.10);
   --diff-mod-bg:rgba(232,168,0,.14); --diff-add-strong:rgba(38,162,105,.24);
   --diff-del-strong:rgba(224,27,36,.20);
+  --diff-minor-strong:rgba(53,132,228,.26);
   --font-ui:system-ui,-apple-system,"Segoe UI Variable Text","Segoe UI",Cantarell,
     Ubuntu,Roboto,"Noto Sans",sans-serif;
   --font-mono:ui-monospace,"Cascadia Mono","SF Mono","JetBrains Mono",Menlo,Consolas,
@@ -33,6 +34,7 @@ _CSS = """
     --diff-add-bg:rgba(46,194,126,.16); --diff-del-bg:rgba(255,99,99,.14);
     --diff-mod-bg:rgba(255,212,121,.14); --diff-add-strong:rgba(46,194,126,.30);
     --diff-del-strong:rgba(255,99,99,.26);
+    --diff-minor-strong:rgba(120,174,237,.34);
   }
 }
 *{box-sizing:border-box}
@@ -90,11 +92,14 @@ tr.add td:nth-child(2){background:var(--diff-add-bg);
   box-shadow:inset 2px 0 0 var(--success-color)}
 tr.del td:nth-child(1){background:var(--diff-del-bg);
   box-shadow:inset 2px 0 0 var(--error-color)}
-tr.mod td{background:var(--diff-mod-bg);
+tr.mod td{background:color-mix(in srgb,var(--warning-color) 4%,transparent);
   box-shadow:inset 2px 0 0 var(--warning-color)}
-del{background:var(--diff-del-strong);color:inherit;border-radius:2px;
+del{padding:1px 2px;background:var(--diff-del-strong);color:inherit;border-radius:3px;
   text-decoration:line-through;text-decoration-thickness:1px}
-ins{background:var(--diff-add-strong);color:inherit;border-radius:2px;text-decoration:none}
+ins{padding:1px 2px;background:var(--diff-add-strong);color:inherit;border-radius:3px;
+  text-decoration:none;font-weight:600}
+del.minor,ins.minor{background:var(--diff-minor-strong);text-decoration:none;
+  box-shadow:inset 0 0 0 1px rgba(53,132,228,.35)}
 .gap td{background:var(--window-bg-color);border-top:1px solid var(--border-color);
   border-bottom:1px solid var(--border-color);color:var(--dim-label-color);
   font-family:inherit;font-size:12px;text-align:center;padding:4px}
@@ -109,6 +114,7 @@ footer{color:var(--dim-label-color);font-size:12px;text-align:center;padding:18p
     --border-color:rgba(0,0,0,.15); --text-color:#1d1d20; --dim-label-color:#4b5563;
     --diff-add-bg:#e6f7ec; --diff-del-bg:#fdeaea; --diff-mod-bg:#fff7e0;
     --diff-add-strong:#bfe8cf; --diff-del-strong:#f5c9c9;
+    --diff-minor-strong:#cfe4fb;
     --success-color:#0f6b36; --warning-color:#7a5200; --error-color:#a11a1a;
   }
   body{background:#fff}
@@ -147,9 +153,10 @@ def render_html(
         _row_html(row, lang, last_page) for row in result.rows
     )
     if not result.rows:
+        empty_key = "empty.byteIdentical" if result.byte_identical else "report.empty"
         body_rows = (
             '<tr><td class="empty" colspan="2">'
-            f"{html.escape(t('report.empty', lang))}"
+            f"{html.escape(t(empty_key, lang))}"
             "</td></tr>"
         )
 
@@ -157,6 +164,8 @@ def render_html(
     add_class = " add" if stats.added else ""
     del_class = " del" if stats.removed else ""
     mod_class = " mod" if stats.changed else ""
+    visual_stats = _visual_stats(result, lang)
+    ocr_stats = _ocr_stats(result, lang)
     return f"""<!doctype html>
 <html lang="{lang}">
 <head>
@@ -186,6 +195,8 @@ def render_html(
     <span class="stat{mod_class}"><b>~{stats.changed}</b> {html.escape(t("stats.changed", lang))}</span>
     <span class="stat">{html.escape(t("report.lines", lang, left=stats.left_lines, right=stats.right_lines))}</span>
     <span class="stat">{html.escape(t("report.pageMap", lang, n=len(result.page_map)))}</span>
+    {ocr_stats}
+    {visual_stats}
   </div>
 </header>
 <main>
@@ -206,6 +217,36 @@ def render_html(
 </body>
 </html>
 """
+
+
+def _ocr_stats(result: DiffResult, lang: str) -> str:
+    ocr = result.ocr
+    if ocr is None or not ocr.pages:
+        return ""
+    parts = [
+        f'<span class="stat">{html.escape(t("report.ocr", lang, pages=ocr.pages, lang=ocr.language))}</span>'
+    ]
+    if ocr.truncated:
+        parts.append(
+            f'<span class="stat">{html.escape(t("report.ocrTruncated", lang))}</span>'
+        )
+    return "".join(parts)
+
+
+def _visual_stats(result: DiffResult, lang: str) -> str:
+    visual = result.visual
+    if visual is None or not visual.compared:
+        return ""
+    parts = [
+        f'<span class="stat">{html.escape(t("report.visual", lang))} '
+        f"<b>{visual.similarity * 100:.1f}%</b></span>",
+        f'<span class="stat">{html.escape(t("report.visualPages", lang, changed=visual.changed_pages, total=visual.compared))}</span>',
+    ]
+    if visual.truncated:
+        parts.append(
+            f'<span class="stat">{html.escape(t("report.visualTruncated", lang))}</span>'
+        )
+    return "".join(parts)
 
 
 _ROW_CLASS = {"equal": "equal", "insert": "add", "delete": "del", "replace": "mod"}
@@ -238,20 +279,31 @@ def _cell(
     label = "" if line.page == previous_page else t("page.label", lang, n=line.page + 1)
     page = f'<span class="page">{html.escape(label)}</span>'
     text = _inline_html(inline) if inline else html.escape(line.text, quote=False)
-    return f'<td>{gutter}{page}<span class="text">{text}</span></td>'
+    style_badge = ""
+    style = getattr(line, "style", None) or {}
+    if style.get("style_change"):
+        summary = html.escape(str(style.get("summary") or style["style_change"]))
+        style_badge = f' <span class="page">{summary}</span>'
+    return f'<td>{gutter}{page}<span class="text">{text}{style_badge}</span></td>'
 
 
 def _inline_html(segments: list[Segment]) -> str:
     out: list[str] = []
     for segment in segments:
         text = html.escape(segment.text, quote=False)
+        minor = ' class="minor"' if _is_minor(segment.text) else ""
         if segment.kind == "delete":
-            out.append(f"<del>{text}</del>")
+            out.append(f"<del{minor}>{text}</del>")
         elif segment.kind == "insert":
-            out.append(f"<ins>{text}</ins>")
+            out.append(f"<ins{minor}>{text}</ins>")
         else:
             out.append(text)
     return "".join(out)
+
+
+def _is_minor(text: str) -> bool:
+    """Whitespace-only edits get a calm blue instead of red/green."""
+    return bool(text) and not text.strip()
 
 
 def _row_number(line: Any) -> str:

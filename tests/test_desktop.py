@@ -102,6 +102,18 @@ def test_open_external_rejects_unknown_schemes() -> None:
     assert DesktopApi().open_external("javascript:alert(1)") is False
 
 
+def test_resolve_dropped_uris_handles_file_urls_and_paths(tmp_path: Path) -> None:
+    first = tmp_path / "bosluklu dosya.docx"
+    second = tmp_path / "ikinci.csv"
+    first.write_text("a", encoding="utf-8")
+    second.write_text("b", encoding="utf-8")
+
+    raw = f"{first.as_uri()}\r\n{second}\r\nfile:///olmayan/dosya.txt\r\n"
+    resolved = DesktopApi().resolve_dropped_uris(raw)
+    assert resolved == [str(first.resolve()), str(second.resolve())]
+
+
+
 def test_wait_until_ready_times_out_quickly() -> None:
     import time
 

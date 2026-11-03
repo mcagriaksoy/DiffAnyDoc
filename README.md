@@ -7,17 +7,29 @@ It shows text differences and marks changed lines with boxes on PDF pages.
 
 ## Status
 
-This repository contains **M0 + M1** in working order:
+This repository contains **M0 + M1 + M2 + M3 + M4** in working order:
 
-- Adapter layer for PDF and text files
+- Adapter layer for PDF, DOCX, DOC/ODT/RTF, XLSX, images (PNG/JPG/TIFF/WEBP) and text files
+- Fast SHA-256 byte checksum check: identical files return immediately without loading or parsing
 - Line alignment plus word-level inline differences
 - Page matching (inserting a page no longer makes every later page look changed)
+- Visual (pixel) page diff: rendered pages, small registration offsets, noise
+  tolerance and changed regions (works on both PDFs and images)
+- Structural PDF/DOCX/XLSX diff: paragraphs, headers/footers/footnotes, table rows,
+  merged-cell expansion and individual cells (including ruled PDF tables), so a
+  changed price is one cell, not a rewritten row
+- Optional formatting/style comparison (`--format-diff` or UI checkbox) for font,
+  size, bold, italic, underline and heading changes
+- Zero-config embedded OCR for scanned/hybrid PDFs and images via **RapidOCR** (`rapidocr-onnxruntime`, Apache-2.0), with word boxes and an on-disk cache keyed by file content
+- X-Ray Vision composite view (`render_xray_page_png`) + interactive manual bounding-box annotations on pages
+- Multi-tab comparison sessions and side-to-side line/document merge (`A → B`, `B → A`)
+- Instant background preloading (`/api/preload`, `/api/preload-path`) when the first file is selected
 - Self-contained HTML report and stable JSON output
 - `diff`, `info`, `formats`, `serve`, `desktop`, `select`, `integrate` commands
 - Web UI and a **native desktop window** (pywebview / GTK)
-- 58 tests (`pytest`)
+- 114 tests (`pytest`)
 
-Not there yet: DOCX/XLSX adapters, OCR, table-cell diffing, visual (pixel) diff.
+> **For AI Coding Agents (Claude Code, OpenCode, Cursor, etc.):** Read [`AGENTS.md`](AGENTS.md) and [`docs/DESIGN.md`](docs/DESIGN.md) before making changes.
 
 English is the default for the app, CLI messages and reports. Turkish ships as a
 second locale and can be selected in the app, or with `--lang tr` /
@@ -29,6 +41,8 @@ System dependencies (Linux, for the native window):
 
 ```bash
 sudo apt install python3-gi gir1.2-webkit2-4.1 libgtk-3-0
+# optional, for --ocr on scanned PDFs
+sudo apt install tesseract-ocr tesseract-ocr-eng
 ```
 
 Python side — the virtualenv must see system packages so it can load the GTK
@@ -98,10 +112,21 @@ The entries hand the chosen file to the running window, or open one if needed:
 
 The two files are compared automatically. On Windows this uses per-user registry
 entries (no administrator rights); on Windows 11 the entries may appear under
-**Show more options**. On Linux both Nautilus scripts and a Dolphin/KDE service
-menu are installed, because GNOME Files has no cross-desktop context-menu API.
-Menu labels follow `--lang`, e.g. `diffanydoc --lang tr integrate install`.
-Restart Nautilus once (`nautilus -q`) if the scripts do not show up immediately.
+**Show more options**. On Linux the installer writes Nautilus scripts, Nemo
+(Cinnamon) actions and a Dolphin/KDE service menu, because there is no
+cross-desktop context-menu API. Menu labels follow `--lang`, e.g.
+`diffanydoc --lang tr integrate install`.
+
+Restart the file manager once after installing or changing the language:
+
+```bash
+nautilus -q        # GNOME Files
+nemo -q            # Cinnamon / Nemo, then open a folder again
+```
+
+If the entries use a virtualenv Python, keep that virtualenv where it is:
+the generated commands point at `<venv>/bin/python`. Re-run
+`diffanydoc integrate install` after moving the checkout or the environment.
 
 ### Browser (local server / on-prem team use)
 
@@ -110,10 +135,28 @@ diffanydoc serve --port 8765
 # http://127.0.0.1:8765
 ```
 
+Drop files on either box, or anywhere on the page: two files fill the left
+and right side at once, one file goes to the first empty side. After a
+comparison the toolbar keeps both files, so:
+
+- **Reload** re-reads both files and re-runs the comparison. In the desktop
+  window it picks up changes saved on disk; in a browser the original upload
+  is resent, because a web page cannot read the file again.
+- **Copy** copies all changes, the left text, the right text, or both sides
+  side by side. Changed rows also get a small arrow next to the line number:
+  `→` on the left copies that line for the right side, `←` on the right copies
+  it for the left side (to the clipboard).
+
+Whitespace-only edits are highlighted in blue instead of the red/green used for
+real content changes.
+
 ### Command line
 
 ```bash
 diffanydoc diff a.pdf b.pdf                       # summary in the terminal
+diffanydoc diff a.pdf b.pdf --visual              # also compare rendered pixels
+diffanydoc diff scan_a.pdf scan_b.pdf --ocr       # OCR pages without text
+diffanydoc diff scan_a.pdf scan_b.pdf --ocr --ocr-lang tur+eng
 diffanydoc diff a.pdf b.pdf -o report.html        # HTML report
 diffanydoc diff a.txt b.txt --format json         # machine-readable output
 diffanydoc diff a.pdf b.pdf --fail-on-diff        # exit code 1 when different
@@ -143,8 +186,12 @@ src/diffanydoc/
   core/
     model.py          # Document / Page / Block + DiffResult / Row
     normalize.py      # NFKC, typography, soft hyphen, whitespace normalisation
-    adapters/         # base.py (registry), pdf.py, text.py
+    adapters/         # base.py (registry), pdf.py, docx.py, xlsx.py, text.py,
+                      # ooxml.py (shared ZIP/XML helpers, no third-party parser)
     diff/             # align.py (pages), lines.py (lines + inline), engine.py
+    render.py         # pdfium page rasterisation (shared, cached, locked)
+    ocr.py            # Tesseract fallback for scanned pages + on-disk cache
+    visual.py         # pixel comparison, registration, region boxes
     report/           # html.py, json.py
   cli.py              # reference consumer of every feature
   web/                # FastAPI + build-free SPA
@@ -158,12 +205,33 @@ desktop share the same code and the engine is tested separately.
 
 | Layer | Status | Note |
 |---|---|---|
-| Byte (sha256) | missing | fast path for identical files |
-| Structure (docx XML, pdf objects) | planned | M3 |
+| Byte (sha256) | **done** | fast path for identical files (skips parsing) |
+| Structure (docx/xlsx XML, table cells) | **done** | M3, stdlib `zipfile` + `ElementTree` + merged cells |
 | Text (line + word) | **done** | M0 |
-| Page mapping | **done** | simple LCS; similarity-based in M2 |
-| Visual (pixel) | planned | M2 |
-| OCR layer | planned | M4, only when there is no text |
+| Page mapping | **done** | LCS + similarity for leftover pages |
+| Visual (pixel) | **done** | M2, opt-in in the engine, on by default in the UI (PDF + image) |
+| OCR layer | **done** | M4, opt-in, scanned/hybrid PDFs and images |
+
+The visual layer is enabled with `--visual` on the CLI, or by the API
+(`"visual": true`, the default). It renders both PDFs at 96 dpi, searches a
+±4 pt registration offset, ignores per-pixel differences below 24/255 and
+reports changed regions in PDF points. It only runs when both files are PDFs;
+`visual.stats` carries `similarity`, `changed_pages`, `changed_pixels` and the
+region count, and `visual.pages` carries the boxes for each page.
+
+The OCR layer is enabled with `--ocr` on the CLI, in the upload options of the
+web UI, or with `"ocr": true` on the API. Pages whose extracted text is shorter
+than 8 non-whitespace characters are rendered at 300 dpi and passed to the
+`tesseract` binary; recognised words become normal text blocks with bounding
+boxes, so the diff, the viewer rectangles and the HTML report all work the same
+way. `--ocr-lang` selects Tesseract languages (default `eng`). Results are
+cached per file hash, page, language, DPI and segmentation mode under the user
+cache directory (`~/.cache/diffanydoc/ocr` on Linux,
+`%LOCALAPPDATA%\DiffAnyDoc\cache\ocr` on Windows,
+`~/Library/Caches/DiffAnyDoc/ocr` on macOS). `DIFFANYDOC_CACHE_DIR` changes the
+base directory and `DIFFANYDOC_TESSERACT` points at a specific binary. If
+Tesseract is missing, only comparisons that actually need OCR fail, with an
+install hint.
 
 ## Licensing strategy
 
@@ -177,6 +245,7 @@ Because the target is a commercial release, dependencies were chosen from
 | `Pillow` | MIT-CMU | images |
 | `fastapi` / `uvicorn` | MIT / BSD-3 | API |
 | `pywebview` | BSD-3 | desktop shell |
+| Tesseract | Apache-2.0 | OCR binary, optional system dependency |
 | GTK / WebKit2GTK | LGPL | system webview (dynamic linking) |
 
 Deliberately **not used**: PyMuPDF (AGPL), PyQt6 (GPL), parts of reportlab.
@@ -192,9 +261,9 @@ These would require extra licensing for a closed-source commercial release.
 
 - **M0 — engine + CLI** ✅ IR, PDF/text adapters, line + inline diff, HTML/JSON report
 - **M1 — viewer** ✅ web UI + native window, change boxes on PDF pages
-- **M2 — visual diff** page-render comparison, tolerance, registration
-- **M3 — DOCX/XLSX** structural diff, table-cell alignment
-- **M4 — OCR** fallback layer for scanned PDFs + cache
+- **M2 — visual diff** ✅ page-render comparison, tolerance, registration
+- **M3 — DOCX/XLSX** ✅ structural diff, table-cell alignment
+- **M4 — OCR** ✅ fallback layer for scanned PDFs + cache
 - **M5 — distribution** PyInstaller/Tauri packaging, auto-update, licensing
 
 ## Tests
@@ -203,13 +272,19 @@ These would require extra licensing for a closed-source commercial release.
 pytest
 ```
 
-Test fixtures generate PDFs at runtime (`tests/pdfgen.py`); no binaries are kept
-in the repository. Files under `samples/` are there for manual testing.
+Test fixtures generate the documents at runtime (`tests/pdfgen.py`,
+`tests/docxgen.py`, `tests/xlsxgen.py`); no binaries are kept in the repository.
+Files under `samples/` are there for manual testing.
 
 ## Known limitations
 
-- DOCX/XLSX are not supported yet → those files are read as plain text and give
-  meaningless results.
-- Scanned PDFs (no text layer) have no text to compare.
+- DOCX/XLSX are read without layout information: page breaks come from explicit
+  breaks only, merged cells keep their top-left value, and comments, tracked
+  change markup and embedded objects are ignored.
+- Scanned PDFs need `--ocr` (or the UI checkbox) and a Tesseract installation.
+  Without OCR they have no text to compare; the visual layer still reports which
+  regions changed, but not what they say. OCR is only as good as the scan, and
+  handwriting is not supported.
 - Line-based alignment can be noisy when paragraphs are reflowed.
-- Tables are read as single lines of text (no column alignment).
+- Borderless (whitespace-aligned) PDF tables are read as lines of text; ruled PDF,
+  DOCX and XLSX tables get full row and cell alignment.

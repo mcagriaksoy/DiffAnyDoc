@@ -18,6 +18,7 @@ from pathlib import Path
 from . import __version__
 from .core.adapters import AdapterError, adapters, load, supported_extensions
 from .core.diff import DiffOptions, compare, supported_formats
+from .core.ocr import OcrError
 from .core.report.html import render_html, write_html_report
 from .core.report.json import result_to_dict
 from .i18n import available_languages, resolve_language, t
@@ -54,6 +55,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     diff.add_argument(
         "--full", action="store_true", help="do not fold unchanged lines"
+    )
+    diff.add_argument(
+        "--visual",
+        action="store_true",
+        help="also compare rendered PDF pages pixel by pixel",
+    )
+    diff.add_argument(
+        "--ocr",
+        action="store_true",
+        help="OCR pages without a text layer (scanned PDFs and images; uses RapidOCR)",
+    )
+    diff.add_argument(
+        "--ocr-lang",
+        default="eng",
+        metavar="LANG",
+        help="OCR language(s), e.g. eng or tur+eng (eng)",
+    )
+    diff.add_argument(
+        "--format-diff",
+        action="store_true",
+        help="also report formatting/style differences (font, size, bold, italic)",
+    )
+    diff.add_argument(
+        "--no-fast-check",
+        action="store_true",
+        help="always parse both files even when their SHA-256 checksums match",
     )
     diff.add_argument(
         "--fail-on-diff",
@@ -110,7 +137,7 @@ def main(argv: list[str] | None = None) -> int:
             return _select(args, language)
         if args.command == "integrate":
             return _integrate(args, language)
-    except (AdapterError, FileNotFoundError) as exc:
+    except (AdapterError, FileNotFoundError, OcrError) as exc:
         print(t("cli.error", language, message=exc), file=sys.stderr)
         return 2
     return 0
@@ -129,7 +156,12 @@ def _diff(args: argparse.Namespace, language: str) -> int:
     options = DiffOptions(
         context=args.context,
         case_sensitive=not args.ignore_case,
+        compare_formatting=args.format_diff,
         fold_equal=not args.full,
+        fast_check=not args.no_fast_check,
+        visual=args.visual,
+        ocr=args.ocr,
+        ocr_language=args.ocr_lang,
     )
     result = compare(args.left, args.right, options)
     fmt = args.format or _infer_format(args.output)
@@ -187,6 +219,35 @@ def _render_text(result, language: str) -> str:
         )
     )
     lines.append("")
+
+    ocr = result.ocr
+    if ocr is not None and ocr.pages:
+        lines.append(
+            t(
+                "cli.ocr",
+                language,
+                pages=ocr.pages,
+                cached=ocr.cached,
+                words=ocr.words,
+                lang=ocr.language,
+            )
+        )
+        lines.append("")
+
+    visual = result.visual
+    if visual is not None and visual.compared:
+        lines.append(
+            t(
+                "cli.visual",
+                language,
+                pct=f"{visual.similarity * 100:.1f}",
+                changed=visual.changed_pages,
+                pages=visual.compared,
+                regions=visual.region_count,
+            )
+        )
+        lines.append("")
+
     if result.identical:
         lines.append(t("cli.identical", language))
         return "\n".join(lines) + "\n"
@@ -204,10 +265,11 @@ def _render_text(result, language: str) -> str:
 
 def _info(args: argparse.Namespace) -> int:
     document = load(args.file)
-    adapter = next(a for a in adapters() if a.name == document.kind)
+    adapter = next((a for a in adapters() if a.name == document.kind), None)
+    adapter_name = adapter.name if adapter else document.kind
     payload = {
         "path": str(document.path),
-        "adapter": adapter.name,
+        "adapter": adapter_name,
         "pages": document.page_count,
         "blocks": sum(len(page.blocks) for page in document.pages),
         "characters": document.char_count,
