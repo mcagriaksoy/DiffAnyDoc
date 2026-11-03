@@ -172,7 +172,9 @@ class DesktopApi:
             dialog_type,
             allow_multiple=False,
             file_types=(
-                f"{t('dialog.documents', lang)} (*.pdf;*.txt;*.md;*.csv;*.json;*.docx;*.xlsx)",
+                f"{t('dialog.documents', lang)} "
+                "(*.pdf;*.docx;*.docm;*.xlsx;*.xlsm;*.csv;*.tsv;*.txt;*.md;*.json;*.xml)",
+                f"{t('dialog.images', lang)} (*.png;*.jpg;*.jpeg;*.tif;*.tiff;*.bmp;*.webp)",
                 f"{t('dialog.allFiles', lang)} (*.*)",
             ),
         )

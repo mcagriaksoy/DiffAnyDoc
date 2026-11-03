@@ -124,6 +124,19 @@ No marketing copy, slogan or "hero" headline.
   colour family, one at 10% and the other at 20% alpha.
 - No background for unchanged lines.
 - Line numbers and page labels are dim and not selectable.
+- Table rows render their cells in a thin grid inside the row; a changed cell
+  gets a 2 px warning-colour underline, its words the usual inline highlight.
+- Automatic numbering ("4.2.") is dim: it is shown, not compared.
+
+### Page overlays
+- Changed words: filled box in the diff colour. The line a changed word sits
+  on: 1 px dashed outline only (context, not a second highlight).
+- Visual (pixel) regions: 2 px dashed **accent** outline, never filled, so they
+  read as "look here" on top of the word boxes.
+- The Overlay image is content, not chrome: it always uses the fixed pair
+  red `#e01b24` (only in A) / green `#26a269` (only in B) on grey, in both
+  themes, with a legend above it.
+- Boxes are buttons: clicking one opens the line in the text view.
 
 ## 8. Platform alignment
 

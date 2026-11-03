@@ -77,3 +77,14 @@ def strings(language: str | None = None) -> dict[str, str]:
     merged = dict(catalogue(DEFAULT_LANGUAGE))
     merged.update(catalogue(lang))
     return merged
+
+
+def warning_text(warning: dict[str, Any], language: str | None = None) -> str:
+    """Human text for a document warning such as ``{"code": "ocr_used", ...}``."""
+    code = str(warning.get("code", ""))
+    pages = list(warning.get("pages") or [])
+    values = {k: v for k, v in warning.items() if k not in ("code", "pages")}
+    shown = ", ".join(str(int(p) + 1) for p in pages[:12])
+    values["pages"] = shown + (" …" if len(pages) > 12 else "")
+    values["n"] = len(pages)
+    return translate(f"warning.{code}", language, **values)

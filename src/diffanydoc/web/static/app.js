@@ -10,6 +10,10 @@ const state = {
   changes: [],
   changeIndex: -1,
   comparing: false,
+  /* Visual comparison per page pair: { [pairIndex]: page }, filled lazily. */
+  visual: {},
+  visualLoading: null,
+  capabilities: null,
 };
 
 /* Present when the page runs inside the native pywebview shell. */
@@ -106,6 +110,7 @@ async function loadLanguage(requested) {
   applyTranslations();
   renderLanguageMenu();
   renderVersion();
+  renderOcrNote();
 
   if (state.comparison) renderResult();
 }
@@ -212,6 +217,8 @@ function fillUpdates() {
   if (node && state.version) {
     node.textContent = i18n.t("updates.current", { version: state.version });
   }
+  $("#updates-status").textContent = i18n.t("updates.privacy");
+  $("#updates-link").hidden = true;
 }
 
 let licenseLoaded = false;
@@ -258,6 +265,12 @@ function setupDialogs() {
     closeMenus();
     fillUpdates();
     $("#updates-dialog").showModal();
+  });
+  $("#updates-check").addEventListener("click", checkUpdates);
+  $("#updates-link").addEventListener("click", (event) => {
+    if (!desktop.available) return;
+    event.preventDefault();
+    window.pywebview.api.open_external($("#updates-link").href);
   });
 }
 
@@ -413,6 +426,9 @@ async function runComparison() {
     let response;
     const caseSensitive = !$("#opt-case").checked;
     const collapseWhitespace = $("#opt-space").checked;
+    const reflow = $("#opt-reflow").checked;
+    const formatting = $("#opt-format").checked;
+    const ocrMode = $("#opt-ocr").value;
     if (desktop.available && desktop.paths.left && desktop.paths.right) {
       response = await fetch("/api/compare-paths", {
         method: "POST",
@@ -422,6 +438,9 @@ async function runComparison() {
           right: desktop.paths.right,
           case_sensitive: caseSensitive,
           collapse_whitespace: collapseWhitespace,
+          reflow,
+          compare_formatting: formatting,
+          ocr: ocrMode,
           fold_equal: false,
           context: 3,
         }),
@@ -432,12 +451,15 @@ async function runComparison() {
       form.append("right", state.files.right);
       form.append("case_sensitive", String(caseSensitive));
       form.append("collapse_whitespace", String(collapseWhitespace));
+      form.append("reflow", String(reflow));
+      form.append("compare_formatting", String(formatting));
+      form.append("ocr_mode", ocrMode);
       form.append("fold_equal", "false");
       form.append("context", "3");
       response = await fetch("/api/compare", { method: "POST", body: form });
     }
     if (!response.ok) throw new Error(await readError(response));
-    state.comparison = await response.json();
+    setComparison(await response.json());
     renderResult();
   } catch (error) {
     showError(error.message || i18n.t("error.generic"));
@@ -459,6 +481,38 @@ async function readError(response) {
 }
 
 /* ---------- result shell ---------- */
+function setComparison(data) {
+  state.comparison = data;
+  state.visual = {};
+  state.visualLoading = null;
+  for (const page of data.visual || []) state.visual[page.pair] = page;
+  // Images and scans: the pixel comparison is the main signal, show it.
+  $("#show-visual").checked = Array.isArray(data.visual);
+}
+
+function bothRenderable(data) {
+  return Boolean(data.renderable.left && data.renderable.right);
+}
+
+function viewUrl(data) {
+  const view = state.mode !== "text" ? `&view=${state.mode}` : "";
+  return `${location.pathname}?id=${data.id}${view}&lang=${i18n.lang}`;
+}
+
+function kindLabel(side) {
+  const info = state.comparison[side];
+  const kind = info.kind;
+  const meta = info.meta || {};
+  if (kind === "xlsx") return `${kind} · ${i18n.t("meta.sheets", { n: meta.sheets || info.pages })}`;
+  if (kind === "docx") {
+    const parts = [kind];
+    if (meta.tables) parts.push(i18n.t("meta.tables", { n: meta.tables }));
+    return parts.join(" · ");
+  }
+  if (kind === "text") return meta.table ? `${kind} · ${i18n.t("meta.table")}` : kind;
+  return `${kind} · ${i18n.t("meta.pages", { n: info.pages })}`;
+}
+
 function renderResult() {
   const data = state.comparison;
   $("#upload-view").hidden = true;
@@ -467,29 +521,55 @@ function renderResult() {
 
   for (const node of $$("[data-result-only]")) node.hidden = false;
 
-  if (data.id) {
-    const view = state.mode === "pages" ? "&view=pages" : "";
-    const lang = `&lang=${i18n.lang}`;
-    history.replaceState(null, "", `${location.pathname}?id=${data.id}${view}${lang}`);
-  }
+  if (data.id) history.replaceState(null, "", viewUrl(data));
 
   $("#name-left").textContent = data.left.name;
   $("#name-right").textContent = data.right.name;
-  $("#meta-left").textContent = `${data.left.kind} · ${i18n.t("meta.pages", { n: data.left.pages })}`;
-  $("#meta-right").textContent = `${data.right.kind} · ${i18n.t("meta.pages", { n: data.right.pages })}`;
+  $("#meta-left").textContent = kindLabel("left");
+  $("#meta-right").textContent = kindLabel("right");
 
   renderStats(data.stats);
+  renderWarnings(data);
 
   const canRender = data.renderable.left || data.renderable.right;
+  const canOverlay = bothRenderable(data);
   $("#tab-pages").disabled = !canRender;
+  $("#tab-overlay").disabled = !canOverlay;
   if (!canRender && state.mode === "pages") state.mode = "text";
+  if (!canOverlay && state.mode === "overlay") state.mode = "text";
 
   $("#export").href = `/api/compare/${data.id}/report?lang=${i18n.lang}`;
 
   renderText();
   renderPages();
-  setMode(canRender ? state.mode : "text");
+  $("#overlay-view").replaceChildren();
+  setMode(state.mode);
   window.scrollTo({ top: 0 });
+}
+
+function warningMessage(warning) {
+  const pages = (warning.pages || []).map((p) => p + 1);
+  const values = { ...warning, n: pages.length, pages: pages.slice(0, 12).join(", ") };
+  return i18n.t(`warning.${warning.code}`, values);
+}
+
+function renderWarnings(data) {
+  const node = $("#warnings");
+  const items = [];
+  if (data.byte_identical) items.push(el("p", { text: i18n.t("result.byteIdentical") }));
+  for (const side of ["left", "right"]) {
+    for (const warning of data[side].warnings || []) {
+      items.push(
+        el("p", {}, [
+          el("span", { class: "side-badge", text: side === "left" ? "A" : "B" }),
+          " ",
+          warningMessage(warning),
+        ])
+      );
+    }
+  }
+  node.replaceChildren(...items);
+  node.hidden = items.length === 0;
 }
 
 function renderStats(stats) {
@@ -511,10 +591,48 @@ function renderStats(stats) {
       ` ${i18n.t("stats.changed")}`,
     ]),
   ];
+  if (stats.formatting) {
+    nodes.push(
+      el("span", { class: "stat mod" }, [
+        el("b", { text: `*${stats.formatting}` }),
+        ` ${i18n.t("stats.formatting")}`,
+      ])
+    );
+  }
+  const visualCount = visualRegionCount();
+  if (visualCount !== null) {
+    nodes.push(
+      el("span", { class: `stat${visualCount ? " mod" : ""}` }, [
+        el("b", { text: `◇${visualCount}` }),
+        ` ${i18n.t("stats.visual")}`,
+      ])
+    );
+  }
   $("#stats").replaceChildren(...nodes);
 }
 
+/* Number of visual regions, or null while the pixel comparison has not run
+   for every page pair. */
+function visualRegionCount() {
+  const data = state.comparison;
+  if (!data || !bothRenderable(data)) return null;
+  const pages = Object.values(state.visual);
+  if (pages.length < data.page_map.length) return null;
+  return pages.reduce((total, page) => total + page.regions.length, 0);
+}
+
 /* ---------- text view ---------- */
+const ROW_CLASS = { insert: "add", delete: "del", replace: "mod", equal: "equal" };
+
+/* "section:footnotes" -> translated section name; sheet names as they are. */
+function pageName(side, index) {
+  const pages = (state.comparison.pages && state.comparison.pages[side]) || [];
+  const label = pages[index] && pages[index].label;
+  if (label && label.startsWith("section:")) return i18n.t(`section.${label.slice(8)}`);
+  if (label) return label;
+  return i18n.t("page.label", { n: index + 1 });
+}
+
 function renderText() {
   const data = state.comparison;
   const container = $("#text-view");
@@ -529,70 +647,107 @@ function renderText() {
 
   const rows = el("div", { class: "rows" });
   if (!data.rows.length) {
+    const scanned = ["left", "right"].some((side) =>
+      (data[side].warnings || []).some((w) => w.code === "ocr_unavailable" || w.code === "no_text_layer")
+    );
     rows.append(
       el("div", { class: "empty-state" }, [
         i18n.t("empty.noText"),
         " ",
-        i18n.t("empty.ocrHint"),
+        scanned ? i18n.t("empty.ocrHint") : "",
+        bothRenderable(data) ? ` ${i18n.t("empty.visualHint")}` : "",
       ])
     );
   }
   const lastPage = { left: -1, right: -1 };
-  for (const row of data.rows) {
+  data.rows.forEach((row, index) => {
     if (row.hidden_before) {
       rows.append(
         el("div", { class: "gap", text: `⋯ ${i18n.t("gap.hidden", { n: row.hidden_before })} ⋯` })
       );
     }
-    if (!row.left && !row.right) continue;
-    rows.append(
-      el(
-        "div",
-        {
-          class: `row ${
-            row.kind === "insert"
-              ? "add"
-              : row.kind === "delete"
-                ? "del"
-                : row.kind === "replace"
-                  ? "mod"
-                  : "equal"
-          }`,
-        },
-        [
-          buildCell(row.left, row.left_inline, lastPage.left),
-          buildCell(row.right, row.right_inline, lastPage.right),
-        ]
-      )
-    );
+    if (!row.left && !row.right) return;
+    const kind = ROW_CLASS[row.kind] + (row.format_changes ? " fmt" : "");
+    const node = el("div", { class: `row ${kind}`, "data-row": String(index) }, [
+      buildCell(row, "left", lastPage.left),
+      buildCell(row, "right", lastPage.right),
+    ]);
+    rows.append(node);
     if (row.left) lastPage.left = row.left.page;
     if (row.right) lastPage.right = row.right.page;
-  }
+  });
   container.append(rows);
 }
 
-function buildCell(line, inline, previousPage = -1) {
-  if (!line) return el("div", { class: "cell" });
-  const text = el("span", { class: "text" });
-  if (inline && inline.length) {
-    for (const segment of inline) {
-      if (segment.kind === "equal") text.append(document.createTextNode(segment.text));
-      else
-        text.append(
-          el("span", {
-            class: segment.kind === "delete" ? "seg-del" : "seg-ins",
-            text: segment.text,
-          })
-        );
+function appendSegments(target, segments) {
+  for (const segment of segments) {
+    if (segment.kind === "equal") target.append(document.createTextNode(segment.text));
+    else
+      target.append(
+        el("span", {
+          class: segment.kind === "delete" ? "seg-del" : "seg-ins",
+          text: segment.text,
+        })
+      );
+  }
+}
+
+/* Table rows: one box per cell; changed cells carry the inline diff. */
+function buildCells(row, side, line) {
+  const wrap = el("span", { class: "text cells" });
+  if (row.cells) {
+    for (const cell of row.cells) {
+      const value = cell[side];
+      if (value === null || value === undefined) continue;
+      const column = cell[`${side}_column`];
+      const changed = cell.kind !== "equal";
+      const node = el("span", {
+        class: `tcell${changed ? ` ${ROW_CLASS[cell.kind]}` : ""}`,
+        title: column || null,
+      });
+      const inline = cell[`${side}_inline`];
+      if (inline) appendSegments(node, inline);
+      else if (changed) node.append(el("span", { class: side === "left" ? "seg-del" : "seg-ins", text: value }));
+      else node.textContent = value;
+      if (!value) node.classList.add("empty");
+      wrap.append(node);
     }
+    return wrap;
+  }
+  const columns = (line.style && line.style.columns) || [];
+  line.cells.forEach((value, index) => {
+    wrap.append(
+      el("span", { class: `tcell${value ? "" : " empty"}`, title: columns[index] || null, text: value })
+    );
+  });
+  return wrap;
+}
+
+function buildCell(row, side, previousPage = -1) {
+  const line = row[side];
+  const inline = row[`${side}_inline`];
+  if (!line) return el("div", { class: "cell" });
+
+  let text;
+  if (line.cells) {
+    text = buildCells(row, side, line);
   } else {
-    text.textContent = line.text;
+    text = el("span", { class: "text" });
+    const style = line.style || {};
+    if (style.list) text.append(el("span", { class: "list-label", text: `${style.list} ` }));
+    if (style.heading !== undefined && style.heading !== null) text.classList.add("heading");
+    if (inline && inline.length) appendSegments(text, inline);
+    else text.append(document.createTextNode(line.text));
+  }
+  if (row.format_changes && side === "right") {
+    const names = row.format_changes.map((name) => i18n.t(`format.${name}`)).join(", ");
+    text.append(el("span", { class: "fmt-note", text: ` ${i18n.t("format.changed", { changes: names })}` }));
   }
   return el("div", { class: "cell" }, [
-    el("span", { class: "gutter", text: String(line.number) }),
+    el("span", { class: "gutter", text: line.label || String(line.number) }),
     el("span", {
       class: "page-tag",
-      text: line.page === previousPage ? "" : i18n.t("page.label", { n: line.page + 1 }),
+      text: line.page === previousPage ? "" : pageName(side, line.page),
     }),
     text,
   ]);
@@ -603,18 +758,42 @@ function renderPages() {
   const data = state.comparison;
   const container = $("#page-view");
   container.replaceChildren();
-
-  for (const pair of data.page_map) {
+  data.page_map.forEach((pair, pairIndex) => {
     container.append(
-      el("div", { class: "page-row" }, [
-        buildPageCard("left", pair.left),
-        buildPageCard("right", pair.right),
+      el("div", { class: "page-row", "data-pair": String(pairIndex) }, [
+        buildPageCard("left", pair.left, pairIndex),
+        buildPageCard("right", pair.right, pairIndex),
       ])
     );
-  }
+  });
+  if (showVisual()) drawVisualRegions();
 }
 
-function buildPageCard(side, index) {
+function pageImage(side, index, name) {
+  return el("img", {
+    src: `/api/compare/${state.comparison.id}/page/${side}/${index}.png?dpi=120`,
+    alt: `${name} ${pageName(side, index)}`,
+    loading: "lazy",
+  });
+}
+
+function percentBox(box, size) {
+  const width = Math.max(box.x1 - box.x0, 1);
+  const height = Math.max(box.bottom - box.top, 1);
+  return (
+    `left:${(box.x0 / size.width) * 100}%;` +
+    `top:${(box.top / size.height) * 100}%;` +
+    `width:${(width / size.width) * 100}%;` +
+    `height:${(height / size.height) * 100}%`
+  );
+}
+
+function pageSize(side, index) {
+  const page = state.comparison.pages[side][index];
+  return page && page.width ? page : { width: 595, height: 842 };
+}
+
+function buildPageCard(side, index, pairIndex) {
   const data = state.comparison;
   const name = side === "left" ? data.left.name : data.right.name;
   const renderable = side === "left" ? data.renderable.left : data.renderable.right;
@@ -622,7 +801,7 @@ function buildPageCard(side, index) {
   const card = el("div", { class: "page-card" }, [
     el("div", { class: "page-label" }, [
       el("span", { text: `${side === "left" ? "A" : "B"} — ${name}` }),
-      el("span", { text: index === null ? i18n.t("page.none") : i18n.t("page.label", { n: index + 1 }) }),
+      el("span", { text: index === null ? i18n.t("page.none") : pageName(side, index) }),
     ]),
   ]);
 
@@ -631,37 +810,164 @@ function buildPageCard(side, index) {
     return card;
   }
 
-  const size = data.pages[side][index] || { width: 595, height: 842 };
-  const canvas = el("div", { class: "page-canvas" });
-  canvas.append(
-    el("img", {
-      src: `/api/compare/${data.id}/page/${side}/${index}.png?dpi=120`,
-      alt: `${name} ${i18n.t("page.label", { n: index + 1 })}`,
-      loading: "lazy",
-    })
-  );
+  const size = pageSize(side, index);
+  const canvas = el("div", { class: "page-canvas", "data-side": side, "data-pair": String(pairIndex) });
+  canvas.append(pageImage(side, index, name));
 
   const rects = (data.rects[side] && data.rects[side][String(index)]) || [];
   for (const rect of rects) {
-    const width = Math.max(rect.x1 - rect.x0, 1);
-    const height = Math.max(rect.bottom - rect.top, 1);
-    canvas.append(
-      el("div", {
-        class: `rect ${
-          rect.kind === "insert" ? "insert" : rect.kind === "delete" ? "delete" : "replace"
-        }`,
-        title: `${rect.kind}: ${rect.text}`,
-        style:
-          `left:${(rect.x0 / size.width) * 100}%;` +
-          `top:${(rect.top / size.height) * 100}%;` +
-          `width:${(width / size.width) * 100}%;` +
-          `height:${(height / size.height) * 100}%`,
-      })
-    );
+    // Line boxes of paired rows are a faint hint; the changed words carry
+    // the colour. Whole inserted/removed lines are coloured as a whole.
+    const faint = rect.level === "line" && (rect.kind === "replace" || rect.kind === "format");
+    const node = el("button", {
+      type: "button",
+      class: `rect ${rect.kind}${faint ? " faint" : ""}${rect.level === "word" ? " word" : ""}`,
+      title: `${i18n.t(`kind.${rect.kind}`)}: ${rect.text}`,
+      "aria-label": `${i18n.t(`kind.${rect.kind}`)}: ${rect.text}`,
+      style: percentBox(rect, size),
+    });
+    node.addEventListener("click", () => jumpToRow(rect.row));
+    canvas.append(node);
   }
 
   card.append(canvas);
   return card;
+}
+
+/* From a box on the page to its line in the text view. */
+function jumpToRow(rowIndex) {
+  setMode("text");
+  const node = document.querySelector(`#text-view .row[data-row="${rowIndex}"]`);
+  if (!node) return;
+  const index = state.changes.indexOf(node);
+  if (index >= 0) setCurrentChange(index);
+  else node.scrollIntoView({ block: "center" });
+}
+
+/* ---------- visual comparison ---------- */
+function showVisual() {
+  return $("#show-visual").checked && state.comparison && bothRenderable(state.comparison);
+}
+
+async function loadVisual() {
+  const data = state.comparison;
+  if (!data || !bothRenderable(data)) return;
+  if (Object.keys(state.visual).length >= data.page_map.length) return;
+  if (state.visualLoading) return state.visualLoading;
+  setBusy(i18n.t("visual.loading"));
+  state.visualLoading = fetch(`/api/compare/${data.id}/visual`)
+    .then(async (response) => {
+      if (!response.ok) throw new Error(await readError(response));
+      const payload = await response.json();
+      if (state.comparison !== data) return;
+      for (const page of payload.pages) state.visual[page.pair] = page;
+      renderStats(data.stats);
+    })
+    .catch((error) => toast(error.message || i18n.t("error.generic")))
+    .finally(() => {
+      state.visualLoading = null;
+      setBusy(null);
+    });
+  return state.visualLoading;
+}
+
+function regionNodes(page, side, size) {
+  return page.regions.map((region) =>
+    el("div", {
+      class: `vregion ${region.kind}`,
+      title: i18n.t(`kind.${region.kind}`),
+      style: percentBox(region, size),
+    })
+  );
+}
+
+async function drawVisualRegions() {
+  for (const node of $$("#page-view .vregion")) node.remove();
+  if (!showVisual()) return;
+  await loadVisual();
+  if (!showVisual()) return;
+  for (const canvas of $$("#page-view .page-canvas[data-pair]")) {
+    const pairIndex = Number(canvas.dataset.pair);
+    const page = state.visual[pairIndex];
+    const pair = state.comparison.page_map[pairIndex];
+    if (!page || pair.left === null || pair.right === null) continue;
+    const side = canvas.dataset.side;
+    // Regions are in left-page units; the right page is registered onto it.
+    const size = pageSize("left", pair.left);
+    canvas.append(...regionNodes(page, side, size));
+  }
+  collectChanges();
+}
+
+/* ---------- overlay view ---------- */
+async function renderOverlay() {
+  const data = state.comparison;
+  const container = $("#overlay-view");
+  if (container.childElementCount) return;
+  container.append(el("p", { class: "note", text: i18n.t("visual.loading") }));
+  await loadVisual();
+  if (state.comparison !== data) return;
+  container.replaceChildren(
+    el("p", { class: "note legend" }, [
+      el("span", { class: "swatch del" }), ` ${i18n.t("overlay.removed")}  `,
+      el("span", { class: "swatch add" }), ` ${i18n.t("overlay.added")}  `,
+      el("span", { class: "swatch same" }), ` ${i18n.t("overlay.same")}`,
+    ])
+  );
+  data.page_map.forEach((pair, pairIndex) => {
+    const page = state.visual[pairIndex];
+    const label = `A ${pair.left === null ? "—" : pageName("left", pair.left)} ↔ B ${
+      pair.right === null ? "—" : pageName("right", pair.right)
+    }`;
+    const count = page ? page.regions.length : 0;
+    const summary = page && count
+      ? i18n.t("overlay.regions", { n: count, pct: (page.changed_ratio * 100).toFixed(1) })
+      : i18n.t("overlay.identical");
+    const card = el("div", { class: "page-card overlay-card", "data-pair": String(pairIndex) }, [
+      el("div", { class: "page-label" }, [el("span", { text: label }), el("span", { text: summary })]),
+    ]);
+    if (pair.left === null || pair.right === null) {
+      card.append(
+        el("div", {
+          class: "page-canvas missing",
+          text: i18n.t(pair.left === null ? "overlay.onlyRight" : "overlay.onlyLeft"),
+        })
+      );
+    } else {
+      const canvas = el("div", { class: "page-canvas" }, [
+        el("img", {
+          src: `/api/compare/${data.id}/overlay/${pairIndex}.png`,
+          alt: label,
+          loading: "lazy",
+        }),
+      ]);
+      if (page) canvas.append(...regionNodes(page, "left", pageSize("left", pair.left)));
+      card.append(canvas);
+    }
+    if (count || pair.left === null || pair.right === null) card.classList.add("changed");
+    container.append(card);
+  });
+  collectChanges();
+}
+
+/* ---------- busy note and toast ---------- */
+function setBusy(message) {
+  let node = $("#busy");
+  if (!message) {
+    if (node) node.remove();
+    return;
+  }
+  if (!node) {
+    node = el("div", { id: "busy", class: "toast", role: "status" });
+    document.body.append(node);
+  }
+  node.replaceChildren(el("span", { class: "spinner" }), ` ${message}`);
+}
+
+function toast(message) {
+  const node = el("div", { class: "toast", role: "status", text: message });
+  document.body.append(node);
+  setTimeout(() => node.remove(), 4000);
 }
 
 /* ---------- change navigation (n / p, F3 / Shift+F3) ---------- */
@@ -673,11 +979,15 @@ function collectChanges() {
     return;
   }
   if (state.mode === "pages") {
-    state.changes = $$("#page-view .page-row").filter((row) => row.querySelector(".rect"));
-  } else {
-    state.changes = $$("#text-view .row.add, #text-view .row.del, #text-view .row.mod").filter(
-      (row) => row.offsetParent !== null
+    state.changes = $$("#page-view .page-row").filter((row) =>
+      row.querySelector(".rect, .vregion")
     );
+  } else if (state.mode === "overlay") {
+    state.changes = $$("#overlay-view .overlay-card.changed");
+  } else {
+    state.changes = $$(
+      "#text-view .row.add, #text-view .row.del, #text-view .row.mod, #text-view .row.fmt"
+    ).filter((row) => row.offsetParent !== null);
   }
   state.changeIndex = -1;
   updateChangeNav();
@@ -722,28 +1032,30 @@ function setMode(mode) {
   $$(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.mode === mode));
   $("#text-view").hidden = mode !== "text";
   $("#page-view").hidden = mode !== "pages";
+  $("#overlay-view").hidden = mode !== "overlay";
   $("#only-diff-wrap").hidden = mode !== "text";
-  $("#zoom-wrap").hidden = mode !== "pages";
+  $("#visual-wrap").hidden = mode !== "pages" || !bothRenderable(state.comparison);
+  $("#zoom-wrap").hidden = mode === "text";
   applyZoom();
   collectChanges();
+  if (mode === "overlay") renderOverlay();
+  if (mode === "pages" && showVisual()) drawVisualRegions();
 
   if (state.comparison && state.comparison.id) {
-    const view = mode === "pages" ? "&view=pages" : "";
-    history.replaceState(
-      null,
-      "",
-      `${location.pathname}?id=${state.comparison.id}${view}&lang=${i18n.lang}`
-    );
+    history.replaceState(null, "", viewUrl(state.comparison));
   }
 }
 
 function applyZoom() {
-  $("#page-view").style.maxWidth = `${1500 * state.zoom}px`;
+  for (const view of [$("#page-view"), $("#overlay-view")]) {
+    view.style.maxWidth = `${(view.id === "overlay-view" ? 900 : 1500) * state.zoom}px`;
+  }
   $("#zoom-label").textContent = `%${Math.round(state.zoom * 100)}`;
 }
 
 function showUploadView() {
   state.comparison = null;
+  state.visual = {};
   state.changes = [];
   state.changeIndex = -1;
   history.replaceState(null, "", location.pathname);
@@ -751,9 +1063,11 @@ function showUploadView() {
   $("#upload-view").hidden = false;
   $("#view-tabs").hidden = true;
   $("#only-diff-wrap").hidden = true;
+  $("#visual-wrap").hidden = true;
   $("#zoom-wrap").hidden = true;
   $("#change-nav").hidden = true;
   $("#stats").replaceChildren();
+  $("#overlay-view").replaceChildren();
   for (const node of $$("[data-result-only]")) node.hidden = true;
   closeMenus();
   hideError();
@@ -777,6 +1091,58 @@ function reset() {
   updateCompareButton();
 }
 
+/* ---------- capabilities (OCR engine) ---------- */
+async function loadCapabilities() {
+  try {
+    const response = await fetch("/api/capabilities");
+    if (!response.ok) return;
+    state.capabilities = await response.json();
+  } catch (_) {
+    return;
+  }
+  renderOcrNote();
+}
+
+function renderOcrNote() {
+  const node = $("#ocr-note");
+  const caps = state.capabilities;
+  if (!node || !caps) return;
+  node.hidden = Boolean(caps.ocr && caps.ocr.available);
+  node.textContent = i18n.t("opt.ocrMissing");
+}
+
+/* ---------- update check ---------- */
+async function checkUpdates() {
+  const status = $("#updates-status");
+  const link = $("#updates-link");
+  const button = $("#updates-check");
+  button.disabled = true;
+  link.hidden = true;
+  status.textContent = i18n.t("updates.checking");
+  try {
+    const response = await fetch("/api/updates");
+    if (!response.ok) throw new Error(await readError(response));
+    const info = await response.json();
+    if (info.status === "update") {
+      status.textContent = i18n.t("updates.available", { version: info.latest, current: info.current });
+      link.href = info.url;
+      link.hidden = false;
+    } else if (info.status === "latest") {
+      status.textContent = i18n.t("updates.latest", { version: info.current });
+    } else if (info.status === "no_releases") {
+      status.textContent = i18n.t("updates.noReleases");
+      link.href = info.url;
+      link.hidden = false;
+    } else {
+      status.textContent = i18n.t("updates.failed", { message: info.message || "" });
+    }
+  } catch (error) {
+    status.textContent = i18n.t("updates.failed", { message: error.message || "" });
+  } finally {
+    button.disabled = false;
+  }
+}
+
 /* ---------- deep link: /?id=<comparison>&view=pages ---------- */
 async function restoreFromUrl() {
   const params = new URLSearchParams(location.search);
@@ -785,8 +1151,9 @@ async function restoreFromUrl() {
   try {
     const response = await fetch(`/api/compare/${id}`);
     if (!response.ok) return;
-    state.comparison = await response.json();
-    state.mode = params.get("view") === "pages" ? "pages" : "text";
+    setComparison(await response.json());
+    const view = params.get("view");
+    state.mode = view === "pages" || view === "overlay" ? view : "text";
     renderResult();
   } catch (_) {
     /* stale link: fall back to the upload view */
@@ -845,6 +1212,7 @@ setupDropZones();
 setupMenus();
 setupDialogs();
 loadTheme();
+loadCapabilities();
 $("#compare").addEventListener("click", runComparison);
 $("#restart").addEventListener("click", reset);
 
@@ -853,6 +1221,10 @@ $$(".tab").forEach((tab) =>
     if (!tab.disabled) setMode(tab.dataset.mode);
   })
 );
+
+$("#show-visual").addEventListener("change", () => {
+  drawVisualRegions();
+});
 
 $("#only-diff").addEventListener("change", (event) => {
   document.body.classList.toggle("only-diff", event.target.checked);

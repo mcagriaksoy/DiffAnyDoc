@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=DiffAnyDoc
+GenericName=Document Comparison
+GenericName[tr]=Belge Karşılaştırma
+Comment=Compare PDF, Word, Excel, image and text documents side by side
+Comment[tr]=PDF, Word, Excel, görsel ve metin belgelerini yan yana karşılaştırın
+Exec=DiffAnyDoc %F
+Icon=diffanydoc
+Terminal=false
+Categories=Office;Utility;
+MimeType=application/pdf;application/vnd.openxmlformats-officedocument.wordprocessingml.document;application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;text/csv;text/plain;image/png;image/jpeg;image/tiff;
+Keywords=diff;compare;pdf;docx;xlsx;contract;karşılaştır;
+StartupWMClass=DiffAnyDoc

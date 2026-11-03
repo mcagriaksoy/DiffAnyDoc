@@ -23,6 +23,7 @@
     <div class="tabs" id="view-tabs" role="tablist" hidden>
       <button class="tab active" data-mode="text" role="tab" data-i18n="tab.text">Text</button>
       <button class="tab" data-mode="pages" role="tab" id="tab-pages" data-i18n="tab.pages">Pages</button>
+      <button class="tab" data-mode="overlay" role="tab" id="tab-overlay" data-i18n="tab.overlay">Overlay</button>
     </div>
   </div>
 
@@ -30,6 +31,11 @@
     <label class="switch" id="only-diff-wrap" hidden>
       <input type="checkbox" id="only-diff">
       <span data-i18n="filter.onlyDiff">Differences only</span>
+    </label>
+
+    <label class="switch" id="visual-wrap" hidden>
+      <input type="checkbox" id="show-visual">
+      <span data-i18n="filter.visual">Visual differences</span>
     </label>
 
     <div class="zoom" id="zoom-wrap" hidden>
@@ -117,14 +123,25 @@
     <div class="options">
       <label class="check"><input type="checkbox" id="opt-case"> <span data-i18n="opt.ignoreCase">Ignore letter case</span></label>
       <label class="check"><input type="checkbox" id="opt-space" checked> <span data-i18n="opt.ignoreWhitespace">Ignore extra whitespace</span></label>
+      <label class="check" data-i18n-title="opt.reflowHint"><input type="checkbox" id="opt-reflow" checked> <span data-i18n="opt.reflow">Join wrapped lines (PDF)</span></label>
+      <label class="check"><input type="checkbox" id="opt-format"> <span data-i18n="opt.formatting">Report formatting changes</span></label>
+      <label class="check select-wrap">
+        <span data-i18n="opt.ocr">Read scans (OCR)</span>
+        <select id="opt-ocr">
+          <option value="auto" data-i18n="opt.ocrAuto">When needed</option>
+          <option value="force" data-i18n="opt.ocrForce">Every page</option>
+          <option value="off" data-i18n="opt.ocrOff">Never</option>
+        </select>
+      </label>
     </div>
+    <p class="note" id="ocr-note" hidden></p>
 
     <div class="actions">
       <button class="suggested" id="compare" disabled>
         <span class="spinner" hidden></span>
         <span data-i18n="action.compare">Compare</span>
       </button>
-      <span class="supported" data-i18n="upload.supported">Supported: PDF, TXT, MD, CSV, JSON, source code</span>
+      <span class="supported" data-i18n="upload.supported">Supported: PDF, Word, Excel, CSV, images and scans, text, source code</span>
     </div>
     <p class="error" id="error" hidden></p>
   </section>
@@ -152,8 +169,11 @@
       </div>
     </div>
 
+    <div class="banner" id="warnings" role="status" hidden></div>
+
     <div class="panes" id="text-view"></div>
     <div class="pages" id="page-view" hidden></div>
+    <div class="pages" id="overlay-view" hidden></div>
   </section>
 </main>
 
@@ -166,7 +186,7 @@
     </div>
   </div>
   <div class="dialog-body">
-    <p data-i18n="about.description">Compare PDF and text documents side by side. Everything runs on your machine.</p>
+    <p data-i18n="about.description">Compare PDF, Word, Excel, image and text documents side by side. Everything runs on your machine.</p>
   </div>
   <div class="dialog-actions">
     <button class="flat" id="about-license" type="button" data-i18n="menu.license">License Agreement</button>
@@ -198,9 +218,11 @@
     </div>
   </div>
   <div class="dialog-body">
-    <p data-i18n="updates.todo">Update checks are not available yet. This will be added before release.</p>
+    <p id="updates-status" data-i18n="updates.privacy">DiffAnyDoc only contacts GitHub when you press Check now. No data about you or your files is sent.</p>
+    <p><a id="updates-link" href="#" target="_blank" rel="noopener" data-i18n="updates.open" hidden>Open the download page</a></p>
   </div>
   <div class="dialog-actions">
+    <button class="flat" id="updates-check" type="button" data-i18n="updates.check">Check now</button>
     <button class="suggested" type="button" data-close data-i18n="action.close">Close</button>
   </div>
 </dialog>

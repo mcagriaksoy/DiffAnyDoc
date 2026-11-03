@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import csv
+import io
 from pathlib import Path
 
 from ..model import Block, Document, Page
-from .base import AdapterError
+from .base import AdapterError, LoadOptions
 
 _TEXT_EXTENSIONS = (
     ".txt",
@@ -54,24 +56,63 @@ class TextAdapter:
         # Unknown extension: accept it if the first block looks like text.
         return _looks_textual(path)
 
-    def load(self, path: Path) -> Document:
+    def load(self, path: Path, options: LoadOptions | None = None) -> Document:
         try:
             raw = path.read_bytes()
         except OSError as exc:
             raise AdapterError(f"cannot read {path.name!r}: {exc}") from exc
 
         text, encoding = _decode(raw)
+        meta = {"encoding": encoding, "bytes": len(raw)}
+        suffix = path.suffix.lower()
+        if suffix in (".csv", ".tsv"):
+            blocks = _table_blocks(text, "\t" if suffix == ".tsv" else None)
+            if blocks is not None:
+                meta["table"] = True
+                return Document(path=path, kind="text", pages=[Page(index=0, blocks=blocks)], meta=meta)
+
         blocks = [
             Block(kind="text", text=line, source_ref={"line": number})
             for number, line in enumerate(text.splitlines())
         ]
         page = Page(index=0, blocks=blocks)
-        return Document(
-            path=path,
-            kind="text",
-            pages=[page],
-            meta={"encoding": encoding, "bytes": len(raw)},
+        return Document(path=path, kind="text", pages=[page], meta=meta)
+
+
+def _table_blocks(text: str, delimiter: str | None) -> list[Block] | None:
+    """Parse CSV/TSV into table rows, so changes are reported per cell.
+
+    Returns ``None`` when the text does not parse as a table; it is then
+    compared line by line like any other text file.
+    """
+    if delimiter is None:
+        try:
+            delimiter = csv.Sniffer().sniff(text[:8192], delimiters=",;\t|").delimiter
+        except csv.Error:
+            delimiter = ","
+    try:
+        rows = list(csv.reader(io.StringIO(text), delimiter=delimiter))
+    except csv.Error:
+        return None
+    blocks: list[Block] = []
+    for number, cells in enumerate(rows, start=1):
+        while cells and not cells[-1].strip():
+            cells.pop()
+        if not cells:
+            continue
+        if len(cells) == 1:
+            blocks.append(Block(kind="text", text=cells[0], label=str(number)))
+            continue
+        blocks.append(
+            Block(
+                kind="text",
+                text=" | ".join(cells),
+                cells=cells,
+                label=str(number),
+                source_ref={"line": number - 1},
+            )
         )
+    return blocks
 
 
 def _decode(raw: bytes) -> tuple[str, str]:

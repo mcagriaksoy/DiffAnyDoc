@@ -108,3 +108,58 @@ def test_integrate_command_installs_and_removes(monkeypatch, capsys) -> None:
 
     assert main(["integrate", "uninstall"]) == 0
     assert "removed" in capsys.readouterr().out
+
+
+def test_cli_xlsx_text_output_names_cells(tmp_path: Path, capsys) -> None:
+    from .officegen import write_xlsx
+
+    left = write_xlsx(tmp_path / "a.xlsx", {"S": [["Item", "Price"], ["Rent", 1000]]})
+    right = write_xlsx(tmp_path / "b.xlsx", {"S": [["Item", "Price"], ["Rent", 1250]]})
+    assert main(["diff", str(left), str(right), "--fail-on-diff"]) == 1
+    out = capsys.readouterr().out
+    assert "B: 1000 → 1250" in out
+
+
+def test_cli_formatting_flag(tmp_path: Path, capsys) -> None:
+    from .officegen import para, run, write_docx
+
+    left = write_docx(tmp_path / "a.docx", [para(run("Total 1000"))])
+    right = write_docx(tmp_path / "b.docx", [para(run("Total 1000", bold=True))])
+    assert main(["diff", str(left), str(right), "--fail-on-diff"]) == 0
+    assert main(["diff", str(left), str(right), "--formatting", "--fail-on-diff"]) == 1
+    assert "bold" in capsys.readouterr().out
+
+
+def test_cli_visual_and_byte_identical(tmp_path: Path, capsys) -> None:
+    from .pdfgen import write_pdf
+
+    left = write_pdf(tmp_path / "a.pdf", [["Total 1000"]])
+    copy = tmp_path / "copy.pdf"
+    copy.write_bytes(left.read_bytes())
+    assert main(["diff", str(left), str(copy), "--visual", "on"]) == 0
+    assert "byte-for-byte" in capsys.readouterr().out
+
+    right = write_pdf(tmp_path / "b.pdf", [["Total 1250"]])
+    assert main(["diff", str(left), str(right), "--visual", "on", "--format", "json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["visual"][0]["regions"]
+    assert payload["format"] == 2
+
+
+def test_cli_info_lists_sections(tmp_path: Path, capsys) -> None:
+    from .officegen import para, write_docx
+
+    path = write_docx(tmp_path / "a.docx", [para("Hello")], header="Top")
+    assert main(["info", str(path)]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert [s["label"] for s in payload["sections"]] == ["section:body", "section:headers"]
+
+
+def test_cli_check_update(monkeypatch, capsys) -> None:
+    from diffanydoc import updates
+
+    monkeypatch.setattr(
+        updates, "check", lambda: updates.UpdateInfo(current="0.2.0", status="update", latest="0.3.0")
+    )
+    assert main(["check-update"]) == 0
+    assert "0.3.0" in capsys.readouterr().out

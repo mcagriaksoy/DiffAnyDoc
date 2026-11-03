@@ -6,7 +6,7 @@ import html
 from pathlib import Path
 from typing import Any
 
-from ...i18n import resolve_language, t
+from ...i18n import resolve_language, t, warning_text
 from ..model import DiffResult, Segment
 
 _CSS = """
@@ -101,6 +101,11 @@ ins{background:var(--diff-add-strong);color:inherit;border-radius:2px;text-decor
 .empty{color:var(--dim-label-color);text-align:center;padding:56px 20px;font-family:inherit}
 body.only-diff tr.equal,body.only-diff tr.gap{display:none}
 footer{color:var(--dim-label-color);font-size:12px;text-align:center;padding:18px}
+.notes{margin:10px 0 0;padding:0;list-style:none;color:var(--dim-label-color);font-size:12px}
+.notes li{margin:2px 0}
+.list{color:var(--dim-label-color)}
+.fmt{color:var(--warning-color);font-family:var(--font-ui);font-size:11px}
+tr.fmt td{background:var(--diff-mod-bg)}
 
 @media print{
   :root{
@@ -142,7 +147,7 @@ def render_html(
         "report.title", lang, left=result.left_path.name, right=result.right_path.name
     )
     stats = result.stats
-    last_page = {"left": -1, "right": -1}
+    last_page: dict[str, Any] = {"left": -1, "right": -1, "result": result}
     body_rows = "\n".join(
         _row_html(row, lang, last_page) for row in result.rows
     )
@@ -153,6 +158,7 @@ def render_html(
             "</td></tr>"
         )
 
+    notes = _notes(result, lang)
     percent = f"{stats.similarity * 100:.1f}%"
     add_class = " add" if stats.added else ""
     del_class = " del" if stats.removed else ""
@@ -186,7 +192,9 @@ def render_html(
     <span class="stat{mod_class}"><b>~{stats.changed}</b> {html.escape(t("stats.changed", lang))}</span>
     <span class="stat">{html.escape(t("report.lines", lang, left=stats.left_lines, right=stats.right_lines))}</span>
     <span class="stat">{html.escape(t("report.pageMap", lang, n=len(result.page_map)))}</span>
+    {_extra_stats(result, lang)}
   </div>
+  {notes}
 </header>
 <main>
 <table>
@@ -211,34 +219,104 @@ def render_html(
 _ROW_CLASS = {"equal": "equal", "insert": "add", "delete": "del", "replace": "mod"}
 
 
+def _extra_stats(result: DiffResult, lang: str) -> str:
+    parts = []
+    if result.stats.formatting:
+        parts.append(
+            f'<span class="stat mod"><b>*{result.stats.formatting}</b> '
+            f'{html.escape(t("report.formatting", lang))}</span>'
+        )
+    if result.visual is not None:
+        regions = result.stats.visual_regions
+        css = " mod" if regions else ""
+        parts.append(
+            f'<span class="stat{css}"><b>◇{regions}</b> {html.escape(t("stats.visual", lang))}</span>'
+        )
+    return "".join(parts)
+
+
+def _notes(result: DiffResult, lang: str) -> str:
+    items: list[str] = []
+    if result.byte_identical:
+        items.append(html.escape(t("result.byteIdentical", lang)))
+    for side, info in (("A", result.left_info), ("B", result.right_info)):
+        for warning in info.warnings if info else []:
+            items.append(f"{side}: " + html.escape(warning_text(warning, lang)))
+    for page in result.visual or []:
+        if not page.regions:
+            continue
+        items.append(
+            html.escape(
+                t(
+                    "report.visualPage",
+                    lang,
+                    left="—" if page.left is None else _page_name(result, "left", page.left, lang),
+                    right="—" if page.right is None else _page_name(result, "right", page.right, lang),
+                    n=len(page.regions),
+                    pct=f"{page.changed_ratio * 100:.1f}",
+                )
+            )
+        )
+    if not items:
+        return ""
+    return '<ul class="notes">' + "".join(f"<li>{item}</li>" for item in items) + "</ul>"
+
+
+def _page_name(result: DiffResult, side: str, index: int, lang: str) -> str:
+    info = result.left_info if side == "left" else result.right_info
+    label = None
+    if info and 0 <= index < len(info.pages):
+        label = info.pages[index].get("label")
+    if label and str(label).startswith("section:"):
+        return t(f"section.{str(label)[8:]}", lang)
+    if label:
+        return str(label)
+    return t("page.label", lang, n=index + 1)
+
+
 def _row_html(row: Any, lang: str, last_page: dict[str, int]) -> str:
     parts: list[str] = []
     if row.hidden_before:
         label = html.escape(t("gap.hidden", lang, n=row.hidden_before))
         parts.append(f'<tr class="gap"><td colspan="2">⋯ {label} ⋯</td></tr>')
 
-    left_cells = _cell(row.left, row.left_inline, lang, last_page["left"])
-    right_cells = _cell(row.right, row.right_inline, lang, last_page["right"])
+    if row.left is None and row.right is None:
+        return "\n".join(parts)
+    result = last_page["result"]
+    left_cells = _cell(row.left, row.left_inline, lang, last_page["left"], result, "left")
+    note = ""
+    if row.format_changes:
+        names = ", ".join(t(f"format.{name}", lang) for name in row.format_changes)
+        note = f' <span class="fmt">{html.escape(t("format.changed", lang, changes=names))}</span>'
+    right_cells = _cell(row.right, row.right_inline, lang, last_page["right"], result, "right", note)
     if row.left is not None:
         last_page["left"] = row.left.page
     if row.right is not None:
         last_page["right"] = row.right.page
-    parts.append(
-        f'<tr class="{_ROW_CLASS[row.kind]}">{left_cells}{right_cells}</tr>'
-    )
+    css = _ROW_CLASS[row.kind] + (" fmt" if row.format_changes else "")
+    parts.append(f'<tr class="{css}">{left_cells}{right_cells}</tr>')
     return "\n".join(parts)
 
 
 def _cell(
-    line: Any, inline: list[Segment] | None, lang: str, previous_page: int
+    line: Any,
+    inline: list[Segment] | None,
+    lang: str,
+    previous_page: int,
+    result: DiffResult,
+    side: str,
+    note: str = "",
 ) -> str:
     if line is None:
         return "<td></td>"
     gutter = f'<span class="gutter">{_row_number(line)}</span>'
-    label = "" if line.page == previous_page else t("page.label", lang, n=line.page + 1)
+    label = "" if line.page == previous_page else _page_name(result, side, line.page, lang)
     page = f'<span class="page">{html.escape(label)}</span>'
     text = _inline_html(inline) if inline else html.escape(line.text, quote=False)
-    return f'<td>{gutter}{page}<span class="text">{text}</span></td>'
+    prefix = (line.style or {}).get("list")
+    if prefix and not line.cells:
+        text = f'<span class="list">{html.escape(str(prefix))} </span>{text}'
+    return f'<td>{gutter}{page}<span class="text">{text}</span>{note}</td>'
 
 
 def _inline_html(segments: list[Segment]) -> str:
@@ -255,6 +333,9 @@ def _inline_html(segments: list[Segment]) -> str:
 
 
 def _row_number(line: Any) -> str:
+    label = getattr(line, "label", None)
+    if label:
+        return html.escape(str(label))
     number = getattr(line, "number", None)
     if number is not None:
         return str(number)

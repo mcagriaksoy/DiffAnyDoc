@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "diffanydoc"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Compare any document side by side: PDF, DOCX, XLSX and plain text."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Mehmet Cagri Aksoy" }]
 keywords = ["diff", "compare", "pdf", "docx", "document"]
-# Placeholder: the license is decided separately, see README "Lisans stratejisi".
+# Placeholder: the license is decided separately, see README "Licensing strategy".
 classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: Text Processing :: General",
@@ -22,7 +22,8 @@ classifiers = [
 dependencies = [
     "pdfplumber>=0.11",   # MIT  - text + coordinates
     "pypdfium2>=4",       # Apache-2.0/BSD-3 - PDF rendering
-    "Pillow>=10",         # MIT-CMU - image handling
+    "Pillow>=10",         # MIT-CMU - image handling, visual diff
+    "openpyxl>=3.1",      # MIT - Excel workbooks
 ]
 
 [project.optional-dependencies]
@@ -36,10 +37,17 @@ desktop = [
 ]
 dev = [
     "pytest>=8",
+    "httpx>=0.27",         # BSD-3 - FastAPI test client
+]
+build = [
+    "pyinstaller>=6",      # GPL with bootloader exception: bundles may use any licence
 ]
 
 [project.scripts]
 diffanydoc = "diffanydoc.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "diffanydoc.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

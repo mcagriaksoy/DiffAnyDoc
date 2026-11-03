@@ -16,11 +16,11 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .core.adapters import AdapterError, adapters, load, supported_extensions
+from .core.adapters import AdapterError, LoadOptions, adapters, load, supported_extensions
 from .core.diff import DiffOptions, compare, supported_formats
 from .core.report.html import render_html, write_html_report
 from .core.report.json import result_to_dict
-from .i18n import available_languages, resolve_language, t
+from .i18n import available_languages, resolve_language, t, warning_text
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -60,9 +60,51 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="exit with code 1 when differences exist (CI / git hooks)",
     )
+    diff.add_argument(
+        "--exact-whitespace",
+        dest="collapse_whitespace",
+        action="store_false",
+        default=True,
+        help="treat differences in spacing as changes",
+    )
+    diff.add_argument(
+        "--no-reflow",
+        dest="reflow",
+        action="store_false",
+        help="compare PDF lines as laid out instead of joining paragraphs",
+    )
+    diff.add_argument(
+        "--formatting",
+        action="store_true",
+        help="also report formatting-only changes (bold, headings, font size)",
+    )
+    diff.add_argument(
+        "--visual",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="pixel comparison of rendered pages (auto: for images and scans)",
+    )
+    diff.add_argument(
+        "--visual-dpi", type=int, default=100, help="resolution for the visual comparison"
+    )
+    diff.add_argument(
+        "--ocr",
+        choices=("auto", "off", "force"),
+        default="auto",
+        help="OCR pages without a text layer (auto), never (off) or always (force)",
+    )
+    diff.add_argument(
+        "--ocr-lang",
+        metavar="LANGS",
+        help="Tesseract languages, e.g. eng+tur (default: installed eng/tur)",
+    )
 
     info = subparsers.add_parser("info", help="show the parsed outline of a file")
     info.add_argument("file", type=Path)
+    info.add_argument("--ocr", choices=("auto", "off", "force"), default="auto")
+    info.add_argument("--ocr-lang", metavar="LANGS")
+
+    subparsers.add_parser("check-update", help="look for a newer release on GitHub")
 
     subparsers.add_parser("formats", help="list supported formats")
 
@@ -102,6 +144,8 @@ def main(argv: list[str] | None = None) -> int:
             return _info(args)
         if args.command == "formats":
             return _formats(language)
+        if args.command == "check-update":
+            return _check_update(language)
         if args.command == "serve":
             return _serve(args, language)
         if args.command == "desktop":
@@ -129,7 +173,14 @@ def _diff(args: argparse.Namespace, language: str) -> int:
     options = DiffOptions(
         context=args.context,
         case_sensitive=not args.ignore_case,
+        collapse_whitespace=args.collapse_whitespace,
         fold_equal=not args.full,
+        reflow=args.reflow,
+        compare_formatting=args.formatting,
+        visual=args.visual,
+        visual_dpi=max(50, min(args.visual_dpi, 300)),
+        ocr=args.ocr,
+        ocr_lang=args.ocr_lang,
     )
     result = compare(args.left, args.right, options)
     fmt = args.format or _infer_format(args.output)
@@ -171,22 +222,34 @@ def _emit(text: str, output: Path | None, language: str) -> None:
     print(t("cli.written", language, path=output), file=sys.stderr)
 
 
+_MARKERS = {"equal": " ", "insert": "+", "delete": "-", "replace": "~"}
+
+
 def _render_text(result, language: str) -> str:
     lines: list[str] = []
     stats = result.stats
     lines.append(f"A: {result.left_path}  ({result.left_kind})")
     lines.append(f"B: {result.right_path}  ({result.right_kind})")
-    lines.append(
-        t(
-            "cli.summary",
-            language,
-            pct=f"{stats.similarity * 100:.1f}",
-            added=stats.added,
-            removed=stats.removed,
-            changed=stats.changed,
-        )
+    summary = t(
+        "cli.summary",
+        language,
+        pct=f"{stats.similarity * 100:.1f}",
+        added=stats.added,
+        removed=stats.removed,
+        changed=stats.changed,
     )
+    if stats.formatting:
+        summary += "  " + t("cli.formatting", language, n=stats.formatting)
+    if result.visual is not None:
+        summary += "  " + t("cli.visual", language, n=stats.visual_regions)
+    lines.append(summary)
+    for side, info in (("A", result.left_info), ("B", result.right_info)):
+        for warning in (info.warnings if info else []):
+            lines.append(f"{side}: " + warning_text(warning, language))
     lines.append("")
+    if result.byte_identical:
+        lines.append(t("cli.byteIdentical", language))
+        return "\n".join(lines) + "\n"
     if result.identical:
         lines.append(t("cli.identical", language))
         return "\n".join(lines) + "\n"
@@ -194,16 +257,59 @@ def _render_text(result, language: str) -> str:
     for row in result.rows:
         if row.hidden_before:
             lines.append(t("cli.hiddenLines", language, n=row.hidden_before))
-        left_number = row.left.number if row.left else ""
-        right_number = row.right.number if row.right else ""
-        marker = {"equal": " ", "insert": "+", "delete": "-", "replace": "~"}[row.kind]
+        if row.left is None and row.right is None:
+            continue
+        left_number = _gutter(row.left)
+        right_number = _gutter(row.right)
+        marker = "*" if row.kind == "equal" and row.format_changes else _MARKERS[row.kind]
         text = row.right.text if row.right is not None else row.left.text
-        lines.append(f"{marker} {str(left_number):>4} {str(right_number):>4} │ {text}")
+        lines.append(f"{marker} {left_number:>5} {right_number:>5} │ {text}")
+        if row.cells:
+            for cell in row.cells:
+                if cell.kind == "equal":
+                    continue
+                column = cell.right_column or cell.left_column or ""
+                where = f"{column}: " if column else ""
+                lines.append(
+                    f"{'':>13}│   {where}{cell.left if cell.left is not None else '∅'}"
+                    f" → {cell.right if cell.right is not None else '∅'}"
+                )
+        elif row.kind == "replace" and row.left is not None:
+            lines.append(f"{'':>13}│   - {row.left.text}")
+        if row.format_changes:
+            names = ", ".join(t(f"format.{name}", language) for name in row.format_changes)
+            lines.append(f"{'':>13}│   {t('cli.formatChange', language, changes=names)}")
+
+    if result.visual:
+        changed = [page for page in result.visual if page.regions]
+        if changed:
+            lines.append("")
+            lines.append(t("cli.visualTitle", language))
+            for page in changed:
+                left = "-" if page.left is None else page.left + 1
+                right = "-" if page.right is None else page.right + 1
+                lines.append(
+                    "  "
+                    + t(
+                        "cli.visualPage",
+                        language,
+                        left=left,
+                        right=right,
+                        n=len(page.regions),
+                        pct=f"{page.changed_ratio * 100:.1f}",
+                    )
+                )
     return "\n".join(lines) + "\n"
 
 
+def _gutter(line) -> str:
+    if line is None:
+        return ""
+    return line.label if line.label else str(line.number)
+
+
 def _info(args: argparse.Namespace) -> int:
-    document = load(args.file)
+    document = load(args.file, LoadOptions(ocr=args.ocr, ocr_lang=args.ocr_lang))
     adapter = next(a for a in adapters() if a.name == document.kind)
     payload = {
         "path": str(document.path),
@@ -212,6 +318,17 @@ def _info(args: argparse.Namespace) -> int:
         "blocks": sum(len(page.blocks) for page in document.pages),
         "characters": document.char_count,
         "meta": document.meta,
+        "sections": [
+            {
+                "index": page.index,
+                "label": page.label,
+                "source": page.source,
+                "blocks": len(page.blocks),
+                "tables": sum(1 for b in page.blocks if b.cells is not None),
+            }
+            for page in document.pages
+        ],
+        "warnings": document.warnings,
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
@@ -223,7 +340,39 @@ def _formats(language: str) -> int:
         print(f"  {entry['name']:<8} {entry['extensions']}")
     print()
     print(t("cli.formatsExtensions", language, value=", ".join(supported_extensions())))
+    from .core import ocr
+
+    status = ocr.status()
+    if status["available"]:
+        print(
+            t(
+                "cli.ocrAvailable",
+                language,
+                engine=f"{status['engine']} ({status['version']})",
+                langs=", ".join(status["languages"]) or "-",
+            )
+        )
+    else:
+        print(t("cli.ocrMissing", language))
     return 0
+
+
+def _check_update(language: str) -> int:
+    from .updates import check
+
+    info = check()
+    if info.status == "update":
+        print(t("updates.available", language, version=info.latest, current=info.current))
+        print(info.url)
+        return 0
+    if info.status == "latest":
+        print(t("updates.latest", language, version=info.current))
+        return 0
+    if info.status == "no_releases":
+        print(t("updates.noReleases", language))
+        return 0
+    print(t("updates.failed", language, message=info.message or ""), file=sys.stderr)
+    return 2
 
 
 def _serve(args: argparse.Namespace, language: str) -> int:
