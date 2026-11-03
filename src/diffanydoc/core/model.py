@@ -23,6 +23,21 @@ BBox = tuple[float, float, float, float]  # x0, top, x1, bottom (points)
 
 
 @dataclass(slots=True)
+class Span:
+    """Where a piece of a block's text sits on the page.
+
+    ``start``/``end`` are character offsets into :attr:`Block.text`. Adapters
+    with geometry (PDF, OCR) emit one span per word, which is what lets the
+    viewer box the exact changed word instead of the whole line.
+    """
+
+    start: int
+    end: int
+    page: int
+    bbox: BBox
+
+
+@dataclass(slots=True)
 class Block:
     """A single addressable unit of content, e.g. one text line."""
 
@@ -32,6 +47,9 @@ class Block:
     style: dict[str, Any] = field(default_factory=dict)
     children: list["Block"] = field(default_factory=list)
     source_ref: dict[str, Any] = field(default_factory=dict)
+    spans: list[Span] = field(default_factory=list)
+    cells: list[str] | None = None
+    label: str | None = None
 
 
 @dataclass(slots=True)
@@ -40,6 +58,7 @@ class Page:
     width: float = 0.0
     height: float = 0.0
     blocks: list[Block] = field(default_factory=list)
+    label: str | None = None
 
     def text(self, sep: str = "\n") -> str:
         return sep.join(
@@ -85,6 +104,8 @@ class Line:
     #: Cell texts when the line comes from a table row, so changed cells can
     #: be aligned and highlighted individually instead of as one long string.
     cells: list[str] | None = None
+    spans: list[Span] = field(default_factory=list)
+    label: str | None = None
 
 
 @dataclass(slots=True)
@@ -106,6 +127,7 @@ class Row:
     right_inline: list[Segment] | None = None
     #: Number of identical rows folded away before this row (0 = nothing hidden).
     hidden_before: int = 0
+    format_changes: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

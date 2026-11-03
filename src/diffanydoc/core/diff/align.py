@@ -1,76 +1,155 @@
-"""Page alignment.
+"""Align pages between documents.
 
 Comparing raw line streams is not enough: one inserted page makes every
 following page look different. Aligning pages first keeps the diff honest and
 gives the viewer a page map to drive side-by-side scrolling.
+
+Two passes:
+
+1. exact matches (identical page text, or identical labels such as sheet
+   names) anchor the alignment cheaply;
+2. between anchors, a global alignment (Needleman–Wunsch) over word-set
+   similarity pairs pages that were edited or reflowed, so an inserted page
+   is reported as inserted instead of shifting every page after it.
 """
 
 from __future__ import annotations
 
+import re
 from difflib import SequenceMatcher
 from itertools import zip_longest
 
 from ..model import Document, PagePair
 from ..normalize import normalize_line
 
-
-def _page_tokens(document: Document, index: int) -> list[str]:
-    page = document.pages[index]
-    lines: list[str] = []
-    for block in page.blocks:
-        if block.kind == "text":
-            lines.append(normalize_line(block.text, case_sensitive=False))
-        elif block.kind == "table":
-            for row in block.children:
-                lines.append(normalize_line(row.text, case_sensitive=False))
-    return lines
+_WORDS = re.compile(r"\w+", re.UNICODE)
+#: Below this similarity two pages are not considered the same page.
+MATCH_THRESHOLD = 0.3
 
 
-def _page_similarity(left_tokens: list[str], right_tokens: list[str]) -> float:
-    if not left_tokens and not right_tokens:
+def _page_key(document: Document, index: int) -> str:
+    return normalize_line(document.pages[index].text(" "), case_sensitive=False)
+
+
+def _words(text: str) -> frozenset[str]:
+    return frozenset(_WORDS.findall(text))
+
+
+def _jaccard(a: frozenset[str], b: frozenset[str]) -> float:
+    if not a and not b:
         return 1.0
-    if not left_tokens or not right_tokens:
+    if not a or not b:
         return 0.0
-    # Cap token sequence comparison to avoid O(N^2) blowup on multi-thousand-row sheets
-    a = left_tokens[:500]
-    b = right_tokens[:500]
-    return SequenceMatcher(None, a, b, autojunk=True).ratio()
+    return len(a & b) / len(a | b)
+
+
+def _labelled(document: Document) -> bool:
+    return bool(document.pages) and all(page.label for page in document.pages)
 
 
 def align_pages(left: Document, right: Document) -> list[PagePair]:
-    """Map left pages to right pages by content similarity.
+    """Map left pages to right pages by content similarity (or by label)."""
+    left_text = [_page_key(left, i) for i in range(left.page_count)]
+    right_text = [_page_key(right, i) for i in range(right.page_count)]
+    left_words = [_words(text) for text in left_text]
+    right_words = [_words(text) for text in right_text]
 
-    Uses a longest-common-subsequence over exact page keys, then pairs the
-    leftover pages in order and reports their real similarity. This is
-    deliberately cheap; heavily reflowed pages are the known weak spot.
-    """
-    if left.page_count == 1 and right.page_count == 1:
-        sim = _page_similarity(_page_tokens(left, 0), _page_tokens(right, 0))
-        return [PagePair(left=0, right=0, similarity=sim)]
+    by_label = _labelled(left) and _labelled(right)
+    if by_label:
+        left_keys = [str(page.label) for page in left.pages]
+        right_keys = [str(page.label) for page in right.pages]
+    else:
+        left_keys, right_keys = left_text, right_text
 
-    left_tokens = [_page_tokens(left, i) for i in range(left.page_count)]
-    right_tokens = [_page_tokens(right, i) for i in range(right.page_count)]
-    left_keys = ["\n".join(t) for t in left_tokens]
-    right_keys = ["\n".join(t) for t in right_tokens]
     matcher = SequenceMatcher(None, left_keys, right_keys, autojunk=False)
-
     pairs: list[PagePair] = []
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
-            pairs.extend(
-                PagePair(left=i, right=j, similarity=1.0)
-                for i, j in zip(range(i1, i2), range(j1, j2))
-            )
+            for i, j in zip(range(i1, i2), range(j1, j2)):
+                similarity = (
+                    _jaccard(left_words[i], right_words[j])
+                    if by_label and left_text[i] != right_text[j]
+                    else 1.0
+                )
+                pairs.append(PagePair(left=i, right=j, similarity=similarity))
             continue
-        for i, j in zip_longest(range(i1, i2), range(j1, j2)):
-            if i is None and j is None:  # pragma: no cover - defensive
-                continue
-            similarity = 0.0
-            if i is not None and j is not None:
-                similarity = _page_similarity(left_tokens[i], right_tokens[j])
-            pairs.append(PagePair(left=i, right=j, similarity=similarity))
+        pairs.extend(
+            _align_block(
+                list(range(i1, i2)), list(range(j1, j2)), left_words, right_words
+            )
+        )
     return pairs
 
 
-def page_count_mismatch(left: Document, right: Document) -> int:
-    return abs(left.page_count - right.page_count)
+def _align_block(
+    left: list[int],
+    right: list[int],
+    left_words: list[frozenset[str]],
+    right_words: list[frozenset[str]],
+) -> list[PagePair]:
+    """Optimal monotone pairing of two runs of pages."""
+    if not left or not right:
+        return [PagePair(left=i, right=None, similarity=0.0) for i in left] + [
+            PagePair(left=None, right=j, similarity=0.0) for j in right
+        ]
+
+    n, m = len(left), len(right)
+    similarity = [
+        [_jaccard(left_words[i], right_words[j]) for j in right] for i in left
+    ]
+    # score[i][j]: best total for left[:i] vs right[:j]. A match earns
+    # (similarity - threshold), so only pages that really correspond pair up.
+    score = [[0.0] * (m + 1) for _ in range(n + 1)]
+    move = [[0] * (m + 1) for _ in range(n + 1)]  # 1 diag, 2 up, 3 left
+    for i in range(1, n + 1):
+        move[i][0] = 2
+    for j in range(1, m + 1):
+        move[0][j] = 3
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            diag = score[i - 1][j - 1] + similarity[i - 1][j - 1] - MATCH_THRESHOLD
+            up = score[i - 1][j]
+            side = score[i][j - 1]
+            best = max(diag, up, side)
+            score[i][j] = best
+            move[i][j] = 1 if best == diag and diag > max(up, side) else (2 if up >= side else 3)
+
+    matches: list[tuple[int, int]] = []
+    i, j = n, m
+    while i > 0 or j > 0:
+        step = move[i][j]
+        if step == 1:
+            matches.append((i - 1, j - 1))
+            i, j = i - 1, j - 1
+        elif step == 2:
+            i -= 1
+        else:
+            j -= 1
+    matches.reverse()
+
+    # Between two matched anchors, leftover pages on both sides are shown
+    # side by side (a rewritten page is still "the same page" to a reader);
+    # only a surplus on one side becomes an inserted or removed page.
+    pairs: list[PagePair] = []
+    previous = (-1, -1)
+    for anchor in matches + [(n, m)]:
+        gap_left = range(previous[0] + 1, anchor[0])
+        gap_right = range(previous[1] + 1, anchor[1])
+        for a, b in zip_longest(gap_left, gap_right):
+            pairs.append(
+                PagePair(
+                    left=left[a] if a is not None else None,
+                    right=right[b] if b is not None else None,
+                    similarity=similarity[a][b] if a is not None and b is not None else 0.0,
+                )
+            )
+        if anchor != (n, m):
+            pairs.append(
+                PagePair(
+                    left=left[anchor[0]],
+                    right=right[anchor[1]],
+                    similarity=similarity[anchor[0]][anchor[1]],
+                )
+            )
+        previous = anchor
+    return pairs

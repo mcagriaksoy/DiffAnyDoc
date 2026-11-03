@@ -22,7 +22,13 @@ _DOLPHIN_FILE = "diffanydoc-select.desktop"
 def launcher_argv() -> list[str]:
     """Command that starts this app, whether frozen or running from source."""
     if getattr(sys, "frozen", False):
-        return [sys.executable]
+        # Frozen builds ship a windowed DiffAnyDoc next to the console
+        # diffanydoc-cli; the context menu must start the windowed one, or a
+        # console window flashes up on every click (Windows).
+        executable = Path(sys.executable)
+        suffix = ".exe" if sys.platform == "win32" else ""
+        windowed = executable.with_name(f"DiffAnyDoc{suffix}")
+        return [str(windowed if windowed.is_file() else executable)]
     return [sys.executable, "-m", "diffanydoc"]
 
 

@@ -107,24 +107,20 @@ src/diffanydoc/
 ## 5. UI & Design System Rules (`docs/DESIGN.md`)
 
 Read [`docs/DESIGN.md`](docs/DESIGN.md) before touching `index.html` or `app.css`.
-- Follows **GNOME HIG / libadwaita** token naming (`--window-bg-color`, `--view-bg-color`, `--headerbar-bg-color`, `--accent-bg-color`).
+- **STRICT MANDATE: NEVER DEVIATE FROM GNOME & CINNAMON DESIGN ELEMENTS.**
+  - DiffAnyDoc is built to look and feel like a first-class citizen on GNOME and Cinnamon desktop environments.
+  - Follows **GNOME HIG / libadwaita** and **Cinnamon** desktop conventions: clean header bars, flat content views, Adwaita colour tokens (`--window-bg-color`, `--view-bg-color`, `--headerbar-bg-color`, `--accent-bg-color`), pill switches, and native typography (`Cantarell` / `Ubuntu` / `system-ui`).
+  - **ABSOLUTELY FORBIDDEN**: Material Design, Bootstrap, Tailwind gradients, glassmorphism, loud hover animations, non-system shadows, or trendy web gimmicks.
 - **Modified rows (`.row.mod .cell`)** must keep a subtle background (`4%` tint + `2px` left warning border) so that **only the inline changed words (`.seg-del`, `.seg-ins`)** stand out clearly — never paint an entire modified paragraph bright yellow/red.
-- No glassmorphism, no gradients, no hover scale/lift animations, no emoji icons, no external CSS frameworks.
+- No external CSS or JS frameworks. Zero-build vanilla JS/CSS.
 
 ---
 
-## 6. Priority Backlog & Roadmap for Next AI Agents
+## 6. Active Task Board & Roadmap (`TODO.md`)
 
-When continuing development, prioritize these items:
-
-1. **Desktop Native Drag-and-Drop Polish (Linux GTK/WebKit2GTK & Windows WebView2)**:
-   - WebKit2GTK often intercepts file drops at the GTK widget level or passes `text/uri-list` without populating `e.dataTransfer.files`. Investigate GTK drag-dest signals or pywebview DOM event hooks so dragging from Nautilus/Nemo/Explorer into the native window is 100% reliable.
-2. **Beyond Compare-Style Folder / Directory Comparison Mode**:
-   - Compare two folders side-by-side (file tree, size, modified timestamp, quick SHA-256 status badge, and click-to-open document diff in a new tab).
-3. **3-Way Merge & Native Format Export (`.docx` / `.xlsx` Save)**:
-   - Currently merged documents export as text/CSV/HTML. Add in-place XML patching so merging a row from Left to Right on a `.docx` or `.xlsx` can save back a valid `.docx` / `.xlsx` package.
-4. **Borderless PDF Table Detection**:
-   - Enhance `src/diffanydoc/core/adapters/pdf.py` to detect whitespace-aligned tables (in addition to ruled tables) using column x-coordinate clustering.
-5. **Standalone Packaging & Licensing Activation (M5)**:
-   - PyInstaller / Briefcase builds for Windows (`DiffAnyDoc.exe` installer) and Linux (`.deb` / `AppImage`).
-   - Offline commercial license key verification (`Ed25519` signed license file) and update checker.
+All open tasks, priority items, and backlog specifications are actively tracked in **[`TODO.md`](TODO.md)**.
+When an AI agent starts working on DiffAnyDoc:
+1. Open [`TODO.md`](TODO.md).
+2. Mark the selected task as `[⏳ IN PROGRESS: <AgentName>]`.
+3. Complete the task following all constraints in this document.
+4. Mark the task as `[x] DONE` and update `CHANGELOG.md`.

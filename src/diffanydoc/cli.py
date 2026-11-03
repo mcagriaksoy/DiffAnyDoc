@@ -91,6 +91,8 @@ def build_parser() -> argparse.ArgumentParser:
     info = subparsers.add_parser("info", help="show the parsed outline of a file")
     info.add_argument("file", type=Path)
 
+    subparsers.add_parser("check-update", help="look for a newer release on GitHub")
+
     subparsers.add_parser("formats", help="list supported formats")
 
     serve = subparsers.add_parser("serve", help="start the web UI")
@@ -127,6 +129,8 @@ def main(argv: list[str] | None = None) -> int:
             return _diff(args, language)
         if args.command == "info":
             return _info(args)
+        if args.command == "check-update":
+            return _check_update(language)
         if args.command == "formats":
             return _formats(language)
         if args.command == "serve":
@@ -386,6 +390,24 @@ def _integrate(args: argparse.Namespace, language: str) -> int:
     for item in items:
         print(f"  {item}")
     return 0
+
+
+def _check_update(language: str) -> int:
+    from .updates import check_for_updates
+
+    info = check_for_updates()
+    if info.status == "update":
+        print(t("updates.available", language, version=info.latest, current=info.current))
+        print(info.url)
+        return 0
+    if info.status == "latest":
+        print(t("updates.latest", language, version=info.current))
+        return 0
+    if info.status == "no_releases":
+        print(t("updates.noReleases", language))
+        return 0
+    print(t("updates.failed", language, message=info.message or ""), file=sys.stderr)
+    return 2
 
 
 if __name__ == "__main__":  # pragma: no cover

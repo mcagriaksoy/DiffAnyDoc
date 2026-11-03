@@ -77,6 +77,12 @@ def create_app() -> FastAPI:
     def formats() -> dict[str, Any]:
         return {"extensions": supported_extensions()}
 
+    @app.get("/api/updates")
+    def updates() -> dict[str, Any]:
+        from ..updates import check_for_updates
+
+        return check_for_updates().as_dict()
+
     @app.get("/api/ocr/status")
     def ocr_status() -> dict[str, Any]:
         return {

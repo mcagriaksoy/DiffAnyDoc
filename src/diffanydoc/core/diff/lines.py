@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from difflib import SequenceMatcher
 
+from ..layout import reflow as reflow_blocks
 from ..model import Document, Line, Segment
 from ..normalize import normalize_line
 
@@ -44,6 +45,7 @@ def document_lines(
     case_sensitive: bool = True,
     collapse_whitespace: bool = True,
     compare_formatting: bool = False,
+    reflow: bool = True,
 ) -> list[Line]:
     """Flatten all text and table rows into a single sequence of lines.
 
@@ -54,7 +56,10 @@ def document_lines(
     """
     lines: list[Line] = []
     for page in document.pages:
-        for block in page.blocks:
+        blocks = page.blocks
+        if reflow and any(b.bbox is not None for b in blocks):
+            blocks = reflow_blocks(blocks, page.width)
+        for block in blocks:
             if block.kind == "text":
                 norm = normalize_line(
                     block.text,
@@ -74,6 +79,9 @@ def document_lines(
                         number=len(lines) + 1,
                         bbox=block.bbox,
                         style=style,
+                        spans=list(block.spans),
+                        cells=block.cells,
+                        label=block.label,
                     )
                 )
             elif block.kind == "table":

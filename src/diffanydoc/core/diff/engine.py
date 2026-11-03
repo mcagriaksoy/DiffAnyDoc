@@ -31,6 +31,8 @@ class DiffOptions:
     pair_threshold: float = 0.4
     #: Fold long unchanged runs (HTML report). The API asks for full rows.
     fold_equal: bool = True
+    #: Join the visual lines of a paragraph before comparing (PDF/OCR).
+    reflow: bool = True
     #: Fast-check SHA-256 checksums before parsing; skip loading if identical.
     fast_check: bool = True
     #: Render both PDFs and compare pixels, not just extracted text.
@@ -257,12 +259,14 @@ def compare(
         case_sensitive=options.case_sensitive,
         collapse_whitespace=options.collapse_whitespace,
         compare_formatting=options.compare_formatting,
+        reflow=options.reflow,
     )
     right_lines = document_lines(
         right_doc,
         case_sensitive=options.case_sensitive,
         collapse_whitespace=options.collapse_whitespace,
         compare_formatting=options.compare_formatting,
+        reflow=options.reflow,
     )
 
     rows = _build_rows(left_lines, right_lines, options)
@@ -482,37 +486,52 @@ def _stats(left: Sequence[Line], right: Sequence[Line], rows: Sequence[Row]) -> 
     )
 
 
-def _fold_equal_runs(rows: Sequence[Row], context: int) -> list[Row]:
-    """Replace long runs of identical rows with a gap marker."""
+def _is_change(row: Row) -> bool:
+    return row.kind != "equal" or bool(getattr(row, "format_changes", None))
+
+
+def fold_equal_runs(rows: Sequence[Row], context: int) -> list[Row]:
+    """Replace long runs of identical rows with a gap marker.
+
+    ``context`` rows are kept before and after every change. The first row
+    after a gap carries ``hidden_before``; a gap at the very end is a
+    placeholder row with no lines.
+    """
     keep = max(context, 0)
     out: list[Row] = []
     index = 0
-    while index < len(rows):
-        row = rows[index]
-        if row.kind != "equal":
-            out.append(row)
+    total = len(rows)
+    while index < total:
+        if _is_change(rows[index]):
+            out.append(rows[index])
             index += 1
             continue
-
         end = index
-        while end < len(rows) and rows[end].kind == "equal":
+        while end < total and not _is_change(rows[end]):
             end += 1
-        run = rows[index:end]
-        if len(run) <= 2 * keep + 1:
+        run = list(rows[index:end])
+        at_start = index == 0
+        at_end = end == total
+        head = 0 if at_start else keep
+        tail = 0 if at_end else keep
+        if len(run) <= head + tail + 1:
             out.extend(run)
         else:
-            out.extend(run[:keep])
-            hidden = run[keep:-keep] if keep else run
-            following = run[-keep] if keep else None
-            gap = len(hidden)
-            if following is not None:
-                following.hidden_before = gap
+            out.extend(run[:head])
+            hidden = len(run) - head - tail
+            if tail:
+                following = run[len(run) - tail]
+                following.hidden_before = hidden
                 out.append(following)
-            else:  # pragma: no cover - covered by the length check
-                anchor = Row(kind="equal", hidden_before=gap)
-                out.append(anchor)
+                out.extend(run[len(run) - tail + 1 :])
+            else:
+                out.append(Row(kind="equal", hidden_before=hidden))
         index = end
     return out
+
+
+# Backwards-compatible private name.
+_fold_equal_runs = fold_equal_runs
 
 
 def supported_formats() -> list[dict[str, str]]:
