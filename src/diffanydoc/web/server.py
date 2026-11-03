@@ -17,11 +17,11 @@ from pathlib import Path
 from typing import Any
 
 from .. import __version__
-from ..core.adapters import AdapterError, load, supported_extensions
-from ..core.diff import DiffOptions, compare
+from ..core.adapters import AdapterError, supported_extensions
+from ..core.diff import DiffOptions, compare, file_sha256
 from ..core.model import DiffResult
-from ..core.ocr import OcrError
-from ..core.render import render_page_png
+from ..core.ocr import OcrError, available as ocr_available, installed_languages
+from ..core.render import is_renderable_path, render_page_png
 from ..core.report.html import render_html
 from ..core.report.json import result_to_dict
 from ..i18n import available_languages, resolve_language, strings
@@ -76,6 +76,29 @@ def create_app() -> FastAPI:
     def formats() -> dict[str, Any]:
         return {"extensions": supported_extensions()}
 
+    @app.get("/api/ocr/status")
+    def ocr_status() -> dict[str, Any]:
+        return {
+            "available": ocr_available(),
+            "languages": installed_languages(),
+        }
+
+    @app.post("/api/checksum")
+    async def checksum_paths(body: dict[str, Any]) -> JSONResponse:
+        left_path = Path(str(body.get("left", ""))).expanduser()
+        right_path = Path(str(body.get("right", ""))).expanduser()
+        if not left_path.is_file() or not right_path.is_file():
+            raise HTTPException(status_code=400, detail="both files must exist")
+        left_hash = file_sha256(left_path)
+        right_hash = file_sha256(right_path)
+        return JSONResponse(
+            {
+                "left_sha256": left_hash,
+                "right_sha256": right_hash,
+                "byte_identical": left_hash == right_hash,
+            }
+        )
+
     @app.get("/api/system/theme")
     def system_theme() -> dict[str, Any]:
         return {"accent": accent_color(), "platform": sys.platform}
@@ -99,6 +122,7 @@ def create_app() -> FastAPI:
         context: int = Form(3),
         case_sensitive: bool = Form(True),
         collapse_whitespace: bool = Form(True),
+        compare_formatting: bool = Form(False),
         fold_equal: bool = Form(False),
         visual: bool = Form(True),
         ocr: bool = Form(False),
@@ -119,6 +143,7 @@ def create_app() -> FastAPI:
                 visual,
                 ocr,
                 ocr_language,
+                compare_formatting,
             )
         except Exception:
             shutil.rmtree(directory, ignore_errors=True)
@@ -142,6 +167,7 @@ def create_app() -> FastAPI:
             bool(body.get("visual", True)),
             bool(body.get("ocr", False)),
             str(body.get("ocr_language") or "eng"),
+            bool(body.get("compare_formatting", False)),
         )
         return JSONResponse(_summary(comparison))
 
@@ -153,13 +179,41 @@ def create_app() -> FastAPI:
     def get_report(comparison_id: str, lang: str | None = None) -> HTMLResponse:
         return HTMLResponse(render_html(_get(comparison_id).result, language=lang))
 
+    @app.get("/api/compare/{comparison_id}/export/{side}")
+    def export_merged(comparison_id: str, side: str) -> Response:
+        comparison = _get(comparison_id)
+        if side not in ("left", "right"):
+            raise HTTPException(status_code=404, detail="invalid side")
+        rows = comparison.payload.get("rows") or []
+        lines: list[str] = []
+        for row in rows:
+            cell = row.get(side)
+            if cell and cell.get("text") is not None:
+                lines.append(str(cell["text"]))
+        content = "\n".join(lines) + ("\n" if lines else "")
+        source_name = (
+            comparison.payload.get(side, {}).get("name")
+            or f"merged-{side}.txt"
+        )
+        stem = Path(source_name).stem or f"merged-{side}"
+        suffix = Path(source_name).suffix.lower()
+        ext = suffix if suffix in (".txt", ".md", ".csv", ".tsv", ".json", ".py", ".js", ".html", ".css", ".xml", ".yaml", ".yml") else ".txt"
+        filename = f"{stem}-merged{ext}"
+        return Response(
+            content=content.encode("utf-8"),
+            media_type="text/plain; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
+
     @app.get("/api/compare/{comparison_id}/page/{side}/{index}.png")
     def get_page(comparison_id: str, side: str, index: int, dpi: int = 110) -> Response:
         comparison = _get(comparison_id)
         if side not in ("left", "right"):
             raise HTTPException(status_code=404, detail="invalid side")
         path = comparison.left if side == "left" else comparison.right
-        if path.suffix.lower() != ".pdf":
+        if not is_renderable_path(path):
             raise HTTPException(status_code=404, detail="this file cannot be rendered as pages")
         try:
             data = render_page_png(path, index, max(60, min(dpi, 300)))
@@ -204,29 +258,29 @@ def _run_compare(
     visual: bool = True,
     ocr: bool = False,
     ocr_language: str = "eng",
+    compare_formatting: bool = False,
 ) -> Comparison:
     options = DiffOptions(
         context=context,
         case_sensitive=case_sensitive,
         fold_equal=fold_equal,
         collapse_whitespace=collapse_whitespace,
+        compare_formatting=compare_formatting,
         visual=visual,
         ocr=ocr,
         ocr_language=ocr_language,
     )
     result = compare(left_path, right_path, options)
-    left_doc = load(left_path)
-    right_doc = load(right_path)
 
     payload = result_to_dict(result)
     payload["id"] = uuid.uuid4().hex if directory else None
     payload["pages"] = {
-        "left": [{"width": p.width, "height": p.height} for p in left_doc.pages],
-        "right": [{"width": p.width, "height": p.height} for p in right_doc.pages],
+        "left": [{"width": w, "height": h} for w, h in result.left_pages],
+        "right": [{"width": w, "height": h} for w, h in result.right_pages],
     }
     payload["renderable"] = {
-        "left": left_doc.kind == "pdf",
-        "right": right_doc.kind == "pdf",
+        "left": result.left_kind in ("pdf", "image"),
+        "right": result.right_kind in ("pdf", "image"),
     }
     payload["rects"] = _rects(result)
 

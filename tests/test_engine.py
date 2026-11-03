@@ -177,3 +177,141 @@ def test_whitespace_edits_render_as_minor_in_html(tmp_path: Path) -> None:
     assert '<del class="minor"> </del>' in report
     assert '<ins class="minor">  </ins>' in report
     assert "--diff-minor-strong" in report
+
+
+def test_fast_checksum_skips_loading_identical_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    left = tmp_path / "same-a.txt"
+    right = tmp_path / "same-b.txt"
+    left.write_text("Merhaba Dünya\nSatır 2\n", encoding="utf-8")
+    right.write_text("Merhaba Dünya\nSatır 2\n", encoding="utf-8")
+
+    def forbidden_load(_path: Path):
+        raise AssertionError("load() must not be called when SHA-256 checksums match")
+
+    monkeypatch.setattr("diffanydoc.core.diff.engine.load", forbidden_load)
+    result = compare(left, right)
+
+    assert result.identical is True
+    assert result.byte_identical is True
+    assert result.left_sha256 is not None
+    assert result.left_sha256 == result.right_sha256
+    assert result.rows == []
+    assert result.stats.similarity == 1.0
+
+
+def test_fast_check_can_be_disabled_to_parse_rows(tmp_path: Path) -> None:
+    left = tmp_path / "parse-a.txt"
+    right = tmp_path / "parse-b.txt"
+    left.write_text("Satır 1\nSatır 2\n", encoding="utf-8")
+    right.write_text("Satır 1\nSatır 2\n", encoding="utf-8")
+
+    result = compare(left, right, DiffOptions(fast_check=False, fold_equal=False))
+    assert result.identical is True
+    assert result.byte_identical is True
+    assert len(result.rows) == 2
+
+
+def test_pdf_table_extraction_and_cell_alignment(tmp_path: Path) -> None:
+    left = write_pdf(
+        tmp_path / "table-l.pdf",
+        [["Invoice Summary"]],
+        tables=[
+            [
+                (
+                    72.0,
+                    700.0,
+                    [150.0, 80.0, 100.0],
+                    24.0,
+                    [
+                        ["Item", "Qty", "Price"],
+                        ["Consulting", "10", "1000"],
+                        ["Support", "5", "500"],
+                    ],
+                )
+            ]
+        ],
+    )
+    right = write_pdf(
+        tmp_path / "table-r.pdf",
+        [["Invoice Summary"]],
+        tables=[
+            [
+                (
+                    72.0,
+                    700.0,
+                    [150.0, 80.0, 100.0],
+                    24.0,
+                    [
+                        ["Item", "Qty", "Price"],
+                        ["Consulting", "10", "1250"],
+                        ["Support", "5", "500"],
+                    ],
+                )
+            ]
+        ],
+    )
+
+    doc = load(left)
+    kinds = [b.kind for b in doc.pages[0].blocks]
+    assert "table" in kinds
+
+    result = compare(left, right, DiffOptions(context=1))
+    assert not result.identical
+    changed = [r for r in result.rows if r.kind == "replace"]
+    assert len(changed) == 1
+    row = changed[0]
+    assert row.left is not None and row.right is not None
+    assert row.left.cells == ["Consulting", "10", "1000"]
+    assert row.right.cells == ["Consulting", "10", "1250"]
+    deleted = "".join(
+        seg.text for seg in (row.left_inline or []) if seg.kind == "delete"
+    )
+    inserted = "".join(
+        seg.text for seg in (row.right_inline or []) if seg.kind == "insert"
+    )
+    assert deleted == "1000"
+    assert inserted == "1250"
+
+
+def test_large_csv_comparison_is_fast_and_aligns_cells(tmp_path: Path) -> None:
+    import time
+
+    left = tmp_path / "large-a.csv"
+    right = tmp_path / "large-b.csv"
+    rows_a = ["id,name,department,salary"] + [
+        f"{i},Employee {i},Engineering,{5000 + i}" for i in range(1, 3001)
+    ]
+    rows_b = list(rows_a)
+    rows_b[1500] = "1500,Employee 1500,Engineering,99999"
+
+    left.write_text("\n".join(rows_a) + "\n", encoding="utf-8")
+    right.write_text("\n".join(rows_b) + "\n", encoding="utf-8")
+
+    t0 = time.monotonic()
+    result = compare(left, right, DiffOptions(fold_equal=False))
+    elapsed = time.monotonic() - t0
+
+    assert elapsed < 1.5, f"3000-row CSV took too long: {elapsed:.2f}s"
+    assert result.left_kind == "csv"
+    assert result.stats.changed == 1
+    # Auto-folding keeps the DOM payload small on 3000-line files
+    assert len(result.rows) < 50
+    changed = [r for r in result.rows if r.kind == "replace"]
+    assert len(changed) == 1
+    assert changed[0].left is not None and changed[0].left.cells == [
+        "1500",
+        "Employee 1500",
+        "Engineering",
+        "6500",
+    ]
+    assert changed[0].right is not None and changed[0].right.cells == [
+        "1500",
+        "Employee 1500",
+        "Engineering",
+        "99999",
+    ]
+
+
+

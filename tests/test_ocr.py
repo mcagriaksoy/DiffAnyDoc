@@ -194,3 +194,66 @@ def test_cli_explains_missing_tesseract(
 
     assert main(["diff", str(left), str(right), "--ocr"]) == 2
     assert "tesseract is required" in capsys.readouterr().err
+
+
+def test_image_adapter_and_ocr_comparison(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from PIL import Image, ImageDraw
+
+    left_img = tmp_path / "scan_a.png"
+    right_img = tmp_path / "scan_b.png"
+
+    im1 = Image.new("RGB", (400, 200), "white")
+    ImageDraw.Draw(im1).rectangle((20, 20, 120, 60), fill="black")
+    im1.save(left_img)
+
+    im2 = Image.new("RGB", (400, 200), "white")
+    ImageDraw.Draw(im2).rectangle((20, 100, 180, 150), fill="black")
+    im2.save(right_img)
+
+    fake = _fake_tesseract(tmp_path)
+    monkeypatch.setattr("diffanydoc.core.ocr._tesseract_binary", lambda _options: str(fake))
+
+    result = compare(
+        left_img,
+        right_img,
+        DiffOptions(ocr=True, visual=True, ocr_cache_dir=str(tmp_path / "cache")),
+    )
+    assert result.left_kind == "image"
+    assert result.right_kind == "image"
+    assert result.ocr is not None and result.ocr.pages == 2
+    assert result.visual is not None and result.visual.changed_pages == 1
+    assert any(row.kind == "replace" for row in result.rows)
+
+
+def test_doc_and_rtf_compared_against_pdf(tmp_path: Path) -> None:
+    rtf_path = tmp_path / "contract.rtf"
+    rtf_path.write_text(
+        r"{\rtf1\ansi{\fonttbl\f0 Arial;}\pard Invoice 2024-001\par Customer: Acme\par Total: 1000 EUR\par}",
+        encoding="utf-8",
+    )
+    doc_path = tmp_path / "contract.doc"
+    doc_path.write_bytes(
+        b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+        + b"\x00" * 64
+        + "Invoice 2024-001\r\nCustomer: Acme\r\nTotal: 900 EUR\r\n".encode("utf-16le")
+    )
+    pdf_path = write_pdf(
+        tmp_path / "contract.pdf",
+        [["Invoice 2024-001", "Customer: Acme", "Total: 1250 EUR"]],
+    )
+
+    rtf_vs_pdf = compare(rtf_path, pdf_path)
+    assert rtf_vs_pdf.left_kind == "doc"
+    assert rtf_vs_pdf.right_kind == "pdf"
+    assert rtf_vs_pdf.stats.changed == 1
+    changed_rtf = [r for r in rtf_vs_pdf.rows if r.kind == "replace"]
+    assert changed_rtf and "1000" in changed_rtf[0].left.text and "1250" in changed_rtf[0].right.text
+
+    doc_vs_pdf = compare(doc_path, pdf_path)
+    assert doc_vs_pdf.left_kind == "doc"
+    assert doc_vs_pdf.right_kind == "pdf"
+    changed_doc = [r for r in doc_vs_pdf.rows if r.kind == "replace"]
+    assert changed_doc and "900" in changed_doc[0].left.text and "1250" in changed_doc[0].right.text
+

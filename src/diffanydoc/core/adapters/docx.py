@@ -60,6 +60,24 @@ class DocxAdapter:
                         f"{path.name!r} is not a Word document (no word/document.xml)"
                     ) from exc
                 core_xml = read_optional(package, "docProps/core.xml")
+                header_parts = sorted(
+                    name
+                    for name in package.namelist()
+                    if name.startswith("word/header") and name.endswith(".xml")
+                )
+                footer_parts = sorted(
+                    name
+                    for name in package.namelist()
+                    if name.startswith("word/footer") and name.endswith(".xml")
+                )
+                note_parts = [
+                    name
+                    for name in ("word/footnotes.xml", "word/endnotes.xml")
+                    if name in package.namelist()
+                ]
+                headers_xml = [package.read(name) for name in header_parts]
+                footers_xml = [package.read(name) for name in footer_parts]
+                notes_xml = [package.read(name) for name in note_parts]
         except zipfile.BadZipFile as exc:
             raise AdapterError(f"cannot read DOCX {path.name!r}: {exc}") from exc
         except OSError as exc:
@@ -77,7 +95,11 @@ class DocxAdapter:
             raise AdapterError(f"{path.name!r} has no document body")
 
         builder = _PageBuilder()
+        for raw_part in headers_xml:
+            _walk_part(builder, raw_part)
         builder.walk(body)
+        for raw_part in notes_xml + footers_xml:
+            _walk_part(builder, raw_part)
         builder.finish()
 
         return Document(
@@ -86,6 +108,22 @@ class DocxAdapter:
             pages=builder.pages,
             meta={**builder.meta, **core_properties(core_xml)},
         )
+
+
+def _walk_part(builder: "_PageBuilder", raw_xml: bytes) -> None:
+    try:
+        part_root = ElementTree.fromstring(raw_xml)
+    except ElementTree.ParseError:
+        return
+    for elem in part_root:
+        if elem.tag in (_W + "footnote", _W + "endnote"):
+            note_type = elem.get(_W + "type") or ""
+            if note_type in ("separator", "continuationSeparator"):
+                continue
+            builder.walk(elem)
+        else:
+            builder.walk(part_root)
+            break
 
 
 class _PageBuilder:
@@ -226,7 +264,57 @@ def _paragraph_style(paragraph: ElementTree.Element) -> dict[str, Any]:
     if style_name:
         out["paragraph_style"] = style_name
         out["heading"] = style_name.lower().startswith("heading")
+
+    bold = False
+    italic = False
+    underline = False
+    strike = False
+    sizes: list[float] = []
+    fonts: list[str] = []
+
+    for rpr in paragraph.iter(_W + "rPr"):
+        if _bool_prop(rpr, _W + "b"):
+            bold = True
+        if _bool_prop(rpr, _W + "i"):
+            italic = True
+        u = rpr.find(_W + "u")
+        if u is not None and (u.get(_W + "val") or "single") not in ("none", "0", "false"):
+            underline = True
+        if _bool_prop(rpr, _W + "strike"):
+            strike = True
+        sz = rpr.find(_W + "sz")
+        if sz is not None:
+            try:
+                sizes.append(float(sz.get(_W + "val") or 0) / 2.0)
+            except ValueError:
+                pass
+        rfonts = rpr.find(_W + "rFonts")
+        if rfonts is not None:
+            fname = rfonts.get(_W + "ascii") or rfonts.get(_W + "hAnsi") or ""
+            if fname:
+                fonts.append(fname)
+
+    if bold or out.get("heading"):
+        out["bold"] = True
+    if italic:
+        out["italic"] = True
+    if underline:
+        out["underline"] = True
+    if strike:
+        out["strike"] = True
+    if sizes:
+        out["size"] = round(sorted(sizes)[len(sizes) // 2], 1)
+    if fonts:
+        out["font"] = max(set(fonts), key=fonts.count)
     return out
+
+
+def _bool_prop(container: ElementTree.Element, tag: str) -> bool:
+    elem = container.find(tag)
+    if elem is None:
+        return False
+    val = (elem.get(_W + "val") or "true").lower()
+    return val not in ("0", "false", "off", "none")
 
 
 def _is_header_row(row: ElementTree.Element) -> bool:

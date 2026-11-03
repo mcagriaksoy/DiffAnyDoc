@@ -73,6 +73,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Tesseract language(s), e.g. eng or tur+eng (eng)",
     )
     diff.add_argument(
+        "--format-diff",
+        action="store_true",
+        help="also report formatting/style differences (font, size, bold, italic)",
+    )
+    diff.add_argument(
+        "--no-fast-check",
+        action="store_true",
+        help="always parse both files even when their SHA-256 checksums match",
+    )
+    diff.add_argument(
         "--fail-on-diff",
         action="store_true",
         help="exit with code 1 when differences exist (CI / git hooks)",
@@ -146,7 +156,9 @@ def _diff(args: argparse.Namespace, language: str) -> int:
     options = DiffOptions(
         context=args.context,
         case_sensitive=not args.ignore_case,
+        compare_formatting=args.format_diff,
         fold_equal=not args.full,
+        fast_check=not args.no_fast_check,
         visual=args.visual,
         ocr=args.ocr,
         ocr_language=args.ocr_lang,
@@ -253,10 +265,11 @@ def _render_text(result, language: str) -> str:
 
 def _info(args: argparse.Namespace) -> int:
     document = load(args.file)
-    adapter = next(a for a in adapters() if a.name == document.kind)
+    adapter = next((a for a in adapters() if a.name == document.kind), None)
+    adapter_name = adapter.name if adapter else document.kind
     payload = {
         "path": str(document.path),
-        "adapter": adapter.name,
+        "adapter": adapter_name,
         "pages": document.page_count,
         "blocks": sum(len(page.blocks) for page in document.pages),
         "characters": document.char_count,

@@ -126,7 +126,79 @@ body {
 .topbar-start {
   display: flex;
   align-items: center;
+  gap: var(--space-2);
   min-width: 0;
+}
+
+.session-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.session-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.session-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--dim-label-color);
+  font-size: var(--font-size-caption);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.session-tab:hover {
+  background: var(--hover-tint);
+  color: var(--text-color);
+}
+
+.session-tab.active {
+  background: var(--view-bg-color);
+  color: var(--text-color);
+  font-weight: 600;
+}
+
+.session-tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: -4px;
+  border-radius: 4px;
+  color: var(--dim-label-color);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.session-tab-close:hover {
+  background: var(--active-tint);
+  color: var(--text-color);
+}
+
+.session-tab-add {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  flex: none;
 }
 
 .topbar-center {
@@ -526,6 +598,17 @@ a {
   accent-color: var(--accent-color);
 }
 
+.select {
+  height: 28px;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--view-bg-color);
+  color: var(--text-color);
+  font-size: var(--font-size-caption);
+  cursor: pointer;
+}
+
 .actions {
   display: flex;
   flex-direction: column;
@@ -765,26 +848,42 @@ a {
   background: var(--diff-add-bg);
 }
 
+.row.add .cell:nth-child(2) {
+  box-shadow: inset 2px 0 0 var(--success-color);
+}
+
 .row.del .cell:nth-child(1),
 .row.del .cell:nth-child(1) .gutter {
   background: var(--diff-del-bg);
 }
 
-.row.mod .cell,
+.row.del .cell:nth-child(1) {
+  box-shadow: inset 2px 0 0 var(--error-color);
+}
+
+/* Modified rows: subtle row tint + left amber marker so only changed words stand out. */
+.row.mod .cell {
+  background: color-mix(in srgb, var(--warning-color) 4%, transparent);
+  box-shadow: inset 2px 0 0 var(--warning-color);
+}
+
 .row.mod .cell .gutter {
-  background: var(--diff-mod-bg);
+  background: color-mix(in srgb, var(--warning-color) 8%, var(--window-bg-color));
 }
 
 .seg-del {
+  padding: 1px 2px;
   background: var(--diff-del-strong);
-  border-radius: 2px;
+  border-radius: 3px;
   text-decoration: line-through;
   text-decoration-thickness: 1px;
 }
 
 .seg-ins {
+  padding: 1px 2px;
   background: var(--diff-add-strong);
-  border-radius: 2px;
+  border-radius: 3px;
+  font-weight: 600;
 }
 
 /* Whitespace-only edits: visible, but not alarming like a red deletion. */

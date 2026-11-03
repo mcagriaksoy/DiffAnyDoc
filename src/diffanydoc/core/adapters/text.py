@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 from pathlib import Path
 
 from ..model import Block, Document, Page
@@ -61,17 +63,70 @@ class TextAdapter:
             raise AdapterError(f"cannot read {path.name!r}: {exc}") from exc
 
         text, encoding = _decode(raw)
-        blocks = [
-            Block(kind="text", text=line, source_ref={"line": number})
-            for number, line in enumerate(text.splitlines())
-        ]
+        suffix = path.suffix.lower()
+        if suffix in (".csv", ".tsv"):
+            blocks = _parse_delimited(text, delimiter="\t" if suffix == ".tsv" else None)
+            kind = "csv"
+        else:
+            blocks = [
+                Block(kind="text", text=line, source_ref={"line": number})
+                for number, line in enumerate(text.splitlines())
+            ]
+            kind = "text"
         page = Page(index=0, blocks=blocks)
         return Document(
             path=path,
-            kind="text",
+            kind=kind,
             pages=[page],
             meta={"encoding": encoding, "bytes": len(raw)},
         )
+
+
+def _parse_delimited(text: str, *, delimiter: str | None = None) -> list[Block]:
+    """Parse CSV/TSV into a structured table block so cells are aligned individually."""
+    if not text.strip():
+        return []
+    sample = text[:4096]
+    sep = delimiter
+    if sep is None:
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
+            sep = dialect.delimiter
+        except csv.Error:
+            sep = ";" if sample.count(";") > sample.count(",") else ","
+
+    reader = csv.reader(io.StringIO(text), delimiter=sep)
+    rows: list[Block] = []
+    for row_idx, raw_row in enumerate(reader):
+        if not raw_row or not any(cell.strip() for cell in raw_row):
+            continue
+        cells = [
+            Block(
+                kind="cell",
+                text=cell.strip(),
+                source_ref={"row": row_idx + 1, "col": col_idx + 1},
+            )
+            for col_idx, cell in enumerate(raw_row)
+        ]
+        rows.append(
+            Block(
+                kind="table_row",
+                text=" | ".join(c.text for c in cells),
+                children=cells,
+                style={"row": row_idx + 1, "header": row_idx == 0},
+                source_ref={"row": row_idx + 1},
+            )
+        )
+    if not rows:
+        return []
+    return [
+        Block(
+            kind="table",
+            text="\n".join(r.text for r in rows),
+            children=rows,
+            source_ref={"rows": len(rows)},
+        )
+    ]
 
 
 def _decode(raw: bytes) -> tuple[str, str]:

@@ -246,6 +246,7 @@ def _sheet_table(
             if block is not None:
                 grid.setdefault(row_index, {})[column] = block
 
+    _expand_merged_cells(worksheet, grid, sheet=name)
     rows = _table_rows(grid, sheet=name)
     if not rows:
         return None
@@ -255,6 +256,50 @@ def _sheet_table(
         children=rows,
         source_ref={"sheet": name, "rows": len(rows)},
     )
+
+
+def _expand_merged_cells(
+    worksheet: ElementTree.Element,
+    grid: dict[int, dict[int, Block]],
+    *,
+    sheet: str,
+) -> None:
+    """Propagate merged cell values across their horizontal/vertical spans."""
+    container = worksheet.find(_S + "mergeCells")
+    if container is None:
+        return
+    for merge in container.findall(_S + "mergeCell"):
+        ref = merge.get("ref") or ""
+        if ":" not in ref:
+            continue
+        start_ref, end_ref = ref.split(":", 1)
+        m1 = _REF.match(start_ref.strip())
+        m2 = _REF.match(end_ref.strip())
+        if not m1 or not m2:
+            continue
+        c1, r1 = _column_index(start_ref.strip()), int(m1.group(2))
+        c2, r2 = _column_index(end_ref.strip()), int(m2.group(2))
+        origin = grid.get(r1, {}).get(c1)
+        if origin is None or not origin.text:
+            continue
+        origin.style["merged"] = ref
+        for r in range(r1, min(r2, r1 + 64) + 1):
+            for c in range(c1, min(c2, c1 + 64) + 1):
+                if r == r1 and c == c1:
+                    continue
+                existing = grid.get(r, {}).get(c)
+                if existing is not None and existing.text:
+                    continue
+                grid.setdefault(r, {})[c] = Block(
+                    kind="cell",
+                    text=origin.text,
+                    style={**origin.style, "merged_from": start_ref.strip()},
+                    source_ref={
+                        "sheet": sheet,
+                        "row": r,
+                        "col": _column_letter(c),
+                    },
+                )
 
 
 def _table_rows(

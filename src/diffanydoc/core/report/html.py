@@ -92,11 +92,12 @@ tr.add td:nth-child(2){background:var(--diff-add-bg);
   box-shadow:inset 2px 0 0 var(--success-color)}
 tr.del td:nth-child(1){background:var(--diff-del-bg);
   box-shadow:inset 2px 0 0 var(--error-color)}
-tr.mod td{background:var(--diff-mod-bg);
+tr.mod td{background:color-mix(in srgb,var(--warning-color) 4%,transparent);
   box-shadow:inset 2px 0 0 var(--warning-color)}
-del{background:var(--diff-del-strong);color:inherit;border-radius:2px;
+del{padding:1px 2px;background:var(--diff-del-strong);color:inherit;border-radius:3px;
   text-decoration:line-through;text-decoration-thickness:1px}
-ins{background:var(--diff-add-strong);color:inherit;border-radius:2px;text-decoration:none}
+ins{padding:1px 2px;background:var(--diff-add-strong);color:inherit;border-radius:3px;
+  text-decoration:none;font-weight:600}
 del.minor,ins.minor{background:var(--diff-minor-strong);text-decoration:none;
   box-shadow:inset 0 0 0 1px rgba(53,132,228,.35)}
 .gap td{background:var(--window-bg-color);border-top:1px solid var(--border-color);
@@ -152,9 +153,10 @@ def render_html(
         _row_html(row, lang, last_page) for row in result.rows
     )
     if not result.rows:
+        empty_key = "empty.byteIdentical" if result.byte_identical else "report.empty"
         body_rows = (
             '<tr><td class="empty" colspan="2">'
-            f"{html.escape(t('report.empty', lang))}"
+            f"{html.escape(t(empty_key, lang))}"
             "</td></tr>"
         )
 
@@ -277,7 +279,12 @@ def _cell(
     label = "" if line.page == previous_page else t("page.label", lang, n=line.page + 1)
     page = f'<span class="page">{html.escape(label)}</span>'
     text = _inline_html(inline) if inline else html.escape(line.text, quote=False)
-    return f'<td>{gutter}{page}<span class="text">{text}</span></td>'
+    style_badge = ""
+    style = getattr(line, "style", None) or {}
+    if style.get("style_change"):
+        summary = html.escape(str(style.get("summary") or style["style_change"]))
+        style_badge = f' <span class="page">{summary}</span>'
+    return f'<td>{gutter}{page}<span class="text">{text}{style_badge}</span></td>'
 
 
 def _inline_html(segments: list[Segment]) -> str:

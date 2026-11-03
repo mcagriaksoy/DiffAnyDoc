@@ -13,17 +13,57 @@ def _escape(text: str) -> str:
     return text.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
 
 
-def _content_stream(lines: list[str], first_baseline: float, leading: float) -> str:
-    parts = ["BT", "/F1 12 Tf", f"{leading} TL", f"72 {first_baseline} Td"]
-    for index, line in enumerate(lines):
-        if index:
-            parts.append("T*")
-        parts.append(f"({_escape(line)}) Tj")
-    parts.append("ET")
+def _content_stream(
+    lines: list[str],
+    first_baseline: float,
+    leading: float,
+    tables: list[tuple[float, float, list[float], float, list[list[str]]]] | None = None,
+) -> str:
+    parts: list[str] = []
+    if lines:
+        parts.extend(["BT", "/F1 12 Tf", f"{leading} TL", f"72 {first_baseline} Td"])
+        for index, line in enumerate(lines):
+            if index:
+                parts.append("T*")
+            parts.append(f"({_escape(line)}) Tj")
+        parts.append("ET")
+
+    for x0, top_y, col_widths, row_h, rows in tables or ():
+        n_rows = len(rows)
+        total_w = sum(col_widths)
+        parts.append("0.5 w")
+        # Horizontal grid lines (PDF y goes bottom-up)
+        for r_idx in range(n_rows + 1):
+            y = top_y - r_idx * row_h
+            parts.append(f"{x0:.1f} {y:.1f} m {x0 + total_w:.1f} {y:.1f} l S")
+        # Vertical grid lines
+        cur_x = x0
+        bottom_y = top_y - n_rows * row_h
+        for w in [0.0, *col_widths]:
+            cur_x += w
+            parts.append(f"{cur_x:.1f} {top_y:.1f} m {cur_x:.1f} {bottom_y:.1f} l S")
+        # Cell texts
+        for r_idx, row in enumerate(rows):
+            cell_x = x0
+            baseline = top_y - (r_idx + 1) * row_h + 6.0
+            for c_idx, cell_text in enumerate(row):
+                if c_idx >= len(col_widths):
+                    break
+                if cell_text:
+                    parts.append(
+                        f"BT /F1 10 Tf {cell_x + 4:.1f} {baseline:.1f} Td ({_escape(cell_text)}) Tj ET"
+                    )
+                cell_x += col_widths[c_idx]
     return "\n".join(parts) + "\n"
 
 
-def build_pdf(pages: list[list[str]], width: float = 595, height: float = 842) -> bytes:
+def build_pdf(
+    pages: list[list[str]],
+    width: float = 595,
+    height: float = 842,
+    *,
+    tables: list[list[tuple[float, float, list[float], float, list[list[str]]]]] | None = None,
+) -> bytes:
     objects: list[bytes] = []
 
     def add(body: bytes) -> int:
@@ -38,10 +78,11 @@ def build_pdf(pages: list[list[str]], width: float = 595, height: float = 842) -
     )
 
     kids: list[str] = []
-    for lines in pages:
-        stream = _content_stream(lines, first_baseline=height - 72, leading=16).encode(
-            "cp1252", errors="replace"
-        )
+    for page_idx, lines in enumerate(pages):
+        page_tables = tables[page_idx] if tables and page_idx < len(tables) else None
+        stream = _content_stream(
+            lines, first_baseline=height - 72, leading=16, tables=page_tables
+        ).encode("cp1252", errors="replace")
         content_id = add(
             b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"endstream"
         )
@@ -96,6 +137,7 @@ def write_pdf(
     *,
     width: float = 595,
     height: float = 842,
+    tables: list[list[tuple[float, float, list[float], float, list[list[str]]]]] | None = None,
 ) -> Path:
-    path.write_bytes(build_pdf(pages, width=width, height=height))
+    path.write_bytes(build_pdf(pages, width=width, height=height, tables=tables))
     return path

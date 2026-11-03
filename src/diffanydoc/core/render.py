@@ -27,15 +27,23 @@ def _key(path: Path, index: int, dpi: int) -> tuple[str, int, int]:
     return (str(path), int(index), int(dpi))
 
 
+_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
+
+
+def is_renderable_path(path: str | Path) -> bool:
+    """Whether a file on disk can be rasterised as page images."""
+    suffix = Path(path).suffix.lower()
+    return suffix == ".pdf" or suffix in _IMAGE_SUFFIXES
+
+
 def render_page(path: str | Path, index: int, dpi: int = 96) -> Image.Image:
-    """Render one PDF page to an RGB image. Cached, bounded, thread-safe."""
-    key = _key(Path(path), index, dpi)
+    """Render one PDF page or image frame to an RGB image. Cached, bounded, thread-safe."""
+    target = Path(path)
+    key = _key(target, index, dpi)
     cached = _IMAGES.get(key)
     if cached is not None:
         _IMAGES.move_to_end(key)
         return cached
-
-    import pypdfium2 as pdfium
 
     with _LOCK:
         cached = _IMAGES.get(key)
@@ -43,18 +51,39 @@ def render_page(path: str | Path, index: int, dpi: int = 96) -> Image.Image:
             _IMAGES.move_to_end(key)
             return cached
 
-        document = pdfium.PdfDocument(str(path))
-        try:
-            if index < 0 or index >= len(document):
-                raise IndexError(f"page {index} does not exist")
-            page = document[index]
-            bitmap = page.render(scale=max(dpi, 24) / 72)
+        if target.suffix.lower() in _IMAGE_SUFFIXES:
+            with Image.open(target) as raw:
+                n_frames = getattr(raw, "n_frames", 1) or 1
+                if index < 0 or index >= n_frames:
+                    raise IndexError(f"page {index} does not exist")
+                if n_frames > 1:
+                    raw.seek(index)
+                dpi_info = raw.info.get("dpi")
+                src_dpi_x = float(dpi_info[0]) if dpi_info and dpi_info[0] > 0 else 96.0
+                src_dpi_y = float(dpi_info[1]) if dpi_info and dpi_info[1] > 0 else 96.0
+                width_pt = raw.width * 72.0 / src_dpi_x
+                height_pt = raw.height * 72.0 / src_dpi_y
+                scale = max(dpi, 24) / 72.0
+                out_w = max(1, round(width_pt * scale))
+                out_h = max(1, round(height_pt * scale))
+                image = raw.convert("RGB")
+                if (out_w, out_h) != image.size:
+                    image = image.resize((out_w, out_h), Image.Resampling.LANCZOS)
+        else:
+            import pypdfium2 as pdfium
+
+            document = pdfium.PdfDocument(str(target))
             try:
-                image = bitmap.to_pil().convert("RGB")
+                if index < 0 or index >= len(document):
+                    raise IndexError(f"page {index} does not exist")
+                page = document[index]
+                bitmap = page.render(scale=max(dpi, 24) / 72)
+                try:
+                    image = bitmap.to_pil().convert("RGB")
+                finally:
+                    bitmap.close()
             finally:
-                bitmap.close()
-        finally:
-            document.close()
+                document.close()
 
         _IMAGES[key] = image
         _IMAGES.move_to_end(key)

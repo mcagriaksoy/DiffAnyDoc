@@ -11,11 +11,39 @@ from ..normalize import normalize_line
 _WORD = re.compile(r"\S+|\s+")
 
 
+def style_summary(style: dict[str, object] | None) -> str:
+    """Short human-readable formatting signature for style comparison."""
+    if not style:
+        return ""
+    tokens: list[str] = []
+    if style.get("heading"):
+        tokens.append(str(style.get("paragraph_style") or "heading"))
+    if style.get("bold"):
+        tokens.append("bold")
+    if style.get("italic"):
+        tokens.append("italic")
+    if style.get("underline"):
+        tokens.append("underline")
+    if style.get("strike"):
+        tokens.append("strike")
+    size = style.get("size")
+    if isinstance(size, (int, float)) and size > 0:
+        tokens.append(f"{float(size):g}pt")
+    font = str(style.get("font") or "").strip()
+    if font:
+        # Strip subset prefix like "ABCDEF+Helvetica-Bold" -> "Helvetica"
+        clean_font = font.split("+")[-1].split("-")[0].strip()
+        if clean_font:
+            tokens.append(clean_font)
+    return ", ".join(tokens)
+
+
 def document_lines(
     document: Document,
     *,
     case_sensitive: bool = True,
     collapse_whitespace: bool = True,
+    compare_formatting: bool = False,
 ) -> list[Line]:
     """Flatten all text and table rows into a single sequence of lines.
 
@@ -28,18 +56,24 @@ def document_lines(
     for page in document.pages:
         for block in page.blocks:
             if block.kind == "text":
+                norm = normalize_line(
+                    block.text,
+                    case_sensitive=case_sensitive,
+                    collapse_whitespace=collapse_whitespace,
+                )
+                style = dict(block.style)
+                if compare_formatting:
+                    sig = style_summary(style)
+                    if sig:
+                        style["summary"] = sig
                 lines.append(
                     Line(
                         text=block.text,
-                        norm=normalize_line(
-                            block.text,
-                            case_sensitive=case_sensitive,
-                            collapse_whitespace=collapse_whitespace,
-                        ),
+                        norm=norm,
                         page=page.index,
                         number=len(lines) + 1,
                         bbox=block.bbox,
-                        style=block.style,
+                        style=style,
                     )
                 )
             elif block.kind == "table":
@@ -59,6 +93,7 @@ def document_lines(
                             ),
                             page=page.index,
                             number=len(lines) + 1,
+                            bbox=row.bbox or block.bbox,
                             style={**row.style, "table": True},
                             cells=[cell.text for cell in row.children],
                         )
@@ -68,8 +103,23 @@ def document_lines(
 
 def line_similarity(a: Line, b: Line) -> float:
     """0..1 similarity between two lines, used to pair changed rows."""
+    len_a = len(a.norm)
+    len_b = len(b.norm)
+    if len_a == 0 and len_b == 0:
+        return 1.0
+    if len_a == 0 or len_b == 0:
+        return 0.0
+    if 2.0 * min(len_a, len_b) / (len_a + len_b) < 0.35:
+        return 0.0
     try:
-        return SequenceMatcher(None, a.norm, b.norm, autojunk=False).ratio()
+        if len_a + len_b > 300:
+            a_tok = a.norm.split()
+            b_tok = b.norm.split()
+            return SequenceMatcher(None, a_tok, b_tok, autojunk=True).ratio()
+        matcher = SequenceMatcher(None, a.norm, b.norm, autojunk=False)
+        if matcher.quick_ratio() < 0.35:
+            return 0.0
+        return matcher.ratio()
     except TypeError:  # pragma: no cover - defensive
         return 0.0
 
@@ -80,10 +130,20 @@ def inline_diff(
     """Word-level diff inside a pair of changed lines.
 
     Whitespace is kept as its own token so the reconstructed text is exact.
+    Normalized word keys are compared first so smart-quote or case/spacing
+    variations do not cause the entire paragraph to look replaced.
     """
     a_tokens = _WORD.findall(left)
     b_tokens = _WORD.findall(right)
-    matcher = SequenceMatcher(None, a_tokens, b_tokens, autojunk=False)
+    a_keys = [
+        " " if tok.isspace() else normalize_line(tok, collapse_whitespace=False)
+        for tok in a_tokens
+    ]
+    b_keys = [
+        " " if tok.isspace() else normalize_line(tok, collapse_whitespace=False)
+        for tok in b_tokens
+    ]
+    matcher = SequenceMatcher(None, a_keys, b_keys, autojunk=False)
 
     left_segments: list[Segment] = []
     right_segments: list[Segment] = []
@@ -98,12 +158,87 @@ def inline_diff(
 
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
-            push(left_segments, "equal", "".join(a_tokens[i1:i2]))
-            push(right_segments, "equal", "".join(b_tokens[j1:j2]))
+            for a_tok, b_tok in zip(a_tokens[i1:i2], b_tokens[j1:j2]):
+                if a_tok == b_tok or (a_tok.isspace() and b_tok.isspace() and a_tok == b_tok):
+                    push(left_segments, "equal", a_tok)
+                    push(right_segments, "equal", b_tok)
+                elif normalize_line(a_tok, collapse_whitespace=False) == normalize_line(b_tok, collapse_whitespace=False) and not a_tok.isspace():
+                    push(left_segments, "equal", a_tok)
+                    push(right_segments, "equal", b_tok)
+                else:
+                    push(left_segments, "delete", a_tok)
+                    push(right_segments, "insert", b_tok)
+        elif tag == "replace":
+            # Refine punctuation-attached tokens (e.g. "word," vs "word.")
+            for a_sub, b_sub in [_subtoken_diff("".join(a_tokens[i1:i2]), "".join(b_tokens[j1:j2]))]:
+                for seg in a_sub:
+                    push(left_segments, seg.kind, seg.text)
+                for seg in b_sub:
+                    push(right_segments, seg.kind, seg.text)
         else:
             push(left_segments, "delete", "".join(a_tokens[i1:i2]))
             push(right_segments, "insert", "".join(b_tokens[j1:j2]))
-    return left_segments, right_segments
+    return _coalesce_whitespace_segments(left_segments), _coalesce_whitespace_segments(right_segments)
+
+
+def _coalesce_whitespace_segments(segments: list[Segment]) -> list[Segment]:
+    """Merge whitespace-only 'equal' segments surrounded by identical change kinds.
+
+    Prevents a single space between two replaced words (e.g. 'yazılım geliştirme'
+    -> 'donanım kurulum') from matching as an isolated 'equal' space and splitting
+    a contiguous multi-word change into fragmented single-word diffs.
+    """
+    if len(segments) < 3:
+        return segments
+    out: list[Segment] = []
+    i = 0
+    n = len(segments)
+    while i < n:
+        cur = segments[i]
+        if (
+            cur.kind == "equal"
+            and cur.text.isspace()
+            and out
+            and out[-1].kind in ("delete", "insert")
+            and i + 1 < n
+            and segments[i + 1].kind == out[-1].kind
+        ):
+            out[-1].text += cur.text + segments[i + 1].text
+            i += 2
+            continue
+        if out and out[-1].kind == cur.kind:
+            out[-1].text += cur.text
+        else:
+            out.append(Segment(kind=cur.kind, text=cur.text))
+        i += 1
+    return out
+
+
+_SUBWORD = re.compile(r"\w+|[^\w]+")
+
+
+def _subtoken_diff(left: str, right: str) -> tuple[list[Segment], list[Segment]]:
+    """Refine a replaced word span by splitting words from attached punctuation."""
+    a_sub = _SUBWORD.findall(left)
+    b_sub = _SUBWORD.findall(right)
+    if len(a_sub) <= 1 and len(b_sub) <= 1:
+        return (
+            [Segment(kind="delete", text=left)] if left else [],
+            [Segment(kind="insert", text=right)] if right else [],
+        )
+    matcher = SequenceMatcher(None, a_sub, b_sub, autojunk=False)
+    l_out: list[Segment] = []
+    r_out: list[Segment] = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal" and not "".join(a_sub[i1:i2]).isspace():
+            l_out.append(Segment(kind="equal", text="".join(a_sub[i1:i2])))
+            r_out.append(Segment(kind="equal", text="".join(b_sub[j1:j2])))
+        else:
+            if i1 < i2:
+                l_out.append(Segment(kind="delete", text="".join(a_sub[i1:i2])))
+            if j1 < j2:
+                r_out.append(Segment(kind="insert", text="".join(b_sub[j1:j2])))
+    return _coalesce_whitespace_segments(l_out), _coalesce_whitespace_segments(r_out)
 
 
 def cell_diff(

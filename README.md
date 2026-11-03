@@ -9,22 +9,25 @@ It shows text differences and marks changed lines with boxes on PDF pages.
 
 This repository contains **M0 + M1 + M2 + M3 + M4** in working order:
 
-- Adapter layer for PDF, DOCX, XLSX and text files
+- Adapter layer for PDF, DOCX, DOC/ODT/RTF, XLSX, images (PNG/JPG/TIFF/WEBP) and text files
+- Fast SHA-256 byte checksum check: identical files return immediately without loading or parsing
 - Line alignment plus word-level inline differences
 - Page matching (inserting a page no longer makes every later page look changed)
 - Visual (pixel) page diff: rendered pages, small registration offsets, noise
-  tolerance and changed regions
-- Structural DOCX/XLSX diff: paragraphs, table rows and individual cells, so a
+  tolerance and changed regions (works on both PDFs and images)
+- Structural PDF/DOCX/XLSX diff: paragraphs, headers/footers/footnotes, table rows,
+  merged-cell expansion and individual cells (including ruled PDF tables), so a
   changed price is one cell, not a rewritten row
-- OCR fallback for scanned PDFs (Tesseract), with word boxes and an on-disk
-  cache keyed by file content
+- Optional formatting/style comparison (`--format-diff` or UI checkbox) for font,
+  size, bold, italic, underline and heading changes
+- OCR fallback for scanned/hybrid PDFs and images (Tesseract), with language selection,
+  word boxes and an on-disk cache keyed by file content
 - Self-contained HTML report and stable JSON output
 - `diff`, `info`, `formats`, `serve`, `desktop`, `select`, `integrate` commands
 - Web UI and a **native desktop window** (pywebview / GTK)
-- 97 tests (`pytest`)
+- 107 tests (`pytest`)
 
-Not there yet: merged-cell expansion, embedded-object diffing, formatting
-(style/font) comparison, bundled Tesseract in the installers.
+Not there yet: embedded-object diffing, bundled Tesseract in the installers.
 
 English is the default for the app, CLI messages and reports. Turkish ships as a
 second locale and can be selected in the app, or with `--lang tr` /
@@ -200,12 +203,12 @@ desktop share the same code and the engine is tested separately.
 
 | Layer | Status | Note |
 |---|---|---|
-| Byte (sha256) | missing | fast path for identical files |
-| Structure (docx/xlsx XML, table cells) | **done** | M3, stdlib `zipfile` + `ElementTree` |
+| Byte (sha256) | **done** | fast path for identical files (skips parsing) |
+| Structure (docx/xlsx XML, table cells) | **done** | M3, stdlib `zipfile` + `ElementTree` + merged cells |
 | Text (line + word) | **done** | M0 |
 | Page mapping | **done** | LCS + similarity for leftover pages |
-| Visual (pixel) | **done** | M2, opt-in in the engine, on by default in the UI |
-| OCR layer | **done** | M4, opt-in, only pages without a text layer |
+| Visual (pixel) | **done** | M2, opt-in in the engine, on by default in the UI (PDF + image) |
+| OCR layer | **done** | M4, opt-in, scanned/hybrid PDFs and images |
 
 The visual layer is enabled with `--visual` on the CLI, or by the API
 (`"visual": true`, the default). It renders both PDFs at 96 dpi, searches a
@@ -281,5 +284,5 @@ Files under `samples/` are there for manual testing.
   regions changed, but not what they say. OCR is only as good as the scan, and
   handwriting is not supported.
 - Line-based alignment can be noisy when paragraphs are reflowed.
-- PDF tables are read as single lines of text; DOCX/XLSX tables get row and
-  cell alignment.
+- Borderless (whitespace-aligned) PDF tables are read as lines of text; ruled PDF,
+  DOCX and XLSX tables get full row and cell alignment.

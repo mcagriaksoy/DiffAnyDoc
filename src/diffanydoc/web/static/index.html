@@ -17,6 +17,14 @@
       <img class="mark" src="/static/icon.svg" alt="">
       <span class="brand-name">DiffAnyDoc</span>
     </div>
+    <div class="session-tabs" id="session-tabs" role="tablist">
+      <button class="session-tab active" data-tab-id="tab-1" role="tab" type="button">
+        <span class="session-tab-label" data-i18n="app.newComparison">New comparison</span>
+      </button>
+      <button class="session-tab-add flat icon" id="add-tab" type="button" data-i18n-title="tab.add" data-i18n-aria-label="tab.add">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </button>
+    </div>
   </div>
 
   <div class="topbar-center">
@@ -69,6 +77,7 @@
       <div class="menu" id="more-menu" role="menu" hidden>
         <a class="menu-item" id="export" target="_blank" rel="noopener" data-result-only data-i18n="action.report" hidden>HTML report</a>
         <button class="menu-item" id="restart" type="button" data-result-only data-i18n="app.newComparison" hidden>New comparison</button>
+        <button class="menu-item" id="new-tab-menu" type="button" data-result-only data-i18n="action.newTab" hidden>New comparison in new tab</button>
         <div class="menu-sep" id="more-sep" data-result-only hidden></div>
         <button class="menu-item" id="about" type="button" data-i18n="menu.about">About DiffAnyDoc</button>
         <button class="menu-item" id="license" type="button" data-i18n="menu.license">License Agreement</button>
@@ -122,7 +131,13 @@
     <div class="options">
       <label class="check"><input type="checkbox" id="opt-case"> <span data-i18n="opt.ignoreCase">Ignore letter case</span></label>
       <label class="check"><input type="checkbox" id="opt-space" checked> <span data-i18n="opt.ignoreWhitespace">Ignore extra whitespace</span></label>
+      <label class="check"><input type="checkbox" id="opt-format"> <span data-i18n="opt.formatDiff">Compare formatting (font, size, bold/italic)</span></label>
       <label class="check" data-i18n-title="opt.ocrTitle"><input type="checkbox" id="opt-ocr"> <span data-i18n="opt.ocr">OCR scanned PDFs</span></label>
+      <select class="select" id="opt-ocr-lang" data-i18n-aria-label="opt.ocrLang" data-i18n-title="opt.ocrLang" hidden>
+        <option value="eng">eng</option>
+        <option value="tur">tur</option>
+        <option value="tur+eng">tur+eng</option>
+      </select>
     </div>
 
     <div class="actions">
@@ -146,6 +161,13 @@
 
       <div class="head-end">
         <div class="result-tools">
+          <button class="flat" id="new-compare-btn" type="button" data-i18n-title="app.newComparison" data-i18n-aria-label="app.newComparison">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            <span data-i18n="app.newComparison">New comparison</span>
+          </button>
+          <button class="flat icon" id="new-tab-btn" type="button" data-i18n-title="action.newTab" data-i18n-aria-label="action.newTab">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3.5" width="9" height="9" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M10 3.5h3.5V7M9 7l4.5-4.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
           <button class="flat icon" id="reload" type="button" data-i18n-title="action.reload" data-i18n-aria-label="action.reload">
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 3v3.5H9.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
@@ -155,10 +177,16 @@
               <span data-i18n="action.copy">Copy</span>
             </button>
             <div class="menu" id="copy-menu" role="menu" hidden>
+              <button class="menu-item" id="copy-all-to-right" type="button" role="menuitem" data-i18n="merge.allToRight">Apply all left to right (A → B)</button>
+              <button class="menu-item" id="copy-all-to-left" type="button" role="menuitem" data-i18n="merge.allToLeft">Apply all right to left (B → A)</button>
+              <div class="menu-sep"></div>
               <button class="menu-item" id="copy-changes" type="button" role="menuitem" data-i18n="copy.changes">Copy all changes</button>
               <button class="menu-item" id="copy-left" type="button" role="menuitem" data-i18n="copy.left">Copy left text</button>
               <button class="menu-item" id="copy-right" type="button" role="menuitem" data-i18n="copy.right">Copy right text</button>
               <button class="menu-item" id="copy-both" type="button" role="menuitem" data-i18n="copy.both">Copy both sides</button>
+              <div class="menu-sep"></div>
+              <button class="menu-item" id="download-left" type="button" role="menuitem" data-i18n="merge.downloadLeft">Download left document (A)</button>
+              <button class="menu-item" id="download-right" type="button" role="menuitem" data-i18n="merge.downloadRight">Download right document (B)</button>
             </div>
           </div>
         </div>

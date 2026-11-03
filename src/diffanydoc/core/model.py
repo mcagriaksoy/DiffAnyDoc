@@ -259,9 +259,18 @@ class DiffResult:
     visual: VisualDiff | None = None
     ocr: OcrStats | None = None
     options: dict[str, Any] = field(default_factory=dict)
+    byte_identical: bool = False
+    left_sha256: str | None = None
+    right_sha256: str | None = None
+    left_pages: list[tuple[float, float]] = field(default_factory=list)
+    right_pages: list[tuple[float, float]] = field(default_factory=list)
 
     @property
     def identical(self) -> bool:
+        if self.byte_identical:
+            return True
+        if self.visual is not None and self.visual.changed_pages > 0:
+            return False
         return not any(r.kind != "equal" for r in self.rows)
 
     @property

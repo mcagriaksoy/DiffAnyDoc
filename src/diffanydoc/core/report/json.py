@@ -56,14 +56,17 @@ def result_to_dict(result: DiffResult, *, include_pages: bool = False) -> dict[s
             "name": result.left_path.name,
             "kind": result.left_kind,
             "pages": _page_count(result, "left"),
+            "sha256": result.left_sha256,
         },
         "right": {
             "path": str(result.right_path),
             "name": result.right_path.name,
             "kind": result.right_kind,
             "pages": _page_count(result, "right"),
+            "sha256": result.right_sha256,
         },
         "identical": result.identical,
+        "byte_identical": result.byte_identical,
         "stats": result.stats.as_dict(),
         "page_map": [
             {"left": pair.left, "right": pair.right, "similarity": pair.similarity}
@@ -77,6 +80,9 @@ def result_to_dict(result: DiffResult, *, include_pages: bool = False) -> dict[s
 
 
 def _page_count(result: DiffResult, side: str) -> int:
+    pages = result.left_pages if side == "left" else result.right_pages
+    if pages:
+        return len(pages)
     indexes = {
         getattr(row.left if side == "left" else row.right, "page", None)
         for row in result.rows

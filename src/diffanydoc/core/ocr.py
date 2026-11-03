@@ -25,11 +25,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .model import Block, Document, OcrStats, Page
+from .model import Block, BBox, Document, OcrStats, Page
+from .normalize import normalize_line
 from .render import render_page
 
 #: Bump when the cache payload changes shape.
 _CACHE_VERSION = 1
+
+#: Fallback languages offered in the UI when Tesseract is not probed or has more.
+_DEFAULT_LANGUAGES = ("eng", "tur", "tur+eng")
 
 #: Options passed to Tesseract's TSV output; columns we care about.
 _TSV_COLUMNS = (
@@ -85,6 +89,53 @@ class OcrOptions:
     binary: str | None = None
 
 
+def _needs_ocr(page: Page, options: OcrOptions) -> bool:
+    """Whether a page needs OCR (sparse text layer or embedded raster scan)."""
+    length = _text_length(page)
+    if length < max(options.min_text_chars, 0):
+        return True
+    has_image = any(block.kind == "image" for block in page.blocks)
+    if has_image and length < max(options.min_text_chars * 10, 80):
+        return True
+    return False
+
+
+def _merge_ocr_blocks(page: Page, ocr_blocks: list[Block]) -> int:
+    """Append OCR blocks that do not duplicate already-extracted text lines."""
+    existing_norms = {
+        normalize_line(b.text, case_sensitive=False)
+        for b in page.blocks
+        if b.kind == "text" and b.text.strip()
+    }
+    existing_boxes = [
+        b.bbox for b in page.blocks if b.kind == "text" and b.bbox is not None
+    ]
+    added_words = 0
+    for block in ocr_blocks:
+        norm = normalize_line(block.text, case_sensitive=False)
+        if not norm or norm in existing_norms:
+            continue
+        if block.bbox is not None and any(
+            _boxes_overlap(block.bbox, box) for box in existing_boxes
+        ):
+            continue
+        page.blocks.append(block)
+        existing_norms.add(norm)
+        added_words += len(block.text.split())
+    return added_words
+
+
+def _boxes_overlap(a: BBox, b: BBox) -> bool:
+    """Whether two bounding boxes share significant vertical and horizontal overlap."""
+    v_top = max(a[1], b[1])
+    v_bot = min(a[3], b[3])
+    if v_bot - v_top <= 0:
+        return False
+    h_left = max(a[0], b[0])
+    h_right = min(a[2], b[2])
+    return h_right - h_left > 4.0
+
+
 def apply_ocr(
     document: Document, options: OcrOptions | None = None
 ) -> OcrStats | None:
@@ -94,14 +145,10 @@ def apply_ocr(
     needed OCR, so a normal text PDF never requires Tesseract.
     """
     options = options or OcrOptions()
-    if document.kind != "pdf":
+    if document.kind not in ("pdf", "image"):
         return None
 
-    pages = [
-        page
-        for page in document.pages
-        if _text_length(page) < max(options.min_text_chars, 0)
-    ]
+    pages = [page for page in document.pages if _needs_ocr(page, options)]
     if not pages:
         return None
 
@@ -130,9 +177,9 @@ def apply_ocr(
                 [_block_to_dict(block) for block in blocks],
             )
 
-        page.blocks.extend(blocks)
+        words = _merge_ocr_blocks(page, blocks)
         stats.pages += 1
-        stats.words += sum(len(block.text.split()) for block in blocks)
+        stats.words += words
 
     document.meta["ocr"] = stats.as_dict()
     return stats
@@ -145,6 +192,39 @@ def available(options: OcrOptions | None = None) -> bool:
     except OcrUnavailable:
         return False
     return True
+
+
+def installed_languages(options: OcrOptions | None = None) -> list[str]:
+    """Return Tesseract language codes installed on the system, plus combos."""
+    try:
+        binary = _tesseract_binary(options or OcrOptions())
+        completed = subprocess.run(
+            [binary, "--list-langs"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=5.0,
+            check=False,
+        )
+    except (OcrUnavailable, OSError, subprocess.SubprocessError):
+        return list(_DEFAULT_LANGUAGES)
+
+    raw = (
+        completed.stdout.decode("utf-8", "replace")
+        + "\n"
+        + completed.stderr.decode("utf-8", "replace")
+    )
+    codes: list[str] = []
+    for line in raw.splitlines():
+        token = line.strip()
+        if not token or " " in token or ":" in token or token == "osd":
+            continue
+        if re.fullmatch(r"[a-z]{3}(?:_[a-z]+)?", token) and token not in codes:
+            codes.append(token)
+    if not codes:
+        return list(_DEFAULT_LANGUAGES)
+    if "tur" in codes and "eng" in codes and "tur+eng" not in codes:
+        codes.append("tur+eng")
+    return codes
 
 
 def default_cache_dir() -> Path:

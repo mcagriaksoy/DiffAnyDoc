@@ -12,6 +12,18 @@ const state = {
   comparing: false,
   visual: null,
   ocr: null,
+  tabs: [
+    {
+      id: "tab-1",
+      files: { left: null, right: null },
+      paths: { left: null, right: null },
+      comparison: null,
+      mode: "text",
+      zoom: 1,
+    },
+  ],
+  activeTabId: "tab-1",
+  nextTabSeq: 2,
 };
 
 /* Present when the page runs inside the native pywebview shell. */
@@ -108,6 +120,7 @@ async function loadLanguage(requested) {
   applyTranslations();
   renderLanguageMenu();
   renderVersion();
+  renderSessionTabs();
 
   if (state.comparison) renderResult();
 }
@@ -313,16 +326,21 @@ function setupDropZones() {
       })
     );
 
-    zone.addEventListener("drop", (e) => {
-      const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
-      if (!files.length) return;
+    zone.addEventListener("drop", async (e) => {
       e.preventDefault();
-      try {
-        input.files = e.dataTransfer.files;
-      } catch (_) {
-        /* some browsers refuse programmatic assignment; state is what matters */
+      e.stopPropagation();
+      document.body.classList.remove("dragging");
+      const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
+      if (files.length) {
+        try {
+          input.files = e.dataTransfer.files;
+        } catch (_) {
+          /* some browsers refuse programmatic assignment; state is what matters */
+        }
+        assignDroppedFiles(files, side);
+        return;
       }
-      assignDroppedFiles(files, side);
+      await handleUriDrop(e.dataTransfer, side);
     });
 
     // Keyboard access: the drop zone behaves like a button.
@@ -366,20 +384,68 @@ function setupDropZones() {
     dragDepth = 0;
     document.body.classList.remove("dragging");
   });
-  document.addEventListener("drop", (e) => {
+  document.addEventListener("drop", async (e) => {
     document.body.classList.remove("dragging");
     dragDepth = 0;
     if (e.defaultPrevented) return; // a drop zone already handled it
-    const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
-    if (!files.length) return;
     e.preventDefault();
-    assignDroppedFiles(files, null);
+    const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
+    if (files.length) {
+      assignDroppedFiles(files, null);
+      return;
+    }
+    await handleUriDrop(e.dataTransfer, null);
   });
 }
 
 function hasFiles(event) {
-  const types = event.dataTransfer && event.dataTransfer.types;
-  return Boolean(types && Array.from(types).includes("Files"));
+  const dt = event.dataTransfer;
+  if (!dt) return false;
+  if (dt.files && dt.files.length > 0) return true;
+  const types = Array.from(dt.types || []);
+  return types.some(
+    (t) =>
+      t === "Files" ||
+      t === "text/uri-list" ||
+      t === "text/plain" ||
+      t.toLowerCase().includes("file") ||
+      t.toLowerCase().includes("uri")
+  );
+}
+
+async function handleUriDrop(dataTransfer, preferredSide) {
+  if (!dataTransfer || !desktop.available || !window.pywebview || !window.pywebview.api) {
+    return;
+  }
+  const raw =
+    dataTransfer.getData("text/uri-list") ||
+    dataTransfer.getData("text/plain") ||
+    "";
+  if (!raw.trim()) return;
+  try {
+    const resolved = await window.pywebview.api.resolve_dropped_uris(raw);
+    if (!Array.isArray(resolved) || !resolved.length) return;
+    if (resolved.length >= 2) {
+      desktop.paths.left = resolved[0];
+      desktop.paths.right = resolved[1];
+      showPath("left", resolved[0]);
+      showPath("right", resolved[1]);
+    } else {
+      const side =
+        preferredSide ||
+        (!desktop.paths.left && !state.files.left
+          ? "left"
+          : !desktop.paths.right && !state.files.right
+            ? "right"
+            : "left");
+      desktop.paths[side] = resolved[0];
+      showPath(side, resolved[0]);
+    }
+    if (!$("#result-view").hidden) showUploadView();
+    updateCompareButton();
+  } catch (_) {
+    /* ignore invalid drop payloads */
+  }
 }
 
 function assignDroppedFiles(files, preferredSide) {
@@ -410,6 +476,7 @@ function showPath(side, path) {
   chip.hidden = false;
   chip.textContent = basename(path);
   chip.title = path;
+  syncActiveTab();
 }
 
 async function chooseFile(side) {
@@ -437,6 +504,7 @@ function setFile(side, file) {
   chip.hidden = false;
   chip.textContent = `${file.name} · ${formatBytes(file.size)}`;
   updateCompareButton();
+  syncActiveTab();
 }
 
 function isReady() {
@@ -462,7 +530,11 @@ function hideError() {
 async function comparisonRequest() {
   const caseSensitive = !$("#opt-case").checked;
   const collapseWhitespace = $("#opt-space").checked;
+  const formatCheckbox = $("#opt-format");
+  const compareFormatting = Boolean(formatCheckbox && formatCheckbox.checked);
   const ocr = $("#opt-ocr").checked;
+  const ocrLangSelect = $("#opt-ocr-lang");
+  const ocrLanguage = (ocrLangSelect && ocrLangSelect.value) || "eng";
 
   if (desktop.available && desktop.paths.left && desktop.paths.right) {
     return fetch("/api/compare-paths", {
@@ -473,11 +545,12 @@ async function comparisonRequest() {
         right: desktop.paths.right,
         case_sensitive: caseSensitive,
         collapse_whitespace: collapseWhitespace,
+        compare_formatting: compareFormatting,
         fold_equal: false,
         context: 3,
         visual: true,
         ocr,
-        ocr_language: "eng",
+        ocr_language: ocrLanguage,
       }),
     });
   }
@@ -487,11 +560,12 @@ async function comparisonRequest() {
   form.append("right", state.files.right);
   form.append("case_sensitive", String(caseSensitive));
   form.append("collapse_whitespace", String(collapseWhitespace));
+  form.append("compare_formatting", String(compareFormatting));
   form.append("fold_equal", "false");
   form.append("context", "3");
   form.append("visual", "true");
   form.append("ocr", String(ocr));
-  form.append("ocr_language", "eng");
+  form.append("ocr_language", ocrLanguage);
   return fetch("/api/compare", { method: "POST", body: form });
 }
 
@@ -642,6 +716,308 @@ async function copyLine(text) {
   );
 }
 
+function recomputeStatsFromRows(data) {
+  const rows = data.rows || [];
+  let added = 0;
+  let removed = 0;
+  let changed = 0;
+  let leftChars = 0;
+  let rightChars = 0;
+  let matched = 0;
+
+  for (const row of rows) {
+    if (row.left && row.left.text) leftChars += row.left.text.length;
+    if (row.right && row.right.text) rightChars += row.right.text.length;
+    if (row.kind === "insert") added += 1;
+    else if (row.kind === "delete") removed += 1;
+    else if (row.kind === "replace") changed += 1;
+    else if (row.kind === "equal") {
+      const lLen = row.left && row.left.text ? row.left.text.length : 0;
+      const rLen = row.right && row.right.text ? row.right.text.length : 0;
+      matched += lLen + rLen;
+    }
+  }
+  const total = leftChars + rightChars;
+  data.stats = {
+    ...data.stats,
+    added,
+    removed,
+    changed,
+    similarity: total ? Math.min(matched / total, 1.0) : 1.0,
+  };
+  data.identical = added === 0 && removed === 0 && changed === 0;
+}
+
+function applyRowChangeToSide(row, fromSide) {
+  const toSide = fromSide === "left" ? "right" : "left";
+  const srcLine = row[fromSide];
+  if (!srcLine) return false;
+  const dstExisting = row[toSide];
+  row[toSide] = {
+    text: srcLine.text,
+    page: dstExisting ? dstExisting.page : srcLine.page,
+    number: dstExisting ? dstExisting.number : srcLine.number,
+    bbox: dstExisting ? dstExisting.bbox : srcLine.bbox,
+    cells: srcLine.cells ? [...srcLine.cells] : null,
+    style: srcLine.style ? { ...srcLine.style } : {},
+  };
+  if (row[fromSide] && row[fromSide].style) {
+    delete row[fromSide].style.style_change;
+  }
+  if (row[toSide] && row[toSide].style) {
+    delete row[toSide].style.style_change;
+  }
+  row.kind = "equal";
+  row.left_inline = null;
+  row.right_inline = null;
+  return true;
+}
+
+async function mergeRowToSide(rowIndex, fromSide) {
+  const data = state.comparison;
+  if (!data || !Array.isArray(data.rows)) return;
+  const row = data.rows[rowIndex];
+  if (!row || !row[fromSide]) return;
+  const copiedText = row[fromSide].text;
+  applyRowChangeToSide(row, fromSide);
+  recomputeStatsFromRows(data);
+  syncActiveTab();
+  const scroll = window.scrollY;
+  renderStats(data.stats);
+  renderText();
+  collectChanges();
+  window.scrollTo({ top: scroll });
+  await copyText(copiedText);
+  showToast(
+    i18n.t(
+      fromSide === "left" ? "merge.lineToRightDone" : "merge.lineToLeftDone"
+    )
+  );
+}
+
+async function mergeAllToSide(fromSide) {
+  closeMenus();
+  const data = state.comparison;
+  if (!data || !Array.isArray(data.rows)) return;
+  const toSide = fromSide === "left" ? "right" : "left";
+  const nextRows = [];
+  let applied = 0;
+
+  for (const row of data.rows) {
+    if (row.kind === "equal") {
+      nextRows.push(row);
+      continue;
+    }
+    if (row[fromSide]) {
+      applyRowChangeToSide(row, fromSide);
+      nextRows.push(row);
+      applied += 1;
+    } else {
+      // Opposite side had an extra line not present in fromSide: remove it on target
+      applied += 1;
+    }
+  }
+  if (!applied) {
+    showToast(i18n.t("copy.none"), true);
+    return;
+  }
+  data.rows = nextRows;
+  recomputeStatsFromRows(data);
+  syncActiveTab();
+  const scroll = window.scrollY;
+  renderStats(data.stats);
+  renderText();
+  collectChanges();
+  window.scrollTo({ top: scroll });
+  await copyText(buildCopyText(toSide));
+  showToast(
+    i18n.t("merge.allDone", {
+      side: toSide === "left" ? `A (${data.left.name})` : `B (${data.right.name})`,
+    })
+  );
+}
+
+function downloadSideDocument(side) {
+  closeMenus();
+  const data = state.comparison;
+  if (!data) return;
+  const text = buildCopyText(side);
+  const sourceName = (data[side] && data[side].name) || `${side}.txt`;
+  const dot = sourceName.lastIndexOf(".");
+  const stem = dot > 0 ? sourceName.slice(0, dot) : sourceName;
+  const ext = dot > 0 ? sourceName.slice(dot).toLowerCase() : ".txt";
+  const textExts = [".txt", ".md", ".csv", ".tsv", ".json", ".py", ".js", ".html", ".css", ".xml", ".yaml", ".yml"];
+  const outName = `${stem}-merged${textExts.includes(ext) ? ext : ".txt"}`;
+  const blob = new Blob([text + (text ? "\n" : "")], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = outName;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  showToast(i18n.t("merge.downloadDone", { name: outName }));
+}
+
+/* ---------- session tabs ---------- */
+function activeTab() {
+  return state.tabs.find((t) => t.id === state.activeTabId) || state.tabs[0];
+}
+
+function syncActiveTab() {
+  const tab = activeTab();
+  if (!tab) return;
+  tab.files = { left: state.files.left, right: state.files.right };
+  tab.paths = { left: desktop.paths.left, right: desktop.paths.right };
+  tab.comparison = state.comparison;
+  tab.mode = state.mode;
+  tab.zoom = state.zoom;
+  renderSessionTabs();
+}
+
+function tabTitle(tab) {
+  if (tab.comparison && tab.comparison.left && tab.comparison.right) {
+    return `${tab.comparison.left.name} ↔ ${tab.comparison.right.name}`;
+  }
+  const leftName =
+    (tab.files.left && tab.files.left.name) ||
+    (tab.paths.left && basename(tab.paths.left)) ||
+    "";
+  const rightName =
+    (tab.files.right && tab.files.right.name) ||
+    (tab.paths.right && basename(tab.paths.right)) ||
+    "";
+  if (leftName && rightName) return `${leftName} ↔ ${rightName}`;
+  if (leftName || rightName) return leftName || rightName;
+  return i18n.t("app.newComparison");
+}
+
+function renderSessionTabs() {
+  const container = $("#session-tabs");
+  if (!container) return;
+  const addBtn = $("#add-tab");
+  container.replaceChildren();
+  for (const tab of state.tabs) {
+    const labelText = tabTitle(tab);
+    const children = [
+      el("span", { class: "session-tab-label", text: labelText }),
+    ];
+    if (state.tabs.length > 1) {
+      children.push(
+        el("span", {
+          class: "session-tab-close",
+          role: "button",
+          tabindex: "0",
+          title: i18n.t("tab.close"),
+          "aria-label": i18n.t("tab.close"),
+          text: "\u00d7",
+          onclick: (e) => {
+            e.stopPropagation();
+            closeSessionTab(tab.id);
+          },
+        })
+      );
+    }
+    const btn = el(
+      "button",
+      {
+        class: `session-tab${tab.id === state.activeTabId ? " active" : ""}`,
+        "data-tab-id": tab.id,
+        role: "tab",
+        type: "button",
+        title: labelText,
+        onclick: () => switchSessionTab(tab.id),
+      },
+      children
+    );
+    container.append(btn);
+  }
+  if (addBtn) container.append(addBtn);
+}
+
+function restoreDropChipsFromState() {
+  for (const side of ["left", "right"]) {
+    const zone = document.querySelector(`.drop[data-side="${side}"]`);
+    if (!zone) continue;
+    const chip = zone.querySelector(".file-chip");
+    const input = zone.querySelector("input[type=file]");
+    if (desktop.available && desktop.paths[side]) {
+      zone.classList.add("filled");
+      chip.hidden = false;
+      chip.textContent = basename(desktop.paths[side]);
+      chip.title = desktop.paths[side];
+    } else if (state.files[side]) {
+      zone.classList.add("filled");
+      chip.hidden = false;
+      chip.textContent = `${state.files[side].name} · ${formatBytes(state.files[side].size)}`;
+    } else {
+      zone.classList.remove("filled");
+      chip.hidden = true;
+      chip.textContent = "";
+      if (input) input.value = "";
+    }
+  }
+}
+
+function switchSessionTab(tabId) {
+  syncActiveTab();
+  const target = state.tabs.find((t) => t.id === tabId);
+  if (!target) return;
+  state.activeTabId = target.id;
+  state.files = { left: target.files.left, right: target.files.right };
+  desktop.paths = { left: target.paths.left, right: target.paths.right };
+  state.comparison = target.comparison;
+  state.mode = target.mode || "text";
+  state.zoom = target.zoom || 1;
+  restoreDropChipsFromState();
+  renderSessionTabs();
+  if (state.comparison) {
+    renderResult();
+  } else {
+    showUploadView();
+  }
+}
+
+function createNewSessionTab() {
+  closeMenus();
+  syncActiveTab();
+  const newId = `tab-${state.nextTabSeq++}`;
+  state.tabs.push({
+    id: newId,
+    files: { left: null, right: null },
+    paths: { left: null, right: null },
+    comparison: null,
+    mode: "text",
+    zoom: 1,
+  });
+  switchSessionTab(newId);
+}
+
+function closeSessionTab(tabId) {
+  if (state.tabs.length <= 1) {
+    reset();
+    return;
+  }
+  const idx = state.tabs.findIndex((t) => t.id === tabId);
+  if (idx < 0) return;
+  const wasActive = tabId === state.activeTabId;
+  state.tabs.splice(idx, 1);
+  if (wasActive) {
+    const nextTab = state.tabs[Math.max(0, idx - 1)];
+    state.activeTabId = nextTab.id;
+    state.files = { left: nextTab.files.left, right: nextTab.files.right };
+    desktop.paths = { left: nextTab.paths.left, right: nextTab.paths.right };
+    state.comparison = nextTab.comparison;
+    state.mode = nextTab.mode || "text";
+    state.zoom = nextTab.zoom || 1;
+    restoreDropChipsFromState();
+    if (state.comparison) renderResult();
+    else showUploadView();
+  }
+  renderSessionTabs();
+}
+
 /* ---------- toast ---------- */
 let toastTimer = 0;
 function showToast(message, isError = false) {
@@ -700,6 +1076,7 @@ function renderResult() {
 
   $("#export").href = `/api/compare/${data.id}/report?lang=${i18n.lang}`;
 
+  syncActiveTab();
   renderText();
   renderPages();
   setMode(canRender ? state.mode : "text");
@@ -741,6 +1118,13 @@ function renderStats(stats) {
       ])
     );
   }
+  if (state.comparison && state.comparison.byte_identical) {
+    nodes.push(
+      el("span", { class: "stat" }, [
+        el("b", { text: i18n.t("stats.byteIdentical") }),
+      ])
+    );
+  }
   $("#stats").replaceChildren(...nodes);
 }
 
@@ -758,24 +1142,28 @@ function renderText() {
   );
 
   const rows = el("div", { class: "rows" });
+  const fragment = document.createDocumentFragment();
   if (!data.rows.length) {
-    rows.append(
-      el("div", { class: "empty-state" }, [
-        i18n.t("empty.noText"),
-        " ",
-        i18n.t("empty.ocrHint"),
-      ])
+    fragment.append(
+      el(
+        "div",
+        { class: "empty-state" },
+        data.byte_identical
+          ? [i18n.t("empty.byteIdentical")]
+          : [i18n.t("empty.noText"), " ", i18n.t("empty.ocrHint")]
+      )
     );
   }
   const lastPage = { left: -1, right: -1 };
-  for (const row of data.rows) {
+  for (let rowIndex = 0; rowIndex < data.rows.length; rowIndex++) {
+    const row = data.rows[rowIndex];
     if (row.hidden_before) {
-      rows.append(
+      fragment.append(
         el("div", { class: "gap", text: `⋯ ${i18n.t("gap.hidden", { n: row.hidden_before })} ⋯` })
       );
     }
     if (!row.left && !row.right) continue;
-    rows.append(
+    fragment.append(
       el(
         "div",
         {
@@ -795,14 +1183,16 @@ function renderText() {
             row.left_inline,
             lastPage.left,
             "left",
-            row.kind !== "equal"
+            row.kind !== "equal",
+            rowIndex
           ),
           buildCell(
             row.right,
             row.right_inline,
             lastPage.right,
             "right",
-            row.kind !== "equal"
+            row.kind !== "equal",
+            rowIndex
           ),
         ]
       )
@@ -810,6 +1200,7 @@ function renderText() {
     if (row.left) lastPage.left = row.left.page;
     if (row.right) lastPage.right = row.right.page;
   }
+  rows.append(fragment);
   container.append(rows);
 }
 
@@ -818,7 +1209,8 @@ function buildCell(
   inline,
   previousPage = -1,
   side = "left",
-  copyable = false
+  copyable = false,
+  rowIndex = -1
 ) {
   if (!line) return el("div", { class: "cell" });
   const text = el("span", { class: "text" });
@@ -840,6 +1232,15 @@ function buildCell(
   } else {
     text.textContent = line.text;
   }
+  if (line.style && line.style.style_change) {
+    text.append(
+      el("span", {
+        class: "page-tag",
+        title: line.style.style_change,
+        text: line.style.summary || line.style.style_change,
+      })
+    );
+  }
   const gutter = el("span", { class: "gutter" });
   if (copyable) {
     const label = i18n.t(
@@ -852,7 +1253,10 @@ function buildCell(
         title: label,
         "aria-label": label,
         text: side === "left" ? "\u2192" : "\u2190",
-        onclick: () => copyLine(line.text),
+        onclick: () => {
+          if (rowIndex >= 0) mergeRowToSide(rowIndex, side);
+          else copyLine(line.text);
+        },
       })
     );
   }
@@ -1098,9 +1502,12 @@ function reset() {
   $("#opt-visual").checked = true;
   document.body.classList.remove("visual-off");
   $("#opt-ocr").checked = false;
+  if ($("#opt-format")) $("#opt-format").checked = false;
+  if ($("#opt-ocr-lang")) $("#opt-ocr-lang").hidden = true;
   document.body.classList.remove("dragging");
   showUploadView();
   updateCompareButton();
+  syncActiveTab();
 }
 
 /* ---------- deep link: /?id=<comparison>&view=pages ---------- */
@@ -1173,11 +1580,19 @@ setupDialogs();
 loadTheme();
 $("#compare").addEventListener("click", runComparison);
 $("#restart").addEventListener("click", reset);
+if ($("#new-compare-btn")) $("#new-compare-btn").addEventListener("click", reset);
+if ($("#add-tab")) $("#add-tab").addEventListener("click", createNewSessionTab);
+if ($("#new-tab-btn")) $("#new-tab-btn").addEventListener("click", createNewSessionTab);
+if ($("#new-tab-menu")) $("#new-tab-menu").addEventListener("click", createNewSessionTab);
 $("#reload").addEventListener("click", reloadComparison);
+if ($("#copy-all-to-right")) $("#copy-all-to-right").addEventListener("click", () => mergeAllToSide("left"));
+if ($("#copy-all-to-left")) $("#copy-all-to-left").addEventListener("click", () => mergeAllToSide("right"));
 $("#copy-changes").addEventListener("click", () => copyView("changes"));
 $("#copy-left").addEventListener("click", () => copyView("left"));
 $("#copy-right").addEventListener("click", () => copyView("right"));
 $("#copy-both").addEventListener("click", () => copyView("both"));
+if ($("#download-left")) $("#download-left").addEventListener("click", () => downloadSideDocument("left"));
+if ($("#download-right")) $("#download-right").addEventListener("click", () => downloadSideDocument("right"));
 
 $$(".tab").forEach((tab) =>
   tab.addEventListener("click", () => {
@@ -1194,6 +1609,33 @@ $("#opt-visual").addEventListener("change", (event) => {
   document.body.classList.toggle("visual-off", !event.target.checked);
   collectChanges();
 });
+
+$("#opt-ocr").addEventListener("change", (event) => {
+  const select = $("#opt-ocr-lang");
+  if (select) select.hidden = !event.target.checked;
+});
+
+async function loadOcrStatus() {
+  const select = $("#opt-ocr-lang");
+  if (!select) return;
+  try {
+    const response = await fetch("/api/ocr/status");
+    if (!response.ok) return;
+    const payload = await response.json();
+    if (Array.isArray(payload.languages) && payload.languages.length) {
+      select.replaceChildren(
+        ...payload.languages.map((code) =>
+          el("option", { value: code, text: code })
+        )
+      );
+      if (i18n.lang === "tr" && payload.languages.includes("tur+eng")) {
+        select.value = "tur+eng";
+      }
+    }
+  } catch (_) {
+    /* keep default language list */
+  }
+}
 
 $("#zoom-in").addEventListener("click", () => {
   state.zoom = Math.min(2, Math.round((state.zoom + 0.1) * 10) / 10);
@@ -1232,6 +1674,7 @@ document.addEventListener("keydown", (event) => {
 
 async function init() {
   await loadLanguage(preferredLanguage());
+  await loadOcrStatus();
   await restoreFromUrl();
   if (window.pywebview && window.pywebview.api) initDesktop();
   try {

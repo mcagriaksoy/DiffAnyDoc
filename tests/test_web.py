@@ -130,3 +130,47 @@ def test_compare_paths_rejects_missing_files(tmp_path: Path) -> None:
         json={"left": str(tmp_path / "yok-a.txt"), "right": str(tmp_path / "yok-b.txt")},
     )
     assert response.status_code == 400
+
+
+def test_checksum_and_ocr_status_endpoints(tmp_path: Path) -> None:
+    left = tmp_path / "a.txt"
+    right = tmp_path / "b.txt"
+    left.write_text("aynı içerik\n", encoding="utf-8")
+    right.write_text("aynı içerik\n", encoding="utf-8")
+
+    client = _client()
+    chk = client.post(
+        "/api/checksum",
+        json={"left": str(left), "right": str(right)},
+    )
+    assert chk.status_code == 200
+    data = chk.json()
+    assert data["byte_identical"] is True
+    assert data["left_sha256"] == data["right_sha256"]
+
+    ocr = client.get("/api/ocr/status")
+    assert ocr.status_code == 200
+    assert isinstance(ocr.json()["languages"], list)
+
+
+def test_export_merged_side_endpoint(tmp_path: Path) -> None:
+    left = tmp_path / "sol.txt"
+    right = tmp_path / "sag.txt"
+    left.write_text("satır 1\nsatır 2 sol\n", encoding="utf-8")
+    right.write_text("satır 1\nsatır 2 sağ\n", encoding="utf-8")
+
+    client = _client()
+    comp = client.post(
+        "/api/compare-paths",
+        json={"left": str(left), "right": str(right), "fold_equal": False},
+    ).json()
+
+    exp_left = client.get(f"/api/compare/{comp['id']}/export/left")
+    assert exp_left.status_code == 200
+    assert "satır 2 sol" in exp_left.text
+
+    exp_right = client.get(f"/api/compare/{comp['id']}/export/right")
+    assert exp_right.status_code == 200
+    assert "satır 2 sağ" in exp_right.text
+
+

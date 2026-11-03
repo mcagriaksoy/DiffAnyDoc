@@ -175,3 +175,32 @@ def test_xlsx_identical_files_are_identical(xlsx_pair: tuple[Path, Path]) -> Non
     result = compare(xlsx_pair[0], xlsx_pair[0])
     assert result.identical
     assert result.stats.similarity == 1.0
+
+
+def test_xlsx_merged_cells_are_expanded(tmp_path: Path) -> None:
+    path = write_xlsx(
+        tmp_path / "merged.xlsx",
+        [("Sheet1", [["Bölüm A", None, "Not"], ["Alt 1", "Alt 2", "Değer"]])],
+    )
+    # Inject a mergeCells node for A1:B1 into sheet1.xml
+    with zipfile.ZipFile(path, "r") as zin:
+        items = {name: zin.read(name) for name in zin.namelist()}
+    sheet_xml = items["xl/worksheets/sheet1.xml"].decode("utf-8")
+    sheet_xml = sheet_xml.replace(
+        "</worksheet>",
+        '<mergeCells count="1"><mergeCell ref="A1:B1"/></mergeCells></worksheet>',
+    )
+    items["xl/worksheets/sheet1.xml"] = sheet_xml.encode("utf-8")
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zout:
+        for name, content in items.items():
+            zout.writestr(name, content)
+
+    doc = load(path)
+    table = doc.pages[0].blocks[0]
+    assert [cell.text for cell in table.children[0].children] == [
+        "Bölüm A",
+        "Bölüm A",
+        "Not",
+    ]
+    assert table.children[0].children[1].style.get("merged_from") == "A1"
+
