@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
+import copy
 import hashlib
+import threading
 from dataclasses import asdict, dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -57,6 +60,86 @@ def file_sha256(path: str | Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+_PRELOAD_LOCK = threading.Lock()
+_PRELOAD_CACHE: "OrderedDict[str, Document]" = OrderedDict()
+_MAX_PRELOAD_ITEMS = 12
+
+
+def preload_document(
+    path: str | Path,
+    ocr: bool = False,
+    ocr_language: str = "eng",
+    ocr_dpi: int = 300,
+    ocr_min_chars: int = 8,
+    ocr_max_pages: int = 60,
+    ocr_cache_dir: str | None = None,
+) -> tuple[str, Document, OcrStats | None]:
+    """Parse (and optionally OCR) a single file ahead of time, caching by SHA-256."""
+    target = Path(path).expanduser()
+    digest = file_sha256(target)
+    with _PRELOAD_LOCK:
+        cached_doc = _PRELOAD_CACHE.get(digest)
+        if cached_doc is not None:
+            _PRELOAD_CACHE.move_to_end(digest)
+            document = copy.deepcopy(cached_doc)
+            document.path = target
+        else:
+            document = None
+
+    if document is None:
+        document = load(target)
+        with _PRELOAD_LOCK:
+            _PRELOAD_CACHE[digest] = copy.deepcopy(document)
+            _PRELOAD_CACHE.move_to_end(digest)
+            while len(_PRELOAD_CACHE) > _MAX_PRELOAD_ITEMS:
+                _PRELOAD_CACHE.popitem(last=False)
+
+    ocr_stats: OcrStats | None = None
+    if ocr:
+        ocr_options = OcrOptions(
+            language=ocr_language,
+            dpi=ocr_dpi,
+            min_text_chars=ocr_min_chars,
+            max_pages=ocr_max_pages,
+            cache_dir=ocr_cache_dir,
+        )
+        ocr_stats = apply_ocr(document, ocr_options)
+
+    return digest, document, ocr_stats
+
+
+def _load_or_cached(
+    source: str | Path | Document,
+    digest: str | None,
+    options: DiffOptions,
+) -> tuple[Document, OcrStats | None]:
+    if isinstance(source, Document):
+        doc = source
+    else:
+        target = Path(source)
+        doc = None
+        if digest and options.fast_check:
+            with _PRELOAD_LOCK:
+                cached = _PRELOAD_CACHE.pop(digest, None)
+                if cached is not None:
+                    doc = copy.deepcopy(cached)
+                    doc.path = target
+        if doc is None:
+            doc = load(target)
+
+    ocr_stats = None
+    if options.ocr:
+        ocr_options = OcrOptions(
+            language=options.ocr_language,
+            dpi=options.ocr_dpi,
+            min_text_chars=options.ocr_min_chars,
+            max_pages=options.ocr_max_pages,
+            cache_dir=options.ocr_cache_dir,
+        )
+        ocr_stats = apply_ocr(doc, ocr_options)
+    return doc, ocr_stats
 
 
 def _fast_byte_check(
@@ -160,23 +243,14 @@ def compare(
             right_pages=list(dims),
         )
 
-    left_doc = _coerce(left)
-    right_doc = _coerce(right)
+    left_doc, left_ocr = _load_or_cached(left, left_hash, options)
+    right_doc, right_ocr = _load_or_cached(right, right_hash, options)
 
     ocr: OcrStats | None = None
-    if options.ocr:
-        ocr_options = OcrOptions(
-            language=options.ocr_language,
-            dpi=options.ocr_dpi,
-            min_text_chars=options.ocr_min_chars,
-            max_pages=options.ocr_max_pages,
-            cache_dir=options.ocr_cache_dir,
-        )
-        for document in (left_doc, right_doc):
-            page_stats = apply_ocr(document, ocr_options)
-            if page_stats is None:
-                continue
-            ocr = page_stats if ocr is None else ocr.merged(page_stats)
+    for page_stats in (left_ocr, right_ocr):
+        if page_stats is None:
+            continue
+        ocr = page_stats if ocr is None else ocr.merged(page_stats)
 
     left_lines = document_lines(
         left_doc,

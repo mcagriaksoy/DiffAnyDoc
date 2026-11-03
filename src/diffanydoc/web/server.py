@@ -18,12 +18,13 @@ from typing import Any
 
 from .. import __version__
 from ..core.adapters import AdapterError, supported_extensions
-from ..core.diff import DiffOptions, compare, file_sha256
+from ..core.diff import DiffOptions, compare, file_sha256, preload_document
 from ..core.model import DiffResult
 from ..core.ocr import OcrError, available as ocr_available, installed_languages
 from ..core.render import is_renderable_path, render_page_png
 from ..core.report.html import render_html
 from ..core.report.json import result_to_dict
+from ..core.visual import render_xray_page_png
 from ..i18n import available_languages, resolve_language, strings
 from ..system import accent_color
 
@@ -99,6 +100,66 @@ def create_app() -> FastAPI:
             }
         )
 
+    @app.post("/api/preload-path")
+    async def preload_path_endpoint(body: dict[str, Any]) -> JSONResponse:
+        path = Path(str(body.get("path", ""))).expanduser()
+        if not path.is_file():
+            raise HTTPException(status_code=400, detail="file must exist")
+        other_sha = str(body.get("other_sha256") or "")
+        digest = file_sha256(path)
+        if other_sha and digest == other_sha:
+            return JSONResponse(
+                {
+                    "sha256": digest,
+                    "byte_identical": True,
+                    "skipped_parse": True,
+                }
+            )
+        ocr = bool(body.get("ocr", True))
+        ocr_lang = str(body.get("ocr_language") or "tur+eng")
+        digest, doc, _ = preload_document(path, ocr=ocr, ocr_language=ocr_lang)
+        return JSONResponse(
+            {
+                "sha256": digest,
+                "kind": doc.kind,
+                "pages": len(doc.pages),
+                "byte_identical": False,
+                "skipped_parse": False,
+            }
+        )
+
+    @app.post("/api/preload")
+    async def preload_upload_endpoint(
+        file: UploadFile = File(...),
+        other_sha256: str = Form(""),
+        ocr: bool = Form(True),
+        ocr_language: str = Form("tur+eng"),
+    ) -> JSONResponse:
+        directory = Path(tempfile.mkdtemp(prefix="diffanydoc-pre-"))
+        try:
+            stored = _store_upload(file, directory, "preload")
+            digest = file_sha256(stored)
+            if other_sha256 and digest == other_sha256:
+                return JSONResponse(
+                    {
+                        "sha256": digest,
+                        "byte_identical": True,
+                        "skipped_parse": True,
+                    }
+                )
+            digest, doc, _ = preload_document(stored, ocr=ocr, ocr_language=ocr_language)
+            return JSONResponse(
+                {
+                    "sha256": digest,
+                    "kind": doc.kind,
+                    "pages": len(doc.pages),
+                    "byte_identical": False,
+                    "skipped_parse": False,
+                }
+            )
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
+
     @app.get("/api/system/theme")
     def system_theme() -> dict[str, Any]:
         return {"accent": accent_color(), "platform": sys.platform}
@@ -125,8 +186,8 @@ def create_app() -> FastAPI:
         compare_formatting: bool = Form(False),
         fold_equal: bool = Form(False),
         visual: bool = Form(True),
-        ocr: bool = Form(False),
-        ocr_language: str = Form("eng"),
+        ocr: bool = Form(True),
+        ocr_language: str = Form("tur+eng"),
     ) -> JSONResponse:
         directory = Path(tempfile.mkdtemp(prefix="diffanydoc-"))
         try:
@@ -165,8 +226,8 @@ def create_app() -> FastAPI:
             bool(body.get("fold_equal", False)),
             bool(body.get("collapse_whitespace", True)),
             bool(body.get("visual", True)),
-            bool(body.get("ocr", False)),
-            str(body.get("ocr_language") or "eng"),
+            bool(body.get("ocr", True)),
+            str(body.get("ocr_language") or "tur+eng"),
             bool(body.get("compare_formatting", False)),
         )
         return JSONResponse(_summary(comparison))
@@ -219,6 +280,31 @@ def create_app() -> FastAPI:
             data = render_page_png(path, index, max(60, min(dpi, 300)))
         except Exception as exc:  # pragma: no cover - renderer specific
             raise HTTPException(status_code=500, detail=f"render failed: {exc}") from exc
+        return Response(
+            content=data,
+            media_type="image/png",
+            headers={"Cache-Control": "private, max-age=3600"},
+        )
+
+    @app.get("/api/compare/{comparison_id}/xray/{left_index}/{right_index}.png")
+    def get_xray_page(
+        comparison_id: str, left_index: int, right_index: int, dpi: int = 110
+    ) -> Response:
+        comparison = _get(comparison_id)
+        if not (is_renderable_path(comparison.left) and is_renderable_path(comparison.right)):
+            raise HTTPException(
+                status_code=404, detail="both files must be renderable for X-Ray view"
+            )
+        try:
+            data = render_xray_page_png(
+                comparison.left,
+                left_index,
+                comparison.right,
+                right_index,
+                dpi=max(60, min(dpi, 300)),
+            )
+        except Exception as exc:  # pragma: no cover - renderer specific
+            raise HTTPException(status_code=500, detail=f"xray render failed: {exc}") from exc
         return Response(
             content=data,
             media_type="image/png",

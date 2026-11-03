@@ -105,6 +105,7 @@ def test_missing_tesseract_is_reported(tmp_path: Path, monkeypatch: pytest.Monke
     left, right = _blank_pair(tmp_path)
     monkeypatch.delenv("DIFFANYDOC_TESSERACT", raising=False)
     monkeypatch.setattr("diffanydoc.core.ocr.shutil.which", lambda _name: None)
+    monkeypatch.setattr("diffanydoc.core.ocr._rapidocr_available", lambda: False)
 
     with pytest.raises(OcrUnavailable):
         compare(
@@ -191,9 +192,40 @@ def test_cli_explains_missing_tesseract(
     monkeypatch.setenv("DIFFANYDOC_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.delenv("DIFFANYDOC_TESSERACT", raising=False)
     monkeypatch.setattr("diffanydoc.core.ocr.shutil.which", lambda _name: None)
+    monkeypatch.setattr("diffanydoc.core.ocr._rapidocr_available", lambda: False)
 
     assert main(["diff", str(left), str(right), "--ocr"]) == 2
     assert "tesseract is required" in capsys.readouterr().err
+
+
+def test_rapidocr_embedded_engine_recognizes_image_without_tesseract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("rapidocr_onnxruntime")
+    from PIL import Image, ImageDraw
+
+    monkeypatch.delenv("DIFFANYDOC_TESSERACT", raising=False)
+    monkeypatch.setattr("diffanydoc.core.ocr.shutil.which", lambda _name: None)
+
+    left_img = tmp_path / "rapid_a.png"
+    right_img = tmp_path / "rapid_b.png"
+
+    im1 = Image.new("RGB", (320, 90), "white")
+    ImageDraw.Draw(im1).text((20, 24), "INVOICE 1000 EUR", fill="black")
+    im1.save(left_img)
+
+    im2 = Image.new("RGB", (320, 90), "white")
+    ImageDraw.Draw(im2).text((20, 24), "INVOICE 1250 EUR", fill="black")
+    im2.save(right_img)
+
+    result = compare(
+        left_img,
+        right_img,
+        DiffOptions(ocr=True, visual=False, ocr_cache_dir=str(tmp_path / "cache")),
+    )
+    assert result.ocr is not None and result.ocr.pages == 2
+    assert result.ocr.words >= 2
+    assert any(row.kind == "replace" for row in result.rows)
 
 
 def test_image_adapter_and_ocr_comparison(

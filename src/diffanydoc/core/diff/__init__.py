@@ -3,7 +3,14 @@
 from __future__ import annotations
 
 from .align import align_pages
-from .engine import DiffOptions, compare, file_sha256, result_as_dict, supported_formats
+from .engine import (
+    DiffOptions,
+    compare,
+    file_sha256,
+    preload_document,
+    result_as_dict,
+    supported_formats,
+)
 from .lines import document_lines, inline_diff, line_similarity
 
 __all__ = [
@@ -14,6 +21,7 @@ __all__ = [
     "file_sha256",
     "inline_diff",
     "line_similarity",
+    "preload_document",
     "result_as_dict",
     "supported_formats",
 ]

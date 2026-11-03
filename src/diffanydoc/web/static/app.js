@@ -12,6 +12,10 @@ const state = {
   comparing: false,
   visual: null,
   ocr: null,
+  annotating: false,
+  annotations: [],
+  nextAnnotationId: 1,
+  preloadedHashes: { left: "", right: "" },
   tabs: [
     {
       id: "tab-1",
@@ -20,6 +24,7 @@ const state = {
       comparison: null,
       mode: "text",
       zoom: 1,
+      annotations: [],
     },
   ],
   activeTabId: "tab-1",
@@ -477,6 +482,7 @@ function showPath(side, path) {
   chip.textContent = basename(path);
   chip.title = path;
   syncActiveTab();
+  preloadSide(side);
 }
 
 async function chooseFile(side) {
@@ -505,6 +511,46 @@ function setFile(side, file) {
   chip.textContent = `${file.name} · ${formatBytes(file.size)}`;
   updateCompareButton();
   syncActiveTab();
+  preloadSide(side);
+}
+
+async function preloadSide(side) {
+  const otherSide = side === "left" ? "right" : "left";
+  const otherHash = (state.preloadedHashes && state.preloadedHashes[otherSide]) || "";
+  const ocrLanguage = i18n.lang === "tr" ? "tur+eng" : "eng";
+  try {
+    if (desktop.available && desktop.paths[side]) {
+      const response = await fetch("/api/preload-path", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          path: desktop.paths[side],
+          other_sha256: otherHash,
+          ocr: true,
+          ocr_language: ocrLanguage,
+        }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.sha256) state.preloadedHashes[side] = data.sha256;
+      }
+      return;
+    }
+    if (state.files[side]) {
+      const form = new FormData();
+      form.append("file", state.files[side]);
+      form.append("other_sha256", otherHash);
+      form.append("ocr", "true");
+      form.append("ocr_language", ocrLanguage);
+      const response = await fetch("/api/preload", { method: "POST", body: form });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.sha256) state.preloadedHashes[side] = data.sha256;
+      }
+    }
+  } catch (_) {
+    /* background preloading is opportunistic */
+  }
 }
 
 function isReady() {
@@ -532,9 +578,10 @@ async function comparisonRequest() {
   const collapseWhitespace = $("#opt-space").checked;
   const formatCheckbox = $("#opt-format");
   const compareFormatting = Boolean(formatCheckbox && formatCheckbox.checked);
-  const ocr = $("#opt-ocr").checked;
+  const ocrCheckbox = $("#opt-ocr");
+  const ocr = ocrCheckbox ? Boolean(ocrCheckbox.checked) : true;
   const ocrLangSelect = $("#opt-ocr-lang");
-  const ocrLanguage = (ocrLangSelect && ocrLangSelect.value) || "eng";
+  const ocrLanguage = (ocrLangSelect && ocrLangSelect.value) || (i18n.lang === "tr" ? "tur+eng" : "eng");
 
   if (desktop.available && desktop.paths.left && desktop.paths.right) {
     return fetch("/api/compare-paths", {
@@ -873,6 +920,7 @@ function syncActiveTab() {
   tab.comparison = state.comparison;
   tab.mode = state.mode;
   tab.zoom = state.zoom;
+  tab.annotations = state.annotations ? [...state.annotations] : [];
   renderSessionTabs();
 }
 
@@ -970,6 +1018,7 @@ function switchSessionTab(tabId) {
   state.comparison = target.comparison;
   state.mode = target.mode || "text";
   state.zoom = target.zoom || 1;
+  state.annotations = Array.isArray(target.annotations) ? [...target.annotations] : [];
   restoreDropChipsFromState();
   renderSessionTabs();
   if (state.comparison) {
@@ -990,6 +1039,7 @@ function createNewSessionTab() {
     comparison: null,
     mode: "text",
     zoom: 1,
+    annotations: [],
   });
   switchSessionTab(newId);
 }
@@ -1011,6 +1061,7 @@ function closeSessionTab(tabId) {
     state.comparison = nextTab.comparison;
     state.mode = nextTab.mode || "text";
     state.zoom = nextTab.zoom || 1;
+    state.annotations = Array.isArray(nextTab.annotations) ? [...nextTab.annotations] : [];
     restoreDropChipsFromState();
     if (state.comparison) renderResult();
     else showUploadView();
@@ -1067,8 +1118,11 @@ function renderResult() {
   renderStats(data.stats);
 
   const canRender = data.renderable.left || data.renderable.right;
+  const canXray = Boolean(data.renderable.left && data.renderable.right);
   $("#tab-pages").disabled = !canRender;
-  if (!canRender && state.mode === "pages") state.mode = "text";
+  if ($("#tab-xray")) $("#tab-xray").disabled = !canXray;
+  if (!canRender && (state.mode === "pages" || state.mode === "xray")) state.mode = "text";
+  if (!canXray && state.mode === "xray") state.mode = canRender ? "pages" : "text";
 
   $("#visual-wrap").hidden = !state.visual;
   $("#opt-visual").checked = !document.body.classList.contains("visual-off");
@@ -1288,14 +1342,99 @@ function renderPages() {
     if (state.visual.stats.compared) container.append(buildVisualBar(state.visual));
   }
 
-  for (const pair of data.page_map) {
+  if (state.mode === "xray") {
+    container.append(
+      el("div", { class: "visual-bar" }, [
+        el("span", { class: "visual-dot", "aria-hidden": "true" }),
+        el("span", { text: i18n.t("xray.hint") }),
+      ])
+    );
+    for (let pairIdx = 0; pairIdx < data.page_map.length; pairIdx++) {
+      const pair = data.page_map[pairIdx];
+      container.append(
+        el("div", { class: "page-row xray-row" }, [
+          buildXrayCard(pair, pairIdx, visualPages.left[pair.left]),
+        ])
+      );
+    }
+    return;
+  }
+
+  for (let pairIdx = 0; pairIdx < data.page_map.length; pairIdx++) {
+    const pair = data.page_map[pairIdx];
     container.append(
       el("div", { class: "page-row" }, [
-        buildPageCard("left", pair.left, visualPages.left[pair.left]),
-        buildPageCard("right", pair.right, visualPages.right[pair.right]),
+        buildPageCard("left", pair.left, visualPages.left[pair.left], pairIdx),
+        buildPageCard("right", pair.right, visualPages.right[pair.right], pairIdx),
       ])
     );
   }
+}
+
+function buildXrayCard(pair, pairIdx, visualPage) {
+  const data = state.comparison;
+  const label = `X-Ray: A (${data.left.name}) ↔ B (${data.right.name})`;
+  const pageText =
+    pair.left !== null && pair.right !== null
+      ? `${i18n.t("page.label", { n: pair.left + 1 })} ↔ ${i18n.t("page.label", { n: pair.right + 1 })}`
+      : i18n.t("page.none");
+
+  const card = el("div", { class: "page-card" }, [
+    el("div", { class: "page-label" }, [
+      el("span", { text: label }),
+      el("span", { text: pageText }),
+    ]),
+  ]);
+
+  if (
+    pair.left === null ||
+    pair.right === null ||
+    !data.renderable.left ||
+    !data.renderable.right
+  ) {
+    card.append(
+      el("div", { class: "page-canvas missing", text: i18n.t("page.missing") })
+    );
+    return card;
+  }
+
+  const sizeL = data.pages.left[pair.left] || { width: 595, height: 842 };
+  const sizeR = data.pages.right[pair.right] || { width: 595, height: 842 };
+  const size = {
+    width: Math.max(sizeL.width, sizeR.width),
+    height: Math.max(sizeL.height, sizeR.height),
+  };
+
+  const canvas = el("div", { class: "page-canvas" });
+  canvas.append(
+    el("img", {
+      src: `/api/compare/${data.id}/xray/${pair.left}/${pair.right}.png?dpi=120`,
+      alt: `${label} ${pageText}`,
+      loading: "lazy",
+    })
+  );
+
+  // Also show OCR/text diff boxes and visual boxes so hovering shows the text
+  const rectsL = (data.rects.left && data.rects.left[String(pair.left)]) || [];
+  const rectsR = (data.rects.right && data.rects.right[String(pair.right)]) || [];
+  for (const rect of [...rectsL, ...rectsR]) {
+    addRect(
+      canvas,
+      [rect.x0, rect.top, rect.x1, rect.bottom],
+      rect.kind === "insert" ? "insert" : rect.kind === "delete" ? "delete" : "replace",
+      `${rect.kind}: ${rect.text}`,
+      size.width,
+      size.height
+    );
+  }
+  for (const box of (visualPage && visualPage.left_regions) || []) {
+    addRect(canvas, box, "visual", i18n.t("visual.region"), size.width, size.height);
+  }
+
+  renderManualAnnotations(canvas, pairIdx, "xray");
+  attachManualAnnotationDrawing(canvas, pairIdx, "xray");
+  card.append(canvas);
+  return card;
 }
 
 function buildVisualBar(visual) {
@@ -1332,7 +1471,7 @@ function addRect(canvas, box, kind, title, pageWidth, pageHeight) {
   );
 }
 
-function buildPageCard(side, index, visualPage) {
+function buildPageCard(side, index, visualPage, pairIdx = 0) {
   const data = state.comparison;
   const name = side === "left" ? data.left.name : data.right.name;
   const renderable = side === "left" ? data.renderable.left : data.renderable.right;
@@ -1381,8 +1520,150 @@ function buildPageCard(side, index, visualPage) {
     addRect(canvas, box, "visual", i18n.t("visual.region"), size.width, size.height);
   }
 
+  renderManualAnnotations(canvas, pairIdx, side);
+  attachManualAnnotationDrawing(canvas, pairIdx, side);
   card.append(canvas);
   return card;
+}
+
+function renderManualAnnotations(canvas, pairIdx, side) {
+  for (const existing of canvas.querySelectorAll(".rect.manual")) {
+    existing.remove();
+  }
+  const items = (state.annotations || []).filter(
+    (ann) => ann.pairIdx === pairIdx && (ann.side === side || ann.side === "both")
+  );
+  for (const ann of items) {
+    const box = el(
+      "div",
+      {
+        class: "rect manual",
+        title: ann.note || i18n.t("annotate.defaultNote"),
+        style: `left:${ann.x}%;top:${ann.y}%;width:${ann.w}%;height:${ann.h}%`,
+      },
+      [
+        el("span", { class: "rect-label" }, [
+          el("span", { text: ann.note || i18n.t("annotate.defaultNote") }),
+          el("button", {
+            class: "rect-del",
+            type: "button",
+            title: i18n.t("annotate.deleteHint"),
+            text: "\u00d7",
+            onclick: (e) => {
+              e.stopPropagation();
+              removeManualAnnotation(ann.id);
+            },
+          }),
+        ]),
+      ]
+    );
+    canvas.append(box);
+  }
+}
+
+function removeManualAnnotation(id) {
+  state.annotations = (state.annotations || []).filter((a) => a.id !== id);
+  syncActiveTab();
+  if ($("#annotate-clear")) {
+    $("#annotate-clear").hidden = state.annotations.length === 0;
+  }
+  renderPages();
+  collectChanges();
+}
+
+function clearManualAnnotations() {
+  state.annotations = [];
+  syncActiveTab();
+  if ($("#annotate-clear")) $("#annotate-clear").hidden = true;
+  renderPages();
+  collectChanges();
+  showToast(i18n.t("annotate.cleared"));
+}
+
+function attachManualAnnotationDrawing(canvas, pairIdx, side) {
+  let startX = 0;
+  let startY = 0;
+  let draft = null;
+
+  canvas.addEventListener("mousedown", (e) => {
+    if (!state.annotating || e.button !== 0) return;
+    if (e.target.closest(".rect-del")) return;
+    e.preventDefault();
+    const bounds = canvas.getBoundingClientRect();
+    if (!bounds.width || !bounds.height) return;
+    startX = ((e.clientX - bounds.left) / bounds.width) * 100;
+    startY = ((e.clientY - bounds.top) / bounds.height) * 100;
+    draft = el("div", {
+      class: "rect manual",
+      style: `left:${startX}%;top:${startY}%;width:0%;height:0%`,
+    });
+    canvas.append(draft);
+
+    const onMove = (moveEvent) => {
+      if (!draft) return;
+      const curX = Math.max(
+        0,
+        Math.min(100, ((moveEvent.clientX - bounds.left) / bounds.width) * 100)
+      );
+      const curY = Math.max(
+        0,
+        Math.min(100, ((moveEvent.clientY - bounds.top) / bounds.height) * 100)
+      );
+      const left = Math.min(startX, curX);
+      const top = Math.min(startY, curY);
+      const width = Math.abs(curX - startX);
+      const height = Math.abs(curY - startY);
+      draft.style.left = `${left}%`;
+      draft.style.top = `${top}%`;
+      draft.style.width = `${width}%`;
+      draft.style.height = `${height}%`;
+    };
+
+    const onUp = (upEvent) => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      if (!draft) return;
+      const curX = Math.max(
+        0,
+        Math.min(100, ((upEvent.clientX - bounds.left) / bounds.width) * 100)
+      );
+      const curY = Math.max(
+        0,
+        Math.min(100, ((upEvent.clientY - bounds.top) / bounds.height) * 100)
+      );
+      const x = Math.round(Math.min(startX, curX) * 100) / 100;
+      const y = Math.round(Math.min(startY, curY) * 100) / 100;
+      const w = Math.round(Math.abs(curX - startX) * 100) / 100;
+      const h = Math.round(Math.abs(curY - startY) * 100) / 100;
+      draft.remove();
+      draft = null;
+      if (w < 1.2 || h < 1.0) return;
+
+      const noteInput = window.prompt(
+        i18n.t("annotate.prompt"),
+        i18n.t("annotate.defaultNote")
+      );
+      if (noteInput === null) return;
+      const note = noteInput.trim() || i18n.t("annotate.defaultNote");
+      state.annotations.push({
+        id: state.nextAnnotationId++,
+        pairIdx,
+        side: side === "xray" ? "both" : "both",
+        x,
+        y,
+        w,
+        h,
+        note,
+      });
+      syncActiveTab();
+      if ($("#annotate-clear")) $("#annotate-clear").hidden = false;
+      renderPages();
+      collectChanges();
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  });
 }
 
 /* ---------- change navigation (n / p, F3 / Shift+F3) ---------- */
@@ -1393,7 +1674,7 @@ function collectChanges() {
     updateChangeNav();
     return;
   }
-  if (state.mode === "pages") {
+  if (state.mode === "pages" || state.mode === "xray") {
     state.changes = $$("#page-view .page-row").filter((row) =>
       Array.from(row.querySelectorAll(".rect")).some((rect) => rect.offsetParent !== null)
     );
@@ -1441,17 +1722,27 @@ function gotoChange(delta) {
 
 /* ---------- view switches ---------- */
 function setMode(mode) {
+  const prevMode = state.mode;
   state.mode = mode;
   $$(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.mode === mode));
+  const isPageMode = mode === "pages" || mode === "xray";
   $("#text-view").hidden = mode !== "text";
-  $("#page-view").hidden = mode !== "pages";
+  $("#page-view").hidden = !isPageMode;
   $("#only-diff-wrap").hidden = mode !== "text";
-  $("#zoom-wrap").hidden = mode !== "pages";
+  $("#zoom-wrap").hidden = !isPageMode;
+  if ($("#annotate-wrap")) $("#annotate-wrap").hidden = !isPageMode;
+  if ($("#annotate-clear")) {
+    $("#annotate-clear").hidden = !isPageMode || !(state.annotations && state.annotations.length);
+  }
+  if (state.comparison && (prevMode !== mode) && isPageMode) {
+    renderPages();
+  }
   applyZoom();
   collectChanges();
+  syncActiveTab();
 
   if (state.comparison && state.comparison.id) {
-    const view = mode === "pages" ? "&view=pages" : "";
+    const view = mode === "pages" ? "&view=pages" : mode === "xray" ? "&view=xray" : "";
     history.replaceState(
       null,
       "",
@@ -1476,6 +1767,8 @@ function showUploadView() {
   $("#only-diff-wrap").hidden = true;
   $("#visual-wrap").hidden = true;
   $("#zoom-wrap").hidden = true;
+  if ($("#annotate-wrap")) $("#annotate-wrap").hidden = true;
+  if ($("#annotate-clear")) $("#annotate-clear").hidden = true;
   $("#change-nav").hidden = true;
   $("#stats").replaceChildren();
   state.visual = null;
@@ -1490,6 +1783,7 @@ function showUploadView() {
 function reset() {
   state.files = { left: null, right: null };
   desktop.paths = { left: null, right: null };
+  state.preloadedHashes = { left: "", right: "" };
   for (const node of $$(".drop")) {
     node.classList.remove("filled");
     const chip = node.querySelector(".file-chip");
@@ -1501,9 +1795,13 @@ function reset() {
   document.body.classList.remove("only-diff");
   $("#opt-visual").checked = true;
   document.body.classList.remove("visual-off");
-  $("#opt-ocr").checked = false;
+  if ($("#opt-ocr")) $("#opt-ocr").checked = false;
   if ($("#opt-format")) $("#opt-format").checked = false;
   if ($("#opt-ocr-lang")) $("#opt-ocr-lang").hidden = true;
+  state.annotations = [];
+  state.annotating = false;
+  if ($("#opt-annotate")) $("#opt-annotate").checked = false;
+  document.body.classList.remove("annotating");
   document.body.classList.remove("dragging");
   showUploadView();
   updateCompareButton();
@@ -1610,10 +1908,23 @@ $("#opt-visual").addEventListener("change", (event) => {
   collectChanges();
 });
 
-$("#opt-ocr").addEventListener("change", (event) => {
-  const select = $("#opt-ocr-lang");
-  if (select) select.hidden = !event.target.checked;
-});
+if ($("#opt-annotate")) {
+  $("#opt-annotate").addEventListener("change", (event) => {
+    state.annotating = Boolean(event.target.checked);
+    document.body.classList.toggle("annotating", state.annotating);
+  });
+}
+
+if ($("#annotate-clear")) {
+  $("#annotate-clear").addEventListener("click", clearManualAnnotations);
+}
+
+if ($("#opt-ocr")) {
+  $("#opt-ocr").addEventListener("change", (event) => {
+    const select = $("#opt-ocr-lang");
+    if (select) select.hidden = !event.target.checked;
+  });
+}
 
 async function loadOcrStatus() {
   const select = $("#opt-ocr-lang");

@@ -152,7 +152,23 @@ def apply_ocr(
     if not pages:
         return None
 
-    binary = _tesseract_binary(options)
+    binary: str | None = None
+    use_rapidocr = False
+    try:
+        binary = _tesseract_binary(options)
+    except OcrUnavailable:
+        if _rapidocr_available():
+            use_rapidocr = True
+        else:
+            raise
+    if (
+        binary is not None
+        and options.binary is None
+        and not os.environ.get("DIFFANYDOC_TESSERACT")
+        and _tesseract_binary is _DEFAULT_TESSERACT_BINARY
+        and _rapidocr_available()
+    ):
+        use_rapidocr = True
     cache = _OcrCache(options.cache_dir)
     digest = _file_digest(Path(document.path))
     stats = OcrStats(language=options.language)
@@ -169,7 +185,11 @@ def apply_ocr(
             if page.width <= 0 or page.height <= 0:
                 page.width = image.width * 72.0 / options.dpi
                 page.height = image.height * 72.0 / options.dpi
-            blocks = _run_tesseract(_png_bytes(image), options, binary)
+            if use_rapidocr:
+                blocks = _run_rapidocr(image, options.dpi)
+            else:
+                assert binary is not None
+                blocks = _run_tesseract(_png_bytes(image), options, binary)
             cache.put(
                 digest,
                 page,
@@ -186,12 +206,120 @@ def apply_ocr(
 
 
 def available(options: OcrOptions | None = None) -> bool:
-    """Whether an OCR binary can be found, without running it."""
+    """Whether an OCR engine (RapidOCR or Tesseract) is available."""
+    if _rapidocr_available():
+        return True
     try:
         _tesseract_binary(options or OcrOptions())
     except OcrUnavailable:
         return False
     return True
+
+
+_RAPIDOCR_INSTANCE: Any = None
+
+
+def _rapidocr_available() -> bool:
+    try:
+        import rapidocr_onnxruntime  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+def _get_rapidocr() -> Any:
+    global _RAPIDOCR_INSTANCE
+    if _RAPIDOCR_INSTANCE is None:
+        from rapidocr_onnxruntime import RapidOCR
+
+        _RAPIDOCR_INSTANCE = RapidOCR()
+    return _RAPIDOCR_INSTANCE
+
+
+def _run_rapidocr(image: Any, dpi: int) -> list[Block]:
+    """Run embedded RapidOCR (Apache-2.0, ONNX Runtime) on a rendered PIL image."""
+    try:
+        engine = _get_rapidocr()
+        rgb = image.convert("RGB")
+        result, _elapse = engine(rgb)
+    except Exception as exc:
+        raise OcrError(f"RapidOCR failed: {exc}") from exc
+
+    if not result:
+        return []
+
+    scale = 72.0 / max(dpi, 1)
+    raw_items: list[dict[str, Any]] = []
+    for entry in result:
+        if not isinstance(entry, (list, tuple)) or len(entry) < 3:
+            continue
+        quad, text_raw, score_raw = entry[0], entry[1], entry[2]
+        text = str(text_raw or "").strip()
+        if not text:
+            continue
+        try:
+            xs = [float(pt[0]) for pt in quad]
+            ys = [float(pt[1]) for pt in quad]
+            left, top, right, bottom = min(xs), min(ys), max(xs), max(ys)
+            confidence = float(score_raw) * 100.0 if float(score_raw) <= 1.0 else float(score_raw)
+        except (TypeError, ValueError, IndexError):
+            continue
+        raw_items.append(
+            {
+                "text": text,
+                "left": left * scale,
+                "top": top * scale,
+                "right": right * scale,
+                "bottom": bottom * scale,
+                "confidence": confidence,
+            }
+        )
+
+    if not raw_items:
+        return []
+
+    # Sort top-to-bottom, then left-to-right, and merge boxes on the same visual line
+    raw_items.sort(key=lambda item: (round(item["top"] / 4.0), item["left"]))
+    merged_lines: list[dict[str, Any]] = []
+    for item in raw_items:
+        if merged_lines:
+            prev = merged_lines[-1]
+            prev_h = max(prev["bottom"] - prev["top"], 4.0)
+            if abs(item["top"] - prev["top"]) <= prev_h * 0.55:
+                prev["words"].append(item)
+                prev["left"] = min(prev["left"], item["left"])
+                prev["top"] = min(prev["top"], item["top"])
+                prev["right"] = max(prev["right"], item["right"])
+                prev["bottom"] = max(prev["bottom"], item["bottom"])
+                continue
+        merged_lines.append(
+            {
+                "words": [item],
+                "left": item["left"],
+                "top": item["top"],
+                "right": item["right"],
+                "bottom": item["bottom"],
+            }
+        )
+
+    lines_out: list[dict[str, Any]] = []
+    for line in merged_lines:
+        words = sorted(line["words"], key=lambda w: w["left"])
+        avg_conf = sum(w["confidence"] for w in words) / len(words)
+        lines_out.append(
+            {
+                "text": " ".join(w["text"] for w in words),
+                "bbox": (
+                    round(line["left"], 2),
+                    round(line["top"], 2),
+                    round(line["right"], 2),
+                    round(line["bottom"], 2),
+                ),
+                "confidence": round(avg_conf, 1),
+            }
+        )
+    return _words_to_blocks(lines_out)
 
 
 def installed_languages(options: OcrOptions | None = None) -> list[str]:
@@ -273,6 +401,9 @@ def _tesseract_binary(options: OcrOptions) -> str:
         if candidate:
             return candidate
     raise OcrUnavailable(_INSTALL_HINT)
+
+
+_DEFAULT_TESSERACT_BINARY = _tesseract_binary
 
 
 def _png_bytes(image: Any) -> bytes:

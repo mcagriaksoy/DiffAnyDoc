@@ -174,3 +174,60 @@ def test_export_merged_side_endpoint(tmp_path: Path) -> None:
     assert "satır 2 sağ" in exp_right.text
 
 
+def test_xray_page_endpoint_returns_composite_png(tmp_path: Path) -> None:
+    left = write_pdf(tmp_path / "x-l.pdf", [["Invoice", "Total: 1000 EUR"]])
+    right = write_pdf(tmp_path / "x-r.pdf", [["Invoice", "Total: 1250 EUR"]])
+
+    client = _client()
+    comp = client.post(
+        "/api/compare-paths",
+        json={"left": str(left), "right": str(right)},
+    ).json()
+
+    xray = client.get(f"/api/compare/{comp['id']}/xray/0/0.png?dpi=96")
+    assert xray.status_code == 200
+    assert xray.headers["content-type"] == "image/png"
+    assert xray.content.startswith(b"\x89PNG")
+
+
+def test_preload_endpoints_warm_cache_and_detect_identical_second_file(tmp_path: Path) -> None:
+    first = tmp_path / "p1.txt"
+    second = tmp_path / "p2.txt"
+    same = tmp_path / "same.txt"
+    first.write_text("merhaba dünya\n", encoding="utf-8")
+    second.write_text("merhaba evren\n", encoding="utf-8")
+    same.write_text("merhaba dünya\n", encoding="utf-8")
+
+    client = _client()
+    r1 = client.post(
+        "/api/preload-path",
+        json={"path": str(first), "ocr": False},
+    )
+    assert r1.status_code == 200
+    d1 = r1.json()
+    assert d1["skipped_parse"] is False
+    assert d1["kind"] == "text"
+    assert d1["sha256"]
+
+    # If the 2nd selected file has the same SHA-256, parsing is skipped immediately
+    r_same = client.post(
+        "/api/preload-path",
+        json={"path": str(same), "other_sha256": d1["sha256"], "ocr": False},
+    )
+    assert r_same.status_code == 200
+    assert r_same.json()["byte_identical"] is True
+    assert r_same.json()["skipped_parse"] is True
+
+    # Upload preload endpoint also works
+    r_up = client.post(
+        "/api/preload",
+        files={"file": ("p2.txt", second.read_bytes())},
+        data={"other_sha256": d1["sha256"], "ocr": "false"},
+    )
+    assert r_up.status_code == 200
+    assert r_up.json()["byte_identical"] is False
+    assert r_up.json()["skipped_parse"] is False
+
+
+
+

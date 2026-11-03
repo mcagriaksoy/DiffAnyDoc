@@ -20,14 +20,16 @@ This repository contains **M0 + M1 + M2 + M3 + M4** in working order:
   changed price is one cell, not a rewritten row
 - Optional formatting/style comparison (`--format-diff` or UI checkbox) for font,
   size, bold, italic, underline and heading changes
-- OCR fallback for scanned/hybrid PDFs and images (Tesseract), with language selection,
-  word boxes and an on-disk cache keyed by file content
+- Zero-config embedded OCR for scanned/hybrid PDFs and images via **RapidOCR** (`rapidocr-onnxruntime`, Apache-2.0), with word boxes and an on-disk cache keyed by file content
+- X-Ray Vision composite view (`render_xray_page_png`) + interactive manual bounding-box annotations on pages
+- Multi-tab comparison sessions and side-to-side line/document merge (`A → B`, `B → A`)
+- Instant background preloading (`/api/preload`, `/api/preload-path`) when the first file is selected
 - Self-contained HTML report and stable JSON output
 - `diff`, `info`, `formats`, `serve`, `desktop`, `select`, `integrate` commands
 - Web UI and a **native desktop window** (pywebview / GTK)
-- 107 tests (`pytest`)
+- 114 tests (`pytest`)
 
-Not there yet: embedded-object diffing, bundled Tesseract in the installers.
+> **For AI Coding Agents (Claude Code, OpenCode, Cursor, etc.):** Read [`AGENTS.md`](AGENTS.md) and [`docs/DESIGN.md`](docs/DESIGN.md) before making changes.
 
 English is the default for the app, CLI messages and reports. Turkish ships as a
 second locale and can be selected in the app, or with `--lang tr` /

@@ -64,13 +64,13 @@ def build_parser() -> argparse.ArgumentParser:
     diff.add_argument(
         "--ocr",
         action="store_true",
-        help="OCR pages without a text layer (scanned PDFs; needs Tesseract)",
+        help="OCR pages without a text layer (scanned PDFs and images; uses RapidOCR)",
     )
     diff.add_argument(
         "--ocr-lang",
         default="eng",
         metavar="LANG",
-        help="Tesseract language(s), e.g. eng or tur+eng (eng)",
+        help="OCR language(s), e.g. eng or tur+eng (eng)",
     )
     diff.add_argument(
         "--format-diff",

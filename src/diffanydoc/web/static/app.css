@@ -998,6 +998,68 @@ body.visual-off .rect.visual {
   display: none;
 }
 
+.rect.manual {
+  background: color-mix(in srgb, var(--warning-color) 20%, transparent);
+  outline: 2px solid var(--warning-color);
+  outline-offset: -1px;
+  z-index: 4;
+}
+
+.rect-label {
+  position: absolute;
+  top: -18px;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--warning-color);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+
+.rect-del {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.25);
+  color: #ffffff;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.rect-del:hover {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+body.annotating .page-canvas {
+  cursor: crosshair;
+  user-select: none;
+}
+
+body.annotating .page-canvas img {
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.xray-row {
+  grid-template-columns: 1fr;
+  max-width: 920px;
+  margin: 0 auto;
+  width: 100%;
+}
+
 .visual-bar {
   grid-column: 1 / -1;
   display: flex;

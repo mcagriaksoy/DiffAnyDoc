@@ -12,10 +12,11 @@ Only Pillow is used for the pixel work; pdfium renders the pages (see
 
 from __future__ import annotations
 
+import io
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageFilter, ImageStat
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageStat
 
 from .model import BBox, PagePair, VisualDiff, VisualPage
 from .render import render_page
@@ -330,4 +331,69 @@ def _clip_to_page(
     return (x0, top, x1, bottom)
 
 
-__all__ = ["VisualOptions", "compare_pdf_pages"]
+def render_xray_page_png(
+    left_path: str | Path,
+    left_index: int,
+    right_path: str | Path,
+    right_index: int,
+    dpi: int = 120,
+    tolerance: int = 24,
+) -> bytes:
+    """Render an X-Ray composite PNG highlighting pixel differences in red/green."""
+    scale = max(dpi, 24) / 72.0
+    left = render_page(left_path, left_index, dpi)
+    right = render_page(right_path, right_index, dpi)
+
+    width = max(left.width, right.width)
+    height = max(left.height, right.height)
+    left_canvas = _canvas(left, width, height)
+    right_canvas = _canvas(right, width, height)
+
+    left_l = left_canvas.convert("L")
+    right_l = right_canvas.convert("L")
+    shift = _estimate_shift(left_l, right_l, max_shift_px=4.0 * scale)
+    right_shifted = _canvas(right, width, height, dx=shift[0], dy=shift[1])
+    right_shifted_l = right_shifted.convert("L")
+
+    diff = _difference(left_canvas, right_shifted)
+    mask = diff.point(lambda value: 255 if value > tolerance else 0)
+    mask = mask.filter(ImageFilter.MedianFilter(3))
+    mask = mask.filter(ImageFilter.MaxFilter(3))
+
+    # Dimmed grayscale base (blend of both pages) so coloured X-Ray ink pops out
+    base_l = ImageChops.darker(left_l, right_shifted_l)
+    dimmed_l = base_l.point(lambda v: int(255 - (255 - v) * 0.35))
+    composite = Image.merge("RGB", (dimmed_l, dimmed_l, dimmed_l))
+
+    # Red where left is darker (removed/old), green where right is darker (added/new),
+    # amber where both changed similarly
+    highlight = Image.new("RGB", (width, height), (255, 220, 100))
+    red_layer = Image.new("RGB", (width, height), (224, 27, 36))
+    green_layer = Image.new("RGB", (width, height), (38, 162, 105))
+
+    left_darker = ImageChops.subtract(right_shifted_l, left_l).point(
+        lambda v: 255 if v > 12 else 0
+    )
+    right_darker = ImageChops.subtract(left_l, right_shifted_l).point(
+        lambda v: 255 if v > 12 else 0
+    )
+    highlight = Image.composite(red_layer, highlight, left_darker)
+    highlight = Image.composite(green_layer, highlight, right_darker)
+
+    out = Image.composite(highlight, composite, mask)
+
+    # Draw bounding boxes around detected diff clusters
+    draw = ImageDraw.Draw(out)
+    for box in _mask_regions(mask, scale):
+        draw.rectangle(
+            (box[0], box[1], box[2], box[3]),
+            outline=(224, 27, 36),
+            width=max(1, round(scale)),
+        )
+
+    buf = io.BytesIO()
+    out.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+__all__ = ["VisualOptions", "compare_pdf_pages", "render_xray_page_png"]
