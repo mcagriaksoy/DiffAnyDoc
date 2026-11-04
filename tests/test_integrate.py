@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -24,7 +25,8 @@ def test_nautilus_scripts_are_installed_and_removed(
     nemo_right = integrate.nemo_dir() / "diffanydoc-select-right.nemo_action"
     assert left.is_file() and right.is_file() and service.is_file()
     assert nemo_left.is_file() and nemo_right.is_file()
-    assert left.stat().st_mode & 0o111
+    if os.name == "posix":  # NTFS has no exec bit
+        assert left.stat().st_mode & 0o111
 
     script = left.read_text(encoding="utf-8")
     assert "select left" in script

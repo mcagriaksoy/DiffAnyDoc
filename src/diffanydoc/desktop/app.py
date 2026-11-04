@@ -21,8 +21,8 @@ import webbrowser
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 from urllib.error import URLError
-from urllib.parse import unquote, urlparse
-from urllib.request import urlopen
+from urllib.parse import urlparse
+from urllib.request import url2pathname, urlopen
 
 from .. import __version__
 from ..i18n import resolve_language, t
@@ -203,7 +203,8 @@ class DesktopApi:
                 continue
             if item.startswith("file://"):
                 parsed = urlparse(item)
-                candidate = Path(unquote(parsed.path))
+                # Handles %20 and Windows drive letters (/C:/x).
+                candidate = Path(url2pathname(parsed.path))
             else:
                 candidate = Path(item).expanduser()
             try:
