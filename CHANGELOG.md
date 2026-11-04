@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Change boxes were shifted on PDF pages whose CropBox differs from the MediaBox; text coordinates and page size now use the CropBox that is rendered.
 - `diffanydoc desktop` refused to start on Windows and macOS (it required `DISPLAY`).
 - Linux installer put the 512 px icon in the `256x256` icon folder.
+- Files dropped from Windows Explorer into the desktop window were ignored (`file:///C:/…` URIs were not resolved).
+- CI: `pip install` failed on Python 3.13 because `rapidocr-onnxruntime` supports Python < 3.13 only; `requires-python` and the test matrix now say so.
 
 ## [0.2.0] - 2026-11-03
 
