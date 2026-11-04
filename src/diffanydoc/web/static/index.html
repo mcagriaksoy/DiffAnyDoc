@@ -54,6 +54,18 @@
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6 4.5V3h4v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
 
+    <div class="menu-wrap" id="box-color-wrap" hidden>
+      <button class="flat icon" id="box-color-button" data-menu="box-color-menu" aria-haspopup="menu" aria-expanded="false" data-i18n-title="boxColor.label" data-i18n-aria-label="boxColor.label">
+        <span class="box-swatch current" aria-hidden="true"></span>
+      </button>
+      <div class="menu" id="box-color-menu" role="menu" hidden>
+        <button class="menu-item" type="button" role="menuitemradio" data-color="amber"><span class="box-swatch" data-swatch="amber" aria-hidden="true"></span><span data-i18n="boxColor.amber">Amber</span></button>
+        <button class="menu-item" type="button" role="menuitemradio" data-color="ruby"><span class="box-swatch" data-swatch="ruby" aria-hidden="true"></span><span data-i18n="boxColor.ruby">Ruby</span></button>
+        <button class="menu-item" type="button" role="menuitemradio" data-color="blue"><span class="box-swatch" data-swatch="blue" aria-hidden="true"></span><span data-i18n="boxColor.blue">Accent blue</span></button>
+        <button class="menu-item" type="button" role="menuitemradio" data-color="contrast"><span class="box-swatch" data-swatch="contrast" aria-hidden="true"></span><span data-i18n="boxColor.contrast">High contrast</span></button>
+      </div>
+    </div>
+
     <div class="zoom" id="zoom-wrap" hidden>
       <button id="zoom-out" data-i18n-title="zoom.out" data-i18n-aria-label="zoom.out">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -61,6 +73,15 @@
       <span id="zoom-label">%100</span>
       <button id="zoom-in" data-i18n-title="zoom.in" data-i18n-aria-label="zoom.in">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </button>
+      <button id="zoom-reset" data-i18n-title="zoom.reset" data-i18n-aria-label="zoom.reset">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 5v6M11 5v6M7.5 6.5v.01M7.5 9.5v.01" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </button>
+      <button id="zoom-fit-width" data-i18n-title="zoom.fitWidth" data-i18n-aria-label="zoom.fitWidth">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3v10M14 3v10M4.5 8h7M6 6.5 4.5 8 6 9.5M10 6.5l1.5 1.5-1.5 1.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button id="zoom-fit-page" data-i18n-title="zoom.fitPage" data-i18n-aria-label="zoom.fitPage">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="2.5" width="8" height="11" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6.5 6h3M6.5 8.5h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
       </button>
     </div>
 
@@ -88,6 +109,7 @@
         <button class="menu-item" id="restart" type="button" data-result-only data-i18n="app.newComparison" hidden>New comparison</button>
         <button class="menu-item" id="new-tab-menu" type="button" data-result-only data-i18n="action.newTab" hidden>New comparison in new tab</button>
         <div class="menu-sep" id="more-sep" data-result-only hidden></div>
+        <button class="menu-item" id="help" type="button" data-i18n="menu.help">Help</button>
         <button class="menu-item" id="about" type="button" data-i18n="menu.about">About DiffAnyDoc</button>
         <button class="menu-item" id="license" type="button" data-i18n="menu.license">License Agreement</button>
         <button class="menu-item" id="updates" type="button" data-i18n="menu.updates">Check for Updates</button>
@@ -230,6 +252,59 @@
   </div>
 </dialog>
 
+<dialog id="help-dialog" class="dialog dialog-wide" aria-labelledby="help-title">
+  <div class="dialog-head">
+    <div>
+      <h2 class="dialog-title" id="help-title" data-i18n="help.title">Help</h2>
+    </div>
+  </div>
+  <div class="dialog-body">
+    <div class="tabs help-tabs" role="tablist">
+      <button class="help-tab active" type="button" role="tab" aria-selected="true" data-help="start" data-i18n="help.tab.start">Quick start</button>
+      <button class="help-tab" type="button" role="tab" aria-selected="false" data-help="modes" data-i18n="help.tab.modes">Views</button>
+      <button class="help-tab" type="button" role="tab" aria-selected="false" data-help="merge" data-i18n="help.tab.merge">Merging</button>
+      <button class="help-tab" type="button" role="tab" aria-selected="false" data-help="annotate" data-i18n="help.tab.annotate">Marks</button>
+      <button class="help-tab" type="button" role="tab" aria-selected="false" data-help="keys" data-i18n="help.tab.keys">Shortcuts</button>
+    </div>
+    <section class="help-panel" data-help-panel="start" role="tabpanel">
+      <p data-i18n="help.start.drop">Drop two files on the window, or click A and B to choose them. Two files dropped at once fill both sides.</p>
+      <p data-i18n="help.start.preload">Reading starts as soon as you pick the first file, so the comparison is ready faster. Identical files are detected at once by checksum.</p>
+      <p data-i18n="help.start.ocr">Scanned pages and images are read with built-in OCR. Nothing leaves your machine.</p>
+    </section>
+    <section class="help-panel" data-help-panel="modes" role="tabpanel" hidden>
+      <p data-i18n="help.modes.text">Text: both documents side by side, line by line. Only the changed words are highlighted.</p>
+      <p data-i18n="help.modes.pages">Pages: the rendered pages with boxes on the changed text. Pick the box color with the color button.</p>
+      <p data-i18n="help.modes.xray">X-Ray: both pages laid on top of each other. Removed ink is red, added ink is green.</p>
+      <p data-i18n="help.modes.zoom">In Pages and X-Ray, zoom with the zoom buttons or Ctrl + mouse wheel. Hold Space and drag, or drag with the middle mouse button, to move a zoomed page.</p>
+    </section>
+    <section class="help-panel" data-help-panel="merge" role="tabpanel" hidden>
+      <p data-i18n="help.merge.line">Each changed line has an arrow next to its number. → copies the left line to the right side, ← copies the right line to the left side.</p>
+      <p data-i18n="help.merge.all">The Copy menu applies all changes in one direction (A → B or B → A) and downloads the merged document.</p>
+    </section>
+    <section class="help-panel" data-help-panel="annotate" role="tabpanel" hidden>
+      <p data-i18n="help.annotate.draw">Turn on Mark on page, then drag a box on a page and type a note. Use it for changes the tool did not find.</p>
+      <p data-i18n="help.annotate.remove">Click × on a mark to remove it. The bin button removes all marks.</p>
+    </section>
+    <section class="help-panel" data-help-panel="keys" role="tabpanel" hidden>
+      <table class="help-keys">
+        <tbody>
+          <tr><td><kbd>Ctrl</kbd> + <kbd>O</kbd></td><td data-i18n="help.key.open">Choose a file</td></tr>
+          <tr><td><kbd>Ctrl</kbd> + <kbd>Enter</kbd></td><td data-i18n="help.key.compare">Compare</td></tr>
+          <tr><td><kbd>Ctrl</kbd> + <kbd>W</kbd></td><td data-i18n="help.key.closeTab">Close the comparison tab</td></tr>
+          <tr><td><kbd>N</kbd> / <kbd>P</kbd>, <kbd>F3</kbd> / <kbd>Shift</kbd> + <kbd>F3</kbd></td><td data-i18n="help.key.nav">Next / previous change</td></tr>
+          <tr><td><kbd>Ctrl</kbd> + <kbd>+</kbd> / <kbd>-</kbd></td><td data-i18n="help.key.zoom">Zoom pages in / out</td></tr>
+          <tr><td><kbd>Ctrl</kbd> + <kbd>0</kbd></td><td data-i18n="help.key.zoomReset">Actual size (100%)</td></tr>
+          <tr><td><kbd data-i18n="help.key.space">Space</kbd> + <span data-i18n="help.key.drag">drag</span></td><td data-i18n="help.key.pan">Move a zoomed page</td></tr>
+          <tr><td><kbd>F1</kbd></td><td data-i18n="help.key.help">Open this help</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </div>
+  <div class="dialog-actions">
+    <button class="suggested" type="button" data-close data-i18n="action.close">Close</button>
+  </div>
+</dialog>
+
 <dialog id="license-dialog" class="dialog dialog-wide" aria-labelledby="license-title">
   <div class="dialog-head">
     <div>
@@ -254,9 +329,13 @@
     </div>
   </div>
   <div class="dialog-body">
-    <p data-i18n="updates.todo">Update checks are not available yet. This will be added before release.</p>
+    <p class="updates-status" id="updates-status" aria-live="polite"></p>
+    <div class="updates-notes" id="updates-notes" hidden></div>
+    <p class="dialog-meta" data-i18n="updates.privacy">DiffAnyDoc only contacts GitHub when you check for updates. No data about you or your files is sent.</p>
   </div>
   <div class="dialog-actions">
+    <a class="flat" id="updates-open" target="_blank" rel="noopener" data-i18n="updates.open" hidden>Open the download page</a>
+    <button class="flat" id="updates-check" type="button" data-i18n="updates.check">Check now</button>
     <button class="suggested" type="button" data-close data-i18n="action.close">Close</button>
   </div>
 </dialog>

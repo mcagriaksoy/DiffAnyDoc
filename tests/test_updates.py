@@ -8,10 +8,8 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 
 import pytest
-from fastapi.testclient import TestClient
 
 from diffanydoc import updates
-from diffanydoc.web.server import create_app
 
 
 def test_version_ordering() -> None:
@@ -55,6 +53,11 @@ def test_check_for_updates_404_no_releases() -> None:
 
 
 def test_updates_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    from diffanydoc.web.server import create_app
+
     monkeypatch.setattr(
         updates, "check_for_updates", lambda: updates.UpdateInfo(current="0.2.0", status="update", latest="0.3.0")
     )

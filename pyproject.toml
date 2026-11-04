@@ -7,7 +7,7 @@ name = "diffanydoc"
 version = "0.2.0"
 description = "Compare any document side by side: PDF, DOCX, XLSX and plain text."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"  # rapidocr-onnxruntime limit
 authors = [{ name = "Mehmet Cagri Aksoy" }]
 keywords = ["diff", "compare", "pdf", "docx", "document"]
 # Placeholder: the license is decided separately, see README "Lisans stratejisi".

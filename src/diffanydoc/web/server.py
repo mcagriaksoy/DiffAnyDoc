@@ -27,6 +27,7 @@ from ..core.report.json import result_to_dict
 from ..core.visual import render_xray_page_png
 from ..i18n import available_languages, resolve_language, strings
 from ..system import accent_color
+from . import STATIC_DIR
 
 # FastAPI is an optional extra (``pip install 'diffanydoc[web]'``). Importing
 # this module without it raises ImportError, which the CLI turns into a hint.
@@ -34,7 +35,6 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-STATIC_DIR = Path(__file__).parent / "static"
 MAX_COMPARISONS = 16
 
 

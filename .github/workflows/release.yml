@@ -1,7 +1,8 @@
 name: Release
 
-# Push a tag like v0.2.0 to build the Windows and Linux bundles and attach them
-# to a draft GitHub release. Publishing the draft stays a manual step.
+# Push a tag like v0.2.0 to build the Windows and Linux bundles, the sdist and
+# the wheel, attach them to a draft GitHub release and publish to PyPI.
+# Publishing the draft release stays a manual step.
 on:
   push:
     tags: ["v*"]
@@ -30,6 +31,9 @@ jobs:
           sudo apt-get install -y python3-gi gir1.2-webkit2-4.1 libgtk-3-0 libfuse2
           curl -fsSL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x appimagetool && sudo mv appimagetool /usr/local/bin/
+      - name: Windows installer tool
+        if: runner.os == 'Windows'
+        run: choco install innosetup -y --no-progress
       - name: Install
         run: python -m pip install -e ".[web,desktop]" pyinstaller
       - name: Build
@@ -39,12 +43,42 @@ jobs:
           name: DiffAnyDoc-${{ runner.os }}
           path: |
             dist/*.zip
+            dist/*.exe
             dist/*.tar.gz
             dist/*.AppImage
           if-no-files-found: error
 
+  python-dist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install build
+      - run: python -m build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          path: dist/*
+          if-no-files-found: error
+
+  pypi:
+    needs: python-dist
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
   release:
-    needs: build
+    needs: [build, python-dist]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:

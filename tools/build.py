@@ -1,13 +1,13 @@
 """Build a release bundle with PyInstaller.
 
     pip install -e ".[web,desktop]" pyinstaller
-    python tools/build.py            # -> dist/DiffAnyDoc-<version>-<os>-<arch>.(zip|tar.gz)
+    python tools/build.py            # -> dist/DiffAnyDoc-<version>-<os>-<arch>...
 
 The bundle is a folder ("onedir"), not a single self-extracting file: it
 starts faster, antivirus tools flag it less often and code signing covers
-every binary. Windows gets a .zip with DiffAnyDoc.exe; Linux a .tar.gz with an
-``install.sh`` that adds a menu entry and the file-manager integration. When
-``appimagetool`` is on PATH an AppImage is produced as well.
+every binary. Windows gets a portable .zip and an Inno Setup installer (needs
+``ISCC``); Linux gets a .tar.gz with an ``install.sh`` and an AppImage (needs
+``appimagetool``). The sdist and wheel come from ``python -m build``.
 """
 
 from __future__ import annotations
@@ -31,6 +31,27 @@ DIST = ROOT / "dist"
 BUILD = ROOT / "build"
 APP = DIST / "DiffAnyDoc"
 WINDOWS = sys.platform == "win32"
+STATIC = ROOT / "src" / "diffanydoc" / "web" / "static"
+SUFFIX = {
+    "zip": "-portable.zip",
+    "installer": "-installer.exe",
+    "tar": ".tar.gz",
+    "appimage": ".AppImage",
+}
+TARGETS = {"windows": ("zip", "installer"), "linux": ("tar", "appimage")}
+# kind -> (program, install hint); only kinds that need an external tool.
+TOOLS = {
+    "installer": ("ISCC", "install Inno Setup 6 (https://jrsoftware.org/isdl.php)"),
+    "appimage": (
+        "appimagetool",
+        "get it from https://github.com/AppImage/appimagetool/releases",
+    ),
+}
+INNO_DIRS = [
+    os.path.join(os.environ[var], "Inno Setup 6")
+    for var in ("ProgramFiles(x86)", "ProgramFiles")
+    if var in os.environ
+]
 
 
 def _arch() -> str:
@@ -44,6 +65,29 @@ def _platform() -> str:
     if sys.platform == "darwin":
         return "macos"
     return "linux"
+
+
+def artifact_name(version: str, plat: str, arch: str, kind: str) -> str:
+    return f"DiffAnyDoc-{version}-{plat}-{arch}{SUFFIX[kind]}"
+
+
+def artifact(kind: str) -> Path:
+    return DIST / artifact_name(__version__, _platform(), _arch(), kind)
+
+
+def targets(plat: str) -> tuple[str, ...]:
+    if plat not in TARGETS:
+        raise SystemExit(f"unsupported platform: {plat}")
+    return TARGETS[plat]
+
+
+def find_tool(kind: str) -> str:
+    name, hint = TOOLS[kind]
+    path = os.pathsep.join([os.environ.get("PATH", ""), *INNO_DIRS])
+    tool = shutil.which(name, path=path)
+    if tool is None:
+        raise SystemExit(f"{name} not found on PATH: {hint}")
+    return tool
 
 
 def write_version_info() -> Path:
@@ -111,50 +155,69 @@ def smoke_test() -> None:
     print("smoke test passed")
 
 
-def archive() -> Path:
-    stem = f"DiffAnyDoc-{__version__}-{_platform()}-{_arch()}"
-    if WINDOWS:
-        target = DIST / f"{stem}.zip"
-        with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as bundle:
-            for path in APP.rglob("*"):
-                bundle.write(path, Path("DiffAnyDoc") / path.relative_to(APP))
-        return target
+def archive_zip() -> Path:
+    target = artifact("zip")
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as bundle:
+        for path in APP.rglob("*"):
+            bundle.write(path, Path("DiffAnyDoc") / path.relative_to(APP))
+    return target
 
+
+def archive_tar() -> Path:
     linux = ROOT / "packaging" / "linux"
     shutil.copy2(linux / "diffanydoc.desktop", APP / "diffanydoc.desktop")
     shutil.copy2(linux / "install.sh", APP / "install.sh")
     os.chmod(APP / "install.sh", 0o755)
-    icon_src = ROOT / "src" / "diffanydoc" / "web" / "static" / "icon.png"
-    if icon_src.exists():
-        shutil.copy2(icon_src, APP / "diffanydoc.png")
-    target = DIST / f"{stem}.tar.gz"
+    shutil.copy2(STATIC / "icon.png", APP / "diffanydoc.png")
+    target = artifact("tar")
     with tarfile.open(target, "w:gz") as bundle:
         bundle.add(APP, arcname="DiffAnyDoc")
     return target
 
 
-def appimage() -> Path | None:
-    tool = shutil.which("appimagetool")
-    if WINDOWS or sys.platform == "darwin" or tool is None:
-        return None
+def installer() -> Path:
+    target = artifact("installer")
+    defines = {
+        "AppVersion": __version__,
+        "SourceDir": APP,
+        "OutputDir": target.parent,
+        "OutputName": target.stem,
+        "IconFile": STATIC / "icon.ico",
+    }
+    command = [find_tool("installer")]
+    command += [f"/D{key}={value}" for key, value in defines.items()]
+    command.append(str(ROOT / "packaging" / "windows" / "installer.iss"))
+    subprocess.run(command, check=True)
+    return target
+
+
+def appimage() -> Path:
+    tool = find_tool("appimage")
     appdir = BUILD / "DiffAnyDoc.AppDir"
     shutil.rmtree(appdir, ignore_errors=True)
     shutil.copytree(APP, appdir / "usr" / "lib" / "DiffAnyDoc")
     shutil.copy2(ROOT / "packaging" / "linux" / "diffanydoc.desktop", appdir / "diffanydoc.desktop")
-    icon_src = ROOT / "src" / "diffanydoc" / "web" / "static" / "icon.png"
-    if icon_src.exists():
-        shutil.copy2(icon_src, appdir / "diffanydoc.png")
+    shutil.copy2(STATIC / "icon.png", appdir / "diffanydoc.png")
     apprun = appdir / "AppRun"
     apprun.write_text(
-        '#!/bin/sh\nHERE="$(dirname "$(readlink -f "$0")")"\n'
+        "#!/bin/sh\n"
+        'HERE="$(dirname "$(readlink -f "$0")")"\n'
         'exec "$HERE/usr/lib/DiffAnyDoc/DiffAnyDoc" "$@"\n',
         encoding="utf-8",
     )
     os.chmod(apprun, 0o755)
-    target = DIST / f"DiffAnyDoc-{__version__}-{_arch()}.AppImage"
+    target = artifact("appimage")
     env = dict(os.environ, ARCH=_arch())
     subprocess.run([tool, str(appdir), str(target)], check=True, env=env)
     return target
+
+
+BUILDERS = {
+    "zip": archive_zip,
+    "installer": installer,
+    "tar": archive_tar,
+    "appimage": appimage,
+}
 
 
 def main() -> int:
@@ -162,14 +225,15 @@ def main() -> int:
     parser.add_argument("--skip-build", action="store_true", help="only test and archive dist/")
     parser.add_argument("--no-smoke-test", action="store_true")
     args = parser.parse_args()
+    kinds = targets(_platform())
+    for kind in kinds:  # fail before the long build
+        if kind in TOOLS:
+            find_tool(kind)
     if not args.skip_build:
         run_pyinstaller()
     if not args.no_smoke_test:
         smoke_test()
-    outputs = [archive()]
-    image = appimage()
-    if image:
-        outputs.append(image)
+    outputs = [BUILDERS[kind]() for kind in kinds]
     for output in outputs:
         print(f"built {output.relative_to(ROOT)} ({output.stat().st_size / 1e6:.1f} MB)")
     return 0
