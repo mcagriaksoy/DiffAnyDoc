@@ -16,22 +16,22 @@
 
 | ID | Priority | Area | Title | Status |
 | :--- | :--- | :--- | :--- | :--- |
-| **TASK-01** | High | UI / UX | Single-Tab Close & Return to Home Screen | `[ ] OPEN` |
-| **TASK-02** | High | Performance | Cold-Start & Startup Latency Optimization | `[ ] OPEN` |
-| **TASK-03** | High | Visual / Engine | Page View Bounding Box Calibration & Custom Color | `[ ] OPEN` |
+| **TASK-01** | High | UI / UX | Single-Tab Close & Return to Home Screen | `[x] DONE` |
+| **TASK-02** | High | Performance | Cold-Start & Startup Latency Optimization | `[x] DONE` |
+| **TASK-03** | High | Visual / Engine | Page View Bounding Box Calibration & Custom Color | `[x] DONE` |
 | **TASK-04** | Medium | Legal / Docs | Commercial EULA & License Agreement Page | `[ ] OPEN` |
-| **TASK-05** | Medium | UI / Docs | In-App Help & User Guide Modal | `[ ] OPEN` |
-| **TASK-06** | Medium | Web / UI | "Check for Updates" Modal with GitHub Tag Diff | `[ ] OPEN` |
-| **TASK-07** | High | UI / Viewer | Page View & X-Ray Zoom / Magnifier Controls | `[ ] OPEN` |
-| **TASK-08** | High | DevOps / CI | Automated Release Builds (Windows Exe, Installer, Linux, PyPI) | `[ ] OPEN` |
-| **TASK-09** | Medium | Design / Desktop | High-Resolution App Icon & OS Asset Integration | `[ ] OPEN` |
+| **TASK-05** | Medium | UI / Docs | In-App Help & User Guide Modal | `[x] DONE` |
+| **TASK-06** | Medium | Web / UI | "Check for Updates" Modal with GitHub Tag Diff | `[x] DONE` |
+| **TASK-07** | High | UI / Viewer | Page View & X-Ray Zoom / Magnifier Controls | `[x] DONE` |
+| **TASK-08** | High | DevOps / CI | Automated Release Builds (Windows Exe, Installer, Linux, PyPI) | `[x] DONE` |
+| **TASK-09** | Medium | Design / Desktop | High-Resolution App Icon & OS Asset Integration | `[x] DONE` |
 
 ---
 
 ## Detailed Task Specifications
 
 ### [TASK-01] Single-Tab Close & Return to Home Screen
-- **Status**: `[ ] OPEN`
+- **Status**: `[x] DONE` - `×` on the last tab (once it holds files) and `Ctrl+W` reset to a clean home screen (files, preload hashes, mode, zoom).
 - **Priority**: High
 - **Files**:
   - `src/diffanydoc/web/static/app.js` (`closeTab`, `updateSessionTabs`, `resetToUpload`)
@@ -47,7 +47,7 @@
 ---
 
 ### [TASK-02] Cold-Start & Startup Latency Optimization
-- **Status**: `[ ] OPEN`
+- **Status**: `[x] DONE` - Window opens at once with a splash; uvicorn starts in parallel and the app URL loads when `/api/health` answers. `diffanydoc.desktop` import 352 ms -> 67 ms (no FastAPI on the GUI path). OCR/PDF libs were already lazy. Also fixed: desktop refused to start on Windows/macOS (`DISPLAY` check).
 - **Priority**: High
 - **Files**:
   - `src/diffanydoc/desktop/app.py`
@@ -64,7 +64,7 @@
 ---
 
 ### [TASK-03] Page View Bounding Box Calibration & Custom Color
-- **Status**: `[ ] OPEN`
+- **Status**: `[x] DONE` - Measured root cause: pages with a CropBox != MediaBox used MediaBox origin and size, so boxes were shifted/scaled. `pdf.py` now crops to the CropBox and shifts all boxes (test: `test_text_boxes_match_render_on_cropped_page`). On plain pages boxes already match the ink. Box outline presets (Amber, Ruby, Accent blue, High contrast) in the page toolbar, saved in `localStorage`.
 - **Priority**: High
 - **Files**:
   - `src/diffanydoc/core/diff/geometry.py` (`_rect`, `line_rects`, `_visual_lines`)
@@ -102,7 +102,7 @@
 ---
 
 ### [TASK-05] In-App Help & User Guide Modal
-- **Status**: `[ ] OPEN`
+- **Status**: `[x] DONE` - Help dialog with Quick start / Views / Merging / Marks / Shortcuts tabs; menu entry and `F1`. Lists only shortcuts that exist; added `Ctrl+O`. Not added: `F5` swap and `Ctrl+F` find (no such features yet).
 - **Priority**: Medium
 - **Files**:
   - `src/diffanydoc/web/static/index.html` (modal `#dlg-help`)
@@ -121,7 +121,7 @@
 ---
 
 ### [TASK-06] "Check for Updates" Modal with GitHub Tag Diff
-- **Status**: `[ ] OPEN`
+- **Status**: `[x] DONE` - Menu item runs `GET /api/updates`; shows current vs latest, release notes (safe Markdown subset, no innerHTML), download button (system browser in desktop), green check when latest, error text on failure. "Check now" retries.
 - **Priority**: Medium
 - **Files**:
   - `src/diffanydoc/web/static/index.html` (`#dlg-updates`)
@@ -139,7 +139,7 @@
 ---
 
 ### [TASK-07] Page View & X-Ray Zoom / Magnifier Controls
-- **Status**: `[ ] OPEN`
+- **Status**: `[x] DONE` - Zoom 25-400 %: step buttons, 100 %, Fit width (default), Fit page; `Ctrl`+wheel keeps the point under the cursor; `Ctrl` `+`/`-`/`0`; `Space`+drag or middle-drag pans. Canvas width = page points x zoom, boxes are % so they scale; image DPI follows zoom (120-300).
 - **Priority**: High
 - **Files**:
   - `src/diffanydoc/web/static/index.html` (`.zoom-toolbar`, zoom buttons, zoom slider)
@@ -158,7 +158,7 @@
 ---
 
 ### [TASK-08] Automated Release Builds (Windows Exe, Installer, Linux, PyPI)
-- **Status**: `[ ] OPEN`
+- **Status**: `[x] DONE` - `tools/build.py` targets per OS: Windows portable zip + Inno Setup installer (`packaging/windows/installer.iss`), Linux tar.gz + AppImage; fails early if `ISCC`/`appimagetool` is missing. `packaging/diffanydoc.spec` is now tracked. `release.yml` adds sdist/wheel and PyPI trusted publishing. Not yet run end to end: first tag build is the real test; the `pypi` environment must be set up on GitHub/PyPI.
 - **Priority**: High
 - **Files**:
   - `.github/workflows/release.yml`
@@ -183,7 +183,7 @@
 ---
 
 ### [TASK-09] High-Resolution App Icon & OS Asset Integration
-- **Status**: `[ ] OPEN`
+- **Status**: `[x] DONE` - Icon set already existed (`tools/make_icon.py`: SVG favicon, 512 px PNG window icon, ICO 16-256 px used by the spec/installer, `.desktop` entry). Fixed `install.sh` to put the 512 px PNG in `hicolor/512x512`. Logo concept unchanged (design decision for the owner).
 - **Priority**: Medium
 - **Files**:
   - `src/diffanydoc/web/static/icon.png`

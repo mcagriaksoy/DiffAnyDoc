@@ -15,7 +15,7 @@ if [ "${1:-}" = "--remove" ]; then
     fi
     rm -f "$BIN/DiffAnyDoc" "$BIN/diffanydoc"
     rm -f "$PREFIX/applications/diffanydoc.desktop"
-    rm -f "$PREFIX/icons/hicolor/256x256/apps/diffanydoc.png"
+    rm -f "$PREFIX/icons/hicolor/512x512/apps/diffanydoc.png"
     # Only remove the folder this script installed, never a parent of it.
     case "$TARGET" in
         "$HOME"/.local/opt/DiffAnyDoc) rm -r -- "$TARGET" ;;
@@ -24,7 +24,7 @@ if [ "${1:-}" = "--remove" ]; then
     exit 0
 fi
 
-mkdir -p "$HOME/.local/opt" "$BIN" "$PREFIX/applications" "$PREFIX/icons/hicolor/256x256/apps"
+mkdir -p "$HOME/.local/opt" "$BIN" "$PREFIX/applications" "$PREFIX/icons/hicolor/512x512/apps"
 if [ "$HERE" != "$TARGET" ]; then
     case "$TARGET" in
         "$HOME"/.local/opt/DiffAnyDoc) [ -d "$TARGET" ] && rm -r -- "$TARGET" ;;
@@ -35,7 +35,7 @@ ln -sf "$TARGET/DiffAnyDoc" "$BIN/DiffAnyDoc"
 ln -sf "$TARGET/diffanydoc-cli" "$BIN/diffanydoc"
 sed "s|^Exec=DiffAnyDoc|Exec=$TARGET/DiffAnyDoc|" "$TARGET/diffanydoc.desktop" \
     > "$PREFIX/applications/diffanydoc.desktop"
-cp "$TARGET/diffanydoc.png" "$PREFIX/icons/hicolor/256x256/apps/diffanydoc.png"
+cp "$TARGET/diffanydoc.png" "$PREFIX/icons/hicolor/512x512/apps/diffanydoc.png"
 "$TARGET/diffanydoc-cli" integrate install || true
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$PREFIX/applications" || true
 echo "DiffAnyDoc installed. Start it from the application menu or run: DiffAnyDoc"

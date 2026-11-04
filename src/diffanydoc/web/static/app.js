@@ -4,7 +4,8 @@ const state = {
   files: { left: null, right: null },
   comparison: null,
   mode: "text",
-  zoom: 1,
+  zoom: "width", // number, "width" or "page"
+  zoomValue: 1, // resolved scale
   version: "",
   isDesktop: false,
   changes: [],
@@ -23,7 +24,7 @@ const state = {
       paths: { left: null, right: null },
       comparison: null,
       mode: "text",
-      zoom: 1,
+      zoom: "width",
       annotations: [],
     },
   ],
@@ -234,6 +235,114 @@ function fillUpdates() {
   }
 }
 
+/* Inline Markdown: **bold** and `code` only. */
+function markdownInline(text) {
+  const out = [];
+  const pattern = /\*\*(.+?)\*\*|`([^`]+)`/g;
+  let last = 0;
+  for (const match of text.matchAll(pattern)) {
+    if (match.index > last) out.push(text.slice(last, match.index));
+    out.push(
+      match[1] !== undefined
+        ? el("strong", { text: match[1] })
+        : el("code", { text: match[2] })
+    );
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
+/* Release notes are remote text: build DOM nodes, never innerHTML. */
+function renderMarkdown(source) {
+  const blocks = [];
+  let list = null;
+  let para = [];
+  const flush = () => {
+    if (para.length) blocks.push(el("p", {}, markdownInline(para.join(" "))));
+    para = [];
+  };
+  for (const raw of String(source || "").split(/\r?\n/)) {
+    const line = raw.trim();
+    const heading = /^#{1,6}\s+(.*)$/.exec(line);
+    const item = /^[-*+]\s+(.*)$/.exec(line);
+    if (!item) list = null;
+    if (!line) {
+      flush();
+    } else if (heading) {
+      flush();
+      blocks.push(el("h3", {}, markdownInline(heading[1])));
+    } else if (item) {
+      flush();
+      if (!list) {
+        list = el("ul");
+        blocks.push(list);
+      }
+      list.append(el("li", {}, markdownInline(item[1])));
+    } else {
+      para.push(line);
+    }
+  }
+  flush();
+  return blocks;
+}
+
+function openExternal(event, href) {
+  if (!desktop.available || !href) return;
+  event.preventDefault();
+  window.pywebview.api.open_external(new URL(href, location.origin).href);
+}
+
+let updatesBusy = false;
+
+async function checkUpdates() {
+  if (updatesBusy) return;
+  updatesBusy = true;
+  const status = $("#updates-status");
+  const notes = $("#updates-notes");
+  const open = $("#updates-open");
+  const button = $("#updates-check");
+  status.className = "updates-status";
+  status.textContent = i18n.t("updates.checking");
+  notes.hidden = true;
+  open.hidden = true;
+  button.disabled = true;
+  try {
+    const response = await fetch("/api/updates");
+    if (!response.ok) throw new Error(await readError(response));
+    const info = await response.json();
+    if (info.status === "update") {
+      status.textContent = i18n.t("updates.available", {
+        version: `v${info.latest}`,
+        current: `v${info.current}`,
+      });
+      const blocks = renderMarkdown(info.notes);
+      notes.replaceChildren(...blocks);
+      notes.hidden = !blocks.length;
+      open.href = info.url;
+      open.hidden = false;
+    } else if (info.status === "latest") {
+      status.classList.add("ok");
+      status.replaceChildren(
+        el("span", { class: "updates-check-icon", "aria-hidden": "true", text: "✓" }),
+        i18n.t("updates.latest", { version: `v${info.current}` })
+      );
+    } else if (info.status === "no_releases") {
+      status.textContent = i18n.t("updates.noReleases");
+    } else {
+      throw new Error(info.message || i18n.t("error.generic"));
+    }
+  } catch (error) {
+    status.classList.add("failed");
+    status.textContent = i18n.t("updates.failed", {
+      message: error.message || i18n.t("error.generic"),
+    });
+  } finally {
+    button.disabled = false;
+    updatesBusy = false;
+  }
+}
+
 let licenseLoaded = false;
 
 async function openLicense() {
@@ -252,6 +361,23 @@ async function openLicense() {
   } catch (_) {
     body.textContent = i18n.t("license.unavailable");
   }
+}
+
+function showHelpPanel(name) {
+  for (const tab of $$(".help-tab")) {
+    const active = tab.dataset.help === name;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", String(active));
+  }
+  for (const panel of $$(".help-panel")) {
+    panel.hidden = panel.dataset.helpPanel !== name;
+  }
+}
+
+function openHelp() {
+  closeMenus();
+  const dialog = $("#help-dialog");
+  if (!dialog.open) dialog.showModal();
 }
 
 function setupDialogs() {
@@ -274,11 +400,20 @@ function setupDialogs() {
     openLicense();
   });
   $("#license").addEventListener("click", openLicense);
+  $("#help").addEventListener("click", openHelp);
+  for (const tab of $$(".help-tab")) {
+    tab.addEventListener("click", () => showHelpPanel(tab.dataset.help));
+  }
   $("#updates").addEventListener("click", () => {
     closeMenus();
     fillUpdates();
     $("#updates-dialog").showModal();
+    checkUpdates();
   });
+  $("#updates-check").addEventListener("click", checkUpdates);
+  $("#updates-open").addEventListener("click", (event) =>
+    openExternal(event, $("#updates-open").getAttribute("href"))
+  );
 }
 
 /* ---------- system accent ---------- */
@@ -941,6 +1076,16 @@ function tabTitle(tab) {
   return i18n.t("app.newComparison");
 }
 
+function tabHasContent(tab) {
+  return Boolean(
+    tab.comparison ||
+      tab.files.left ||
+      tab.files.right ||
+      tab.paths.left ||
+      tab.paths.right
+  );
+}
+
 function renderSessionTabs() {
   const container = $("#session-tabs");
   if (!container) return;
@@ -951,7 +1096,13 @@ function renderSessionTabs() {
     const children = [
       el("span", { class: "session-tab-label", text: labelText }),
     ];
-    if (state.tabs.length > 1) {
+    // The last tab can close too once it holds files.
+    if (state.tabs.length > 1 || tabHasContent(tab)) {
+      const close = (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        closeSessionTab(tab.id);
+      };
       children.push(
         el("span", {
           class: "session-tab-close",
@@ -960,9 +1111,9 @@ function renderSessionTabs() {
           title: i18n.t("tab.close"),
           "aria-label": i18n.t("tab.close"),
           text: "\u00d7",
-          onclick: (e) => {
-            e.stopPropagation();
-            closeSessionTab(tab.id);
+          onclick: close,
+          onkeydown: (e) => {
+            if (e.key === "Enter" || e.key === " ") close(e);
           },
         })
       );
@@ -1017,7 +1168,7 @@ function switchSessionTab(tabId) {
   desktop.paths = { left: target.paths.left, right: target.paths.right };
   state.comparison = target.comparison;
   state.mode = target.mode || "text";
-  state.zoom = target.zoom || 1;
+  state.zoom = target.zoom || "width";
   state.annotations = Array.isArray(target.annotations) ? [...target.annotations] : [];
   restoreDropChipsFromState();
   renderSessionTabs();
@@ -1038,7 +1189,7 @@ function createNewSessionTab() {
     paths: { left: null, right: null },
     comparison: null,
     mode: "text",
-    zoom: 1,
+    zoom: "width",
     annotations: [],
   });
   switchSessionTab(newId);
@@ -1046,6 +1197,9 @@ function createNewSessionTab() {
 
 function closeSessionTab(tabId) {
   if (state.tabs.length <= 1) {
+    // Last tab: back to a clean home screen.
+    state.mode = "text";
+    state.zoom = "width";
     reset();
     return;
   }
@@ -1060,7 +1214,7 @@ function closeSessionTab(tabId) {
     desktop.paths = { left: nextTab.paths.left, right: nextTab.paths.right };
     state.comparison = nextTab.comparison;
     state.mode = nextTab.mode || "text";
-    state.zoom = nextTab.zoom || 1;
+    state.zoom = nextTab.zoom || "width";
     state.annotations = Array.isArray(nextTab.annotations) ? [...nextTab.annotations] : [];
     restoreDropChipsFromState();
     if (state.comparison) renderResult();
@@ -1392,9 +1546,7 @@ function buildXrayCard(pair, pairIdx, visualPage) {
     !data.renderable.left ||
     !data.renderable.right
   ) {
-    card.append(
-      el("div", { class: "page-canvas missing", text: i18n.t("page.missing") })
-    );
+    card.append(missingCanvas());
     return card;
   }
 
@@ -1405,13 +1557,12 @@ function buildXrayCard(pair, pairIdx, visualPage) {
     height: Math.max(sizeL.height, sizeR.height),
   };
 
-  const canvas = el("div", { class: "page-canvas" });
+  const canvas = el("div", { class: "page-canvas", style: canvasStyle(size) });
   canvas.append(
-    el("img", {
-      src: `/api/compare/${data.id}/xray/${pair.left}/${pair.right}.png?dpi=120`,
-      alt: `${label} ${pageText}`,
-      loading: "lazy",
-    })
+    pageImage(
+      `/api/compare/${data.id}/xray/${pair.left}/${pair.right}.png`,
+      `${label} ${pageText}`
+    )
   );
 
   // Also show OCR/text diff boxes and visual boxes so hovering shows the text
@@ -1484,18 +1635,17 @@ function buildPageCard(side, index, visualPage, pairIdx = 0) {
   ]);
 
   if (index === null || !renderable) {
-    card.append(el("div", { class: "page-canvas missing", text: i18n.t("page.missing") }));
+    card.append(missingCanvas());
     return card;
   }
 
   const size = data.pages[side][index] || { width: 595, height: 842 };
-  const canvas = el("div", { class: "page-canvas" });
+  const canvas = el("div", { class: "page-canvas", style: canvasStyle(size) });
   canvas.append(
-    el("img", {
-      src: `/api/compare/${data.id}/page/${side}/${index}.png?dpi=120`,
-      alt: `${name} ${i18n.t("page.label", { n: index + 1 })}`,
-      loading: "lazy",
-    })
+    pageImage(
+      `/api/compare/${data.id}/page/${side}/${index}.png`,
+      `${name} ${i18n.t("page.label", { n: index + 1 })}`
+    )
   );
 
   const rects = (data.rects[side] && data.rects[side][String(index)]) || [];
@@ -1730,6 +1880,7 @@ function setMode(mode) {
   $("#page-view").hidden = !isPageMode;
   $("#only-diff-wrap").hidden = mode !== "text";
   $("#zoom-wrap").hidden = !isPageMode;
+  $("#box-color-wrap").hidden = !isPageMode;
   if ($("#annotate-wrap")) $("#annotate-wrap").hidden = !isPageMode;
   if ($("#annotate-clear")) {
     $("#annotate-clear").hidden = !isPageMode || !(state.annotations && state.annotations.length);
@@ -1751,9 +1902,242 @@ function setMode(mode) {
   }
 }
 
+/* ---------- box outline color ---------- */
+const BOX_COLOR_KEY = "diffanydoc:box-color";
+const BOX_COLORS = ["amber", "ruby", "blue", "contrast"];
+
+function applyBoxColor(name) {
+  const color = BOX_COLORS.includes(name) ? name : "amber";
+  document.body.dataset.boxColor = color;
+  for (const item of $$("#box-color-menu [data-color]")) {
+    const active = item.dataset.color === color;
+    item.classList.toggle("active", active);
+    item.setAttribute("aria-checked", String(active));
+  }
+}
+
+function setupBoxColor() {
+  let saved = null;
+  try {
+    saved = localStorage.getItem(BOX_COLOR_KEY);
+  } catch (_) {
+    /* storage may be blocked */
+  }
+  applyBoxColor(saved);
+  for (const item of $$("#box-color-menu [data-color]")) {
+    item.addEventListener("click", () => {
+      closeMenus();
+      applyBoxColor(item.dataset.color);
+      try {
+        localStorage.setItem(BOX_COLOR_KEY, item.dataset.color);
+      } catch (_) {
+        /* storage may be blocked */
+      }
+    });
+  }
+}
+
+/* ---------- page zoom / pan ---------- */
+const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4];
+const PT_TO_PX = 96 / 72;
+
+function isPageMode() {
+  return state.mode === "pages" || state.mode === "xray";
+}
+
+function clampZoom(value) {
+  return Math.min(4, Math.max(0.25, value));
+}
+
+/* Largest page in PDF points. */
+function pageExtent() {
+  const pages = (state.comparison && state.comparison.pages) || {};
+  let width = 0;
+  let height = 0;
+  for (const side of ["left", "right"]) {
+    for (const page of Object.values(pages[side] || {})) {
+      if (!page) continue;
+      width = Math.max(width, page.width);
+      height = Math.max(height, page.height);
+    }
+  }
+  return { width: width || 595, height: height || 842 };
+}
+
+function canvasStyle(size) {
+  return (
+    `width:calc(${(size.width * PT_TO_PX).toFixed(2)}px * var(--zoom, 1));` +
+    `aspect-ratio:${size.width} / ${size.height}`
+  );
+}
+
+function missingCanvas() {
+  return el("div", {
+    class: "page-canvas missing",
+    style: canvasStyle(pageExtent()),
+    text: i18n.t("page.missing"),
+  });
+}
+
+/* Render DPI follows zoom so small print stays sharp. */
+function pageDpi() {
+  const need = 96 * state.zoomValue * (window.devicePixelRatio || 1);
+  return Math.max(120, Math.min(300, Math.ceil(need / 30) * 30));
+}
+
+function pageImage(base, alt) {
+  return el("img", {
+    src: `${base}?dpi=${pageDpi()}`,
+    "data-base": base,
+    alt,
+    loading: "lazy",
+  });
+}
+
+let dpiTimer = 0;
+function scheduleDpiUpdate() {
+  clearTimeout(dpiTimer);
+  dpiTimer = setTimeout(() => {
+    const dpi = pageDpi();
+    for (const img of $$("#page-view img[data-base]")) {
+      const next = `${img.dataset.base}?dpi=${dpi}`;
+      if (img.getAttribute("src") !== next) img.src = next;
+    }
+  }, 250);
+}
+
+function resolveZoom() {
+  if (typeof state.zoom === "number") return state.zoom;
+  const view = $("#page-view");
+  if (!view.clientWidth) return state.zoomValue;
+  const extent = pageExtent();
+  const cols = state.mode === "xray" ? 1 : 2;
+  const style = getComputedStyle(view);
+  const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+  const row = view.querySelector(".page-row");
+  const gap = row ? parseFloat(getComputedStyle(row).columnGap) || 0 : 0;
+  const card = view.querySelector(".page-card");
+  const cardStyle = card ? getComputedStyle(card) : null;
+  const chrome = cardStyle
+    ? parseFloat(cardStyle.paddingLeft) +
+      parseFloat(cardStyle.paddingRight) +
+      parseFloat(cardStyle.borderLeftWidth) +
+      parseFloat(cardStyle.borderRightWidth)
+    : 0;
+  const avail = view.clientWidth - padding - cols * chrome - (cols - 1) * gap - 1;
+  let zoom = avail / (cols * extent.width * PT_TO_PX);
+  if (state.zoom === "page") {
+    const top = $(".topbar").offsetHeight + $(".result-head").offsetHeight;
+    const label = 40;
+    zoom = Math.min(
+      zoom,
+      (window.innerHeight - top - label) / (extent.height * PT_TO_PX)
+    );
+  }
+  return clampZoom(zoom);
+}
+
 function applyZoom() {
-  $("#page-view").style.maxWidth = `${1500 * state.zoom}px`;
-  $("#zoom-label").textContent = `%${Math.round(state.zoom * 100)}`;
+  state.zoomValue = resolveZoom();
+  $("#page-view").style.setProperty("--zoom", String(state.zoomValue));
+  $("#zoom-label").textContent = `%${Math.round(state.zoomValue * 100)}`;
+  $("#zoom-fit-width").setAttribute("aria-pressed", String(state.zoom === "width"));
+  $("#zoom-fit-page").setAttribute("aria-pressed", String(state.zoom === "page"));
+  scheduleDpiUpdate();
+}
+
+/* Keep the point under the anchor fixed. */
+function setZoom(value, anchor) {
+  const view = $("#page-view");
+  const before = state.zoomValue;
+  const rect = view.getBoundingClientRect();
+  const x = (anchor ? anchor.x : rect.left + view.clientWidth / 2) - rect.left;
+  const y = (anchor ? anchor.y : window.innerHeight / 2) - rect.top;
+  const scrollLeft = view.scrollLeft;
+  state.zoom = typeof value === "number" ? clampZoom(value) : value;
+  applyZoom();
+  syncActiveTab();
+  const ratio = state.zoomValue / before;
+  view.scrollLeft = (scrollLeft + x) * ratio - x;
+  window.scrollBy(0, y * (ratio - 1));
+}
+
+function stepZoom(direction) {
+  const current = state.zoomValue;
+  const next =
+    direction > 0
+      ? ZOOM_STEPS.find((step) => step > current + 0.001)
+      : [...ZOOM_STEPS].reverse().find((step) => step < current - 0.001);
+  setZoom(next === undefined ? current : next);
+}
+
+const pan = { ready: false };
+
+function setPanReady(ready) {
+  pan.ready = ready;
+  document.body.classList.toggle("pan-ready", ready);
+}
+
+function setupPageZoom() {
+  const view = $("#page-view");
+
+  view.addEventListener(
+    "wheel",
+    (event) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      const factor = event.deltaY < 0 ? 1.1 : 1 / 1.1;
+      setZoom(state.zoomValue * factor, { x: event.clientX, y: event.clientY });
+    },
+    { passive: false }
+  );
+
+  // Capture phase: panning wins over annotation drawing.
+  view.addEventListener(
+    "mousedown",
+    (event) => {
+      if (!(event.button === 1 || (event.button === 0 && pan.ready))) return;
+      event.preventDefault();
+      event.stopPropagation();
+      let lastX = event.clientX;
+      let lastY = event.clientY;
+      document.body.classList.add("panning");
+      const onMove = (move) => {
+        view.scrollLeft -= move.clientX - lastX;
+        window.scrollBy(0, -(move.clientY - lastY));
+        lastX = move.clientX;
+        lastY = move.clientY;
+      };
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        document.body.classList.remove("panning");
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    true
+  );
+  // No middle-click autoscroll or paste.
+  view.addEventListener("auxclick", (event) => {
+    if (event.button === 1) event.preventDefault();
+  });
+
+  document.addEventListener("keyup", (event) => {
+    if (event.key === " ") setPanReady(false);
+  });
+  window.addEventListener("blur", () => setPanReady(false));
+  window.addEventListener("resize", () => {
+    if (state.comparison && isPageMode() && typeof state.zoom !== "number") {
+      applyZoom();
+    }
+  });
+
+  $("#zoom-in").addEventListener("click", () => stepZoom(1));
+  $("#zoom-out").addEventListener("click", () => stepZoom(-1));
+  $("#zoom-reset").addEventListener("click", () => setZoom(1));
+  $("#zoom-fit-width").addEventListener("click", () => setZoom("width"));
+  $("#zoom-fit-page").addEventListener("click", () => setZoom("page"));
 }
 
 function showUploadView() {
@@ -1767,6 +2151,7 @@ function showUploadView() {
   $("#only-diff-wrap").hidden = true;
   $("#visual-wrap").hidden = true;
   $("#zoom-wrap").hidden = true;
+  $("#box-color-wrap").hidden = true;
   if ($("#annotate-wrap")) $("#annotate-wrap").hidden = true;
   if ($("#annotate-clear")) $("#annotate-clear").hidden = true;
   $("#change-nav").hidden = true;
@@ -1865,10 +2250,7 @@ window.addEventListener("pywebviewready", initDesktop);
 /* In the desktop shell, reports open in the real browser, not the webview. */
 $("#export").addEventListener("click", (event) => {
   closeMenus();
-  if (!desktop.available) return;
-  event.preventDefault();
-  const href = $("#export").getAttribute("href");
-  if (href) window.pywebview.api.open_external(new URL(href, location.origin).href);
+  openExternal(event, $("#export").getAttribute("href"));
 });
 
 /* ---------- wiring ---------- */
@@ -1948,14 +2330,8 @@ async function loadOcrStatus() {
   }
 }
 
-$("#zoom-in").addEventListener("click", () => {
-  state.zoom = Math.min(2, Math.round((state.zoom + 0.1) * 10) / 10);
-  applyZoom();
-});
-$("#zoom-out").addEventListener("click", () => {
-  state.zoom = Math.max(0.5, Math.round((state.zoom - 0.1) * 10) / 10);
-  applyZoom();
-});
+setupPageZoom();
+setupBoxColor();
 
 $("#prev-change").addEventListener("click", () => gotoChange(-1));
 $("#next-change").addEventListener("click", () => gotoChange(1));
@@ -1967,12 +2343,62 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
+  if (event.key === "F1") {
+    event.preventDefault();
+    openHelp();
+    return;
+  }
+
+  if (
+    (event.ctrlKey || event.metaKey) &&
+    event.key.toLowerCase() === "o" &&
+    !$("#upload-view").hidden
+  ) {
+    event.preventDefault();
+    const empty = !(state.files.left || desktop.paths.left) ? "left"
+      : !(state.files.right || desktop.paths.right) ? "right" : "left";
+    chooseFile(empty);
+    return;
+  }
+
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "w") {
+    event.preventDefault();
+    closeSessionTab(state.activeTabId);
+    return;
+  }
+
+  const pageZoomKeys = state.comparison && isPageMode() && !$("#result-view").hidden;
+  if ((event.ctrlKey || event.metaKey) && pageZoomKeys) {
+    if (event.key === "+" || event.key === "=") {
+      event.preventDefault();
+      stepZoom(1);
+      return;
+    }
+    if (event.key === "-") {
+      event.preventDefault();
+      stepZoom(-1);
+      return;
+    }
+    if (event.key === "0") {
+      event.preventDefault();
+      setZoom(1);
+      return;
+    }
+  }
+
   if (event.ctrlKey || event.metaKey || event.altKey) return;
   const tag = (event.target.tagName || "").toLowerCase();
   if (tag === "input" || tag === "textarea" || tag === "select" || event.target.isContentEditable) {
     return;
   }
   if ($("#result-view").hidden) return;
+
+  // Space + drag pans; buttons keep Space.
+  if (event.key === " " && pageZoomKeys && tag !== "button") {
+    event.preventDefault();
+    if (!event.repeat) setPanReady(true);
+    return;
+  }
 
   if (event.key === "n" || (event.key === "F3" && !event.shiftKey)) {
     event.preventDefault();

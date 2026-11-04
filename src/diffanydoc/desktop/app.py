@@ -10,9 +10,11 @@ linked in.
 
 from __future__ import annotations
 
+import html
 import json
 import os
 import socket
+import sys
 import threading
 import time
 import webbrowser
@@ -25,7 +27,7 @@ from urllib.request import urlopen
 from .. import __version__
 from ..i18n import resolve_language, t
 from ..session import SessionServer
-from ..web.server import STATIC_DIR, create_app
+from ..web import STATIC_DIR
 
 HOST = "127.0.0.1"
 _WINDOW_MIN = (900, 620)
@@ -53,7 +55,10 @@ class ServerThread(threading.Thread):
         self._server: Any = None
 
     def run(self) -> None:  # pragma: no cover - needs a socket
+        # Heavy imports here, off the GUI thread.
         import uvicorn
+
+        from ..web.server import create_app
 
         config = uvicorn.Config(
             create_app(),
@@ -219,7 +224,23 @@ def _resolve(path: str | Path) -> str:
 
 
 def has_display() -> bool:
+    # Only X11/Wayland systems need DISPLAY; Windows and macOS always have one.
+    if not sys.platform.startswith(("linux", "freebsd", "openbsd", "netbsd")):
+        return True
     return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
+def splash_html(language: str | None = None) -> str:
+    """Tiny page shown while the local server starts."""
+    text = html.escape(t("app.starting", resolve_language(language)))
+    return (
+        "<!doctype html><html><head><meta charset='utf-8'><style>"
+        ":root{color-scheme:light dark}"
+        "body{margin:0;height:100vh;display:grid;place-items:center;"
+        "font:15px system-ui,sans-serif;background:#fafafb;color:#6b7280}"
+        "@media (prefers-color-scheme:dark){body{background:#1d1d20;color:#b0b0b6}}"
+        f"</style></head><body>{text}</body></html>"
+    )
 
 
 def window_icon() -> str | None:
@@ -253,20 +274,16 @@ def run_desktop(
         )
         return 2
 
+    # Window and server start together; the splash shows until the API answers.
     port = free_port()
     server = ServerThread(port)
     server.start()
-
-    if not wait_until_ready(server.url):
-        server.stop()
-        print("the local server could not start (port conflict?).")
-        return 2
 
     api = DesktopApi(paths, startup_slots=slots)
     url = f"{server.url}/?lang={language}" if language else server.url
     window = webview.create_window(
         f"DiffAnyDoc {__version__}",
-        url,
+        html=splash_html(language),
         width=width,
         height=height,
         min_size=_WINDOW_MIN,
@@ -277,14 +294,25 @@ def run_desktop(
     window.events.loaded += api.on_loaded
     _attach_native_drop(window, api)
 
+    failed = threading.Event()
+
+    def load_app() -> None:
+        if wait_until_ready(server.url):
+            window.load_url(url)
+            return
+        failed.set()
+        message = t("app.serverFailed", resolve_language(language))
+        print(message)
+        window.load_html(f"<p style='font-family:system-ui'>{html.escape(message)}</p>")
+
     session = SessionServer(api.deliver_selection)
     session.start()
     try:
-        webview.start(debug=debug, icon=window_icon())
+        webview.start(load_app, debug=debug, icon=window_icon())
     finally:
         session.stop()
         server.stop()
-    return 0
+    return 2 if failed.is_set() else 0
 
 
 def _attach_native_drop(window: Any, api: DesktopApi) -> None:

@@ -51,6 +51,10 @@ def _clean_meta(meta: dict[str, Any]) -> dict[str, Any]:
 
 
 def _build_page(index: int, page: Any) -> Page:
+    # pdfium renders the CropBox: use its origin and size.
+    crop: BBox = tuple(float(v) for v in page.cropbox)  # type: ignore[assignment]
+    if crop != tuple(float(v) for v in page.bbox):
+        page = page.crop(crop, strict=False)
     words = page.extract_words(
         use_text_flow=False,
         keep_blank_chars=False,
@@ -80,12 +84,29 @@ def _build_page(index: int, page: Any) -> Page:
                     source_ref={"name": str(img.get("name") or "")},
                 )
             )
+    if crop[0] or crop[1]:
+        for block in blocks:
+            _shift(block, crop[0], crop[1])
     return Page(
         index=index,
-        width=float(page.width),
-        height=float(page.height),
+        width=crop[2] - crop[0],
+        height=crop[3] - crop[1],
         blocks=blocks,
     )
+
+
+def _shift(block: Block, dx: float, dy: float) -> None:
+    """Move a block tree to CropBox coordinates."""
+
+    def move(box: BBox) -> BBox:
+        return (box[0] - dx, box[1] - dy, box[2] - dx, box[3] - dy)
+
+    if block.bbox is not None:
+        block.bbox = move(block.bbox)
+    for span in block.spans:
+        span.bbox = move(span.bbox)
+    for child in block.children:
+        _shift(child, dx, dy)
 
 
 def _extract_tables(page: Any) -> tuple[list[Block], list[BBox]]:

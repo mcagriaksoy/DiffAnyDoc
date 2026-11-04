@@ -163,3 +163,32 @@ def test_compare_pdf_pages_accepts_explicit_options(tmp_path: Path) -> None:
 
     assert visual.compared == 1
     assert visual.pages[0].total_pixels > 0
+
+
+def test_text_boxes_match_render_on_cropped_page(tmp_path: Path) -> None:
+    from diffanydoc.core.render import render_page
+
+    from .pdfgen import build_pdf
+
+    raw = build_pdf([["HELLO WORLD", "SECOND LINE"]]).replace(
+        b"/MediaBox [0 0 595 842]",
+        b"/MediaBox [0 0 595 842] /CropBox [40 120 555 802]",
+    )
+    pdf = tmp_path / "cropped.pdf"
+    pdf.write_bytes(raw)
+
+    page = load(pdf).pages[0]
+    assert (page.width, page.height) == (515.0, 682.0)
+
+    scale = 2.0
+    image = render_page(pdf, 0, 144).convert("L")
+    x0, top, x1, bottom = page.blocks[0].bbox
+    columns = range(int(x0 * scale), int(x1 * scale))
+    ink = [
+        y
+        for y in range(int((top - 4) * scale), int((bottom + 4) * scale))
+        if any(image.getpixel((x, y)) < 140 for x in columns)
+    ]
+    # Ink of the first line sits inside its box.
+    assert ink
+    assert top <= ink[0] / scale and ink[-1] / scale <= bottom

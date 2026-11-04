@@ -58,10 +58,11 @@ pip install -e ".[dev,web,desktop]"
 > `PyGObject` cannot be built with pip, so the system `python3-gi` is used.
 > Server and CLI usage do not need it.
 
-> **No standalone executable yet.** `diffanydoc` is a console script inside the
-> virtualenv. M5 adds PyInstaller builds: `DiffAnyDoc.exe` on Windows and an
-> AppImage or `.deb` on Linux. The context-menu integration above also works
-> from a source checkout.
+> **Standalone builds.** `python tools/build.py` makes a PyInstaller bundle:
+> a portable `.zip` and an Inno Setup installer on Windows (needs `ISCC`), a
+> `.tar.gz` and an AppImage on Linux (needs `appimagetool`). Pushing a `v*` tag
+> builds all of them plus the sdist/wheel in GitHub Actions. From a source
+> checkout, `diffanydoc` is a console script inside the virtualenv.
 
 ## Usage
 
@@ -80,7 +81,9 @@ comparison actions (report, new comparison) it holds:
 
 - **About DiffAnyDoc** — icon, version and a one-line summary
 - **License Agreement** — the full license text in a scrollable dialog
-- **Check for Updates** — reports the current version (network checks are TODO)
+- **Help** (`F1`) — quick start, views, merging, marks and keyboard shortcuts
+- **Check for Updates** — asks GitHub for the latest release only when you open
+  it, and shows release notes and a download link
 
 These open as in-app modal dialogs rather than a classic menu bar; there is one
 toolbar per window, matching the GNOME/libadwaita pattern.
@@ -264,7 +267,9 @@ These would require extra licensing for a closed-source commercial release.
 - **M2 — visual diff** ✅ page-render comparison, tolerance, registration
 - **M3 — DOCX/XLSX** ✅ structural diff, table-cell alignment
 - **M4 — OCR** ✅ fallback layer for scanned PDFs + cache
-- **M5 — distribution** PyInstaller/Tauri packaging, auto-update, licensing
+- **M5 — distribution** 🚧 PyInstaller builds (Windows zip + installer, Linux
+  tar.gz + AppImage, PyPI) and the update check are in; the commercial licence
+  and EULA are still open (`TODO.md` TASK-04)
 
 ## Tests
 

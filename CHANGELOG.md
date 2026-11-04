@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Page zoom and pan (TASK-07)**: Fit width, Fit page, 100 % and step zoom (25–400 %) in Pages and X-Ray; `Ctrl` + wheel, `Ctrl` `+` / `-` / `0`; `Space` + drag or middle-drag pans. Page images re-render at a DPI that follows the zoom.
+- **Box color presets (TASK-03)**: Amber, Ruby, Accent blue and High contrast outlines for change boxes, saved per browser.
+- **Help dialog (TASK-05)**: Quick start, views, merging, marks and a shortcut table; opens from the menu or with `F1`. New `Ctrl+O` opens the file picker.
+- **Check for Updates dialog (TASK-06)**: queries `/api/updates`, shows current vs latest version, release notes and a download link, or a green "latest version" state.
+- **Close the last tab (TASK-01)**: `×` and `Ctrl+W` return to a clean home screen.
+- **Release builds (TASK-08)**: Windows portable `.zip` + Inno Setup installer, Linux `.tar.gz` + AppImage, sdist/wheel and PyPI trusted publishing. The PyInstaller spec is now tracked.
+
+### Changed
+- **Faster desktop start (TASK-02)**: the window opens at once with a splash while the local server starts in parallel; FastAPI is no longer imported on the GUI path.
+
+### Fixed
+- Change boxes were shifted on PDF pages whose CropBox differs from the MediaBox; text coordinates and page size now use the CropBox that is rendered.
+- `diffanydoc desktop` refused to start on Windows and macOS (it required `DISPLAY`).
+- Linux installer put the 512 px icon in the `256x256` icon folder.
+
 ## [0.2.0] - 2026-11-03
 
 ### Added

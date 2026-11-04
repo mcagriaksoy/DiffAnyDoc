@@ -1,7 +1,11 @@
-"""Web frontend (FastAPI API + static SPA)."""
+"""Web frontend (FastAPI API + static SPA).
+
+Kept light: importing this package must not load FastAPI, so the desktop
+window can open before the server is ready.
+"""
 
 from __future__ import annotations
 
-from .server import create_app, run
+from pathlib import Path
 
-__all__ = ["create_app", "run"]
+STATIC_DIR = Path(__file__).parent / "static"
