@@ -26,6 +26,9 @@
 | **TASK-08** | High | DevOps / CI | Automated Release Builds (Windows Exe, Installer, Linux, PyPI) | `[x] DONE` |
 | **TASK-09** | Medium | Design / Desktop | High-Resolution App Icon & OS Asset Integration | `[x] DONE` |
 | **TASK-10** | High | UI / UX | Difference Navigation Controls (Sticky Topbar & Keyboard Shortcuts) | `[x] DONE` |
+| **TASK-11** | High | Desktop / UX | Linux Desktop Drag-and-Drop (WebKit2GTK URI / File Drop) Fix | `[ ] OPEN` |
+| **TASK-12** | High | Integration / OS | File Manager Context Menu Integration ("Compare with DiffAnyDoc") | `[ ] OPEN` |
+| **TASK-13** | High | Engine / UI | Pure-stdlib A4 Page Layout & Sheet View for Office/Text Documents | `[ ] OPEN` |
 
 ---
 
@@ -222,3 +225,59 @@
   - Next/Previous change buttons that smoothly scroll to and highlight each change (`.current`).
   - Full keyboard shortcut support (`F7`, `Shift+F7`, `N`, `P`, `Alt+Up`, `Alt+Down`, `F3`).
   - Maintain strict GNOME Adwaita & Cinnamon design aesthetics.
+
+---
+
+### [TASK-11] Linux Desktop Drag-and-Drop (WebKit2GTK / URI Drop) Fix
+- **Status**: `[ ] OPEN`
+- **Priority**: High
+- **Files**:
+  - `src/diffanydoc/desktop/app.py` (`resolve_dropped_uris`, GTK DND target signals)
+  - `src/diffanydoc/web/static/app.js` (`setupDropZones`, `handleUriDrop`, `hasFiles`)
+- **Problem Statement**:
+  - Dragging and dropping files from Linux file managers (Nautilus, Nemo, Dolphin) onto the desktop window does not populate the comparison drop zones.
+  - In WebKit2GTK on Linux, `dataTransfer.files` is frequently empty due to browser security restrictions on local filesystem paths, and `text/uri-list` or `text/plain` drops must be properly routed and resolved to canonical paths via desktop IPC.
+- **Requirements**:
+  - Ensure drag-over visual feedback triggers reliably across all Linux desktop environments (GNOME, Cinnamon, XFCE, KDE).
+  - Robustly extract URI lists and paths from `dataTransfer` (`text/uri-list`, `text/plain`, `application/x-moz-file`).
+  - Connect native GTK drag-and-drop signals in `diffanydoc.desktop.app` when running under WebKit2GTK if webview security drops URIs.
+  - Test and verify single-file drop (fills left or right depending on drop zone) and two-file simultaneous drop (fills both A and B).
+
+---
+
+### [TASK-12] File Manager Context Menu Integration ("Compare with DiffAnyDoc")
+- **Status**: `[ ] OPEN`
+- **Priority**: High
+- **Files**:
+  - `src/diffanydoc/integrate.py`
+  - `src/diffanydoc/cli.py` (`integrate` subcommand)
+  - `src/diffanydoc/web/static/index.html` (Desktop integration action / settings menu entry)
+  - `src/diffanydoc/locales/en.json`, `src/diffanydoc/locales/tr.json`
+- **Problem Statement**:
+  - Users want to right-click files in their file manager to directly launch or compare them with DiffAnyDoc.
+- **Requirements**:
+  - Support Linux file managers:
+    - **Nemo (Cinnamon)**: `.nemo_action` entry in `~/.local/share/nemo/actions/`.
+    - **Nautilus (GNOME)**: Nautilus scripts in `~/.local/share/nautilus/scripts/` and Desktop Action in `.desktop`.
+    - **Dolphin (KDE)**: Service menu `.desktop` in `~/.local/share/kservices5/ServiceMenus/` / `kio/servicemenus`.
+  - Support **Windows Explorer**:
+    - Context menu commands under `HKCU\Software\Classes\*\shell\DiffAnyDoc` ("Select Left File (A)", "Compare with DiffAnyDoc...").
+  - Provide a one-click "Install File Manager Integration" button in the app's menu/dialog in addition to `diffanydoc integrate install`.
+
+---
+
+### [TASK-13] Pure-stdlib A4 Page Layout & Sheet View for Office/Text Documents
+- **Status**: `[ ] OPEN`
+- **Priority**: High
+- **Files**:
+  - `src/diffanydoc/core/model.py` (`Page`, `renderable` flags)
+  - `src/diffanydoc/core/diff/engine.py` (Pagination generation for `.docx`, `.doc`, `.odt`, `.rtf`, `.xlsx`, `.txt`)
+  - `src/diffanydoc/web/static/app.js` (`renderPages`, DOM sheet layout)
+  - `src/diffanydoc/web/static/app.css` (`.page-sheet`, A4 styling, typography)
+- **Problem Statement**:
+  - Currently, office documents (`.docx`, `.doc`, `.odt`, `.rtf`, `.xlsx`) disable the **Pages** and **X-Ray** views because they are not rasterized by `pypdfium2`. Users expect to see these documents formatted as printable A4 page cards alongside PDFs.
+- **Requirements**:
+  - Implement **Option 1**: A pure-stdlib, zero-external-dependency A4 sheet paginator using the existing `Document -> Page -> Block` IR.
+  - Paginate paragraphs, headings, and tables into standard A4 sheets (approx. 595 × 842 pt / 1123 × 794 px at 96 DPI).
+  - Enable the **Pages** tab for office formats, rendering interactive A4 card views with highlighted inline word diffs, bounding boxes, and box color switching.
+  - Comply 100% with commercial permissive licensing (no LibreOffice/Word runtime requirements).
