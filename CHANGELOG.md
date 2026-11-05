@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Sticky Difference Navigation Controls**: Added GNOME Adwaita linked pill navigation controls in the top header (`#top-diff-nav`) with Previous change (`▲`), Next change (`▼`), and position counter (`current / total`), accessible at all times while scrolling. Supported shortcuts include `F7` / `Shift+F7`, `N` / `P`, `Alt+Up` / `Alt+Down`, and `F3` / `Shift+F3`.
 - **Page zoom and pan (TASK-07)**: Fit width, Fit page, 100 % and step zoom (25–400 %) in Pages and X-Ray; `Ctrl` + wheel, `Ctrl` `+` / `-` / `0`; `Space` + drag or middle-drag pans. Page images re-render at a DPI that follows the zoom.
 - **Box color presets (TASK-03)**: Amber, Ruby, Accent blue and High contrast outlines for change boxes, saved per browser.
 - **Help dialog (TASK-05)**: Quick start, views, merging, marks and a shortcut table; opens from the menu or with `F1`. New `Ctrl+O` opens the file picker.

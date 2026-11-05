@@ -1839,14 +1839,27 @@ function collectChanges() {
 }
 
 function updateChangeNav() {
+  const count = state.changes.length;
+  const current = count === 0 ? 0 : Math.max(state.changeIndex + 1, 0);
+  const text = i18n.t("nav.position", { current, total: count });
+
   const nav = $("#change-nav");
-  if (!nav) return;
-  nav.hidden = state.changes.length === 0;
-  const current = Math.max(state.changeIndex + 1, 0);
-  $("#change-count").textContent = i18n.t("nav.position", {
-    current,
-    total: state.changes.length,
-  });
+  if (nav) {
+    nav.hidden = count === 0;
+    const cnt = $("#change-count");
+    if (cnt) cnt.textContent = text;
+  }
+
+  const topNav = $("#top-diff-nav");
+  if (topNav) {
+    topNav.hidden = count === 0;
+    const topCnt = $("#top-change-count");
+    if (topCnt) topCnt.textContent = text;
+    const topPrev = $("#top-prev-change");
+    const topNext = $("#top-next-change");
+    if (topPrev) topPrev.disabled = count === 0;
+    if (topNext) topNext.disabled = count === 0;
+  }
 }
 
 function setCurrentChange(index) {
@@ -2155,7 +2168,8 @@ function showUploadView() {
   $("#box-color-wrap").hidden = true;
   if ($("#annotate-wrap")) $("#annotate-wrap").hidden = true;
   if ($("#annotate-clear")) $("#annotate-clear").hidden = true;
-  $("#change-nav").hidden = true;
+  if ($("#change-nav")) $("#change-nav").hidden = true;
+  if ($("#top-diff-nav")) $("#top-diff-nav").hidden = true;
   $("#stats").replaceChildren();
   state.visual = null;
   state.ocr = null;
@@ -2334,8 +2348,10 @@ async function loadOcrStatus() {
 setupPageZoom();
 setupBoxColor();
 
-$("#prev-change").addEventListener("click", () => gotoChange(-1));
-$("#next-change").addEventListener("click", () => gotoChange(1));
+if ($("#prev-change")) $("#prev-change").addEventListener("click", () => gotoChange(-1));
+if ($("#next-change")) $("#next-change").addEventListener("click", () => gotoChange(1));
+if ($("#top-prev-change")) $("#top-prev-change").addEventListener("click", () => gotoChange(-1));
+if ($("#top-next-change")) $("#top-next-change").addEventListener("click", () => gotoChange(1));
 
 document.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
@@ -2384,6 +2400,27 @@ document.addEventListener("keydown", (event) => {
       event.preventDefault();
       setZoom(1);
       return;
+    }
+  }
+
+  // Navigation shortcuts with Alt (Alt+Down, Alt+Up) or F7 (F7, Shift+F7)
+  if (state.comparison && !$("#result-view").hidden) {
+    if (event.key === "F7") {
+      event.preventDefault();
+      gotoChange(event.shiftKey ? -1 : 1);
+      return;
+    }
+    if (event.altKey && !event.ctrlKey && !event.metaKey) {
+      if (event.key === "ArrowDown" || event.key === "Down") {
+        event.preventDefault();
+        gotoChange(1);
+        return;
+      }
+      if (event.key === "ArrowUp" || event.key === "Up") {
+        event.preventDefault();
+        gotoChange(-1);
+        return;
+      }
     }
   }
 

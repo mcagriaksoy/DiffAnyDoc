@@ -33,6 +33,15 @@
       <button class="tab" data-mode="pages" role="tab" id="tab-pages" data-i18n="tab.pages">Pages</button>
       <button class="tab" data-mode="xray" role="tab" id="tab-xray" data-i18n="tab.xray">X-Ray</button>
     </div>
+    <div class="diff-nav" id="top-diff-nav" hidden>
+      <button class="flat icon diff-nav-btn" id="top-prev-change" type="button" data-i18n-title="nav.prev" data-i18n-aria-label="nav.prev">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m11 10-3-3-3 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <span class="diff-nav-count" id="top-change-count" aria-live="polite">0 / 0</span>
+      <button class="flat icon diff-nav-btn" id="top-next-change" type="button" data-i18n-title="nav.next" data-i18n-aria-label="nav.next">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 6 3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
   </div>
 
   <div class="topbar-end">
@@ -291,7 +300,7 @@
           <tr><td><kbd>Ctrl</kbd> + <kbd>O</kbd></td><td data-i18n="help.key.open">Choose a file</td></tr>
           <tr><td><kbd>Ctrl</kbd> + <kbd>Enter</kbd></td><td data-i18n="help.key.compare">Compare</td></tr>
           <tr><td><kbd>Ctrl</kbd> + <kbd>W</kbd></td><td data-i18n="help.key.closeTab">Close the comparison tab</td></tr>
-          <tr><td><kbd>N</kbd> / <kbd>P</kbd>, <kbd>F3</kbd> / <kbd>Shift</kbd> + <kbd>F3</kbd></td><td data-i18n="help.key.nav">Next / previous change</td></tr>
+          <tr><td><kbd>F7</kbd> / <kbd>Shift</kbd> + <kbd>F7</kbd>, <kbd>N</kbd> / <kbd>P</kbd></td><td data-i18n="help.key.nav">Next / previous change</td></tr>
           <tr><td><kbd>Ctrl</kbd> + <kbd>+</kbd> / <kbd>-</kbd></td><td data-i18n="help.key.zoom">Zoom pages in / out</td></tr>
           <tr><td><kbd>Ctrl</kbd> + <kbd>0</kbd></td><td data-i18n="help.key.zoomReset">Actual size (100%)</td></tr>
           <tr><td><kbd data-i18n="help.key.space">Space</kbd> + <span data-i18n="help.key.drag">drag</span></td><td data-i18n="help.key.pan">Move a zoomed page</td></tr>

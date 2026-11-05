@@ -205,7 +205,46 @@ body {
 
 .topbar-center {
   display: flex;
+  align-items: center;
   justify-content: center;
+  gap: var(--space-2);
+}
+
+.diff-nav {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--view-bg-color);
+  padding: 0 2px;
+}
+
+.diff-nav-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: calc(var(--radius-sm) - 2px);
+  color: var(--text-color);
+}
+
+.diff-nav-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.diff-nav-count {
+  min-width: 48px;
+  padding: 0 6px;
+  text-align: center;
+  font-size: var(--font-size-caption);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--text-color);
+  user-select: none;
 }
 
 .topbar-end {
@@ -1253,6 +1292,7 @@ body.dragging .drop {
 .page-row.current {
   outline: 2px solid var(--accent-color);
   outline-offset: -2px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 25%, transparent);
   border-radius: 2px;
 }
 

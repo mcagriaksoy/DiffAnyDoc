@@ -25,6 +25,7 @@
 | **TASK-07** | High | UI / Viewer | Page View & X-Ray Zoom / Magnifier Controls | `[x] DONE` |
 | **TASK-08** | High | DevOps / CI | Automated Release Builds (Windows Exe, Installer, Linux, PyPI) | `[x] DONE` |
 | **TASK-09** | Medium | Design / Desktop | High-Resolution App Icon & OS Asset Integration | `[x] DONE` |
+| **TASK-10** | High | UI / UX | Difference Navigation Controls (Sticky Topbar & Keyboard Shortcuts) | `[x] DONE` |
 
 ---
 
@@ -202,3 +203,22 @@
     - Web tab favicon (`<link rel="icon">`).
     - Linux `.desktop` and `install.sh`.
     - PyInstaller executable resource.
+
+---
+
+### [TASK-10] Difference Navigation Controls (Sticky Topbar & Keyboard Shortcuts)
+- **Status**: `[x] DONE` - Added sticky Adwaita linked pill navigation control in `<header class="topbar">` (`#top-diff-nav`) with Previous (`▲`), Next (`▼`), and current/total counter. Synchronized across Text, Pages, and X-Ray views with smooth scrolling and outline highlights. Added full keyboard shortcuts: `F7` / `Shift+F7`, `N` / `P`, `Alt+Down` / `Alt+Up`, and `F3` / `Shift+F3`.
+- **Priority**: High
+- **Files**:
+  - `src/diffanydoc/web/static/index.html` (`#top-diff-nav`, `#help-dialog` shortcuts table)
+  - `src/diffanydoc/web/static/app.css` (`.diff-nav`, `.diff-nav-btn`, `.diff-nav-count`, `.row.current`)
+  - `src/diffanydoc/web/static/app.js` (`updateChangeNav`, `collectChanges`, `gotoChange`, `keydown` shortcuts)
+  - `src/diffanydoc/locales/en.json`, `src/diffanydoc/locales/tr.json` (`nav.next`, `nav.prev` tooltips with shortcut cues)
+- **Problem Statement**:
+  - Users reading long documents had to scroll back up or hunt manually for changes once the view header scrolled off-screen.
+- **Requirements**:
+  - Provide persistent, sticky difference navigation directly in the header bar.
+  - Display current change index and total changes (e.g. `1 / 14`).
+  - Next/Previous change buttons that smoothly scroll to and highlight each change (`.current`).
+  - Full keyboard shortcut support (`F7`, `Shift+F7`, `N`, `P`, `Alt+Up`, `Alt+Down`, `F3`).
+  - Maintain strict GNOME Adwaita & Cinnamon design aesthetics.
