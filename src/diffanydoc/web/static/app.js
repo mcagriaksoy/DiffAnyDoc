@@ -343,24 +343,22 @@ async function checkUpdates() {
   }
 }
 
-let licenseLoaded = false;
+function showLicensePanel(name) {
+  for (const tab of $$(".license-tab")) {
+    const active = tab.dataset.license === name;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", String(active));
+  }
+  for (const panel of $$(".license-panel")) {
+    panel.hidden = panel.dataset.licensePanel !== name;
+  }
+}
 
-async function openLicense() {
+function openLicense() {
   closeMenus();
+  showLicensePanel("terms");
   const dialog = $("#license-dialog");
   if (!dialog.open) dialog.showModal();
-  if (licenseLoaded) return;
-
-  const body = $("#license-text");
-  body.textContent = i18n.t("license.loading");
-  try {
-    const response = await fetch("/static/gpl-3.0.txt");
-    if (!response.ok) throw new Error("license");
-    body.textContent = await response.text();
-    licenseLoaded = true;
-  } catch (_) {
-    body.textContent = i18n.t("license.unavailable");
-  }
 }
 
 function showHelpPanel(name) {
@@ -400,6 +398,9 @@ function setupDialogs() {
     openLicense();
   });
   $("#license").addEventListener("click", openLicense);
+  for (const tab of $$(".license-tab")) {
+    tab.addEventListener("click", () => showLicensePanel(tab.dataset.license));
+  }
   $("#help").addEventListener("click", openHelp);
   for (const tab of $$(".help-tab")) {
     tab.addEventListener("click", () => showHelpPanel(tab.dataset.help));

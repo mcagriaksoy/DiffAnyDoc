@@ -246,19 +246,15 @@ Because the target is a commercial release, dependencies were chosen from
 | `pdfplumber` / `pdfminer.six` | MIT | PDF text + coordinates |
 | `pypdfium2` | Apache-2.0 / BSD-3 | PDF rendering |
 | `Pillow` | MIT-CMU | images |
+| `rapidocr-onnxruntime` | Apache-2.0 | Embedded ONNX OCR engine |
 | `fastapi` / `uvicorn` | MIT / BSD-3 | API |
 | `pywebview` | BSD-3 | desktop shell |
-| Tesseract | Apache-2.0 | OCR binary, optional system dependency |
 | GTK / WebKit2GTK | LGPL | system webview (dynamic linking) |
 
 Deliberately **not used**: PyMuPDF (AGPL), PyQt6 (GPL), parts of reportlab.
 These would require extra licensing for a closed-source commercial release.
 
-> ⚠️ The `LICENSE` file in the repository is still the GPL-3.0 text from the
-> first commit and **must change before any release.** Suggested model: AGPL-3.0
-> for the open-source repository plus a separate commercial licence for paying
-> customers (dual licensing), or fully proprietary until 1.0. Do not publish
-> before that decision.
+> **License**: DiffAnyDoc is distributed under a proprietary Commercial End User License Agreement (EULA). All bundled third-party libraries use approved permissive open-source licenses (MIT, Apache-2.0, BSD-3, PSF). See [`LICENSE`](LICENSE), [`EULA.md`](EULA.md), and [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 ## Roadmap
 

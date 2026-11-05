@@ -19,7 +19,7 @@
 | **TASK-01** | High | UI / UX | Single-Tab Close & Return to Home Screen | `[x] DONE` |
 | **TASK-02** | High | Performance | Cold-Start & Startup Latency Optimization | `[x] DONE` |
 | **TASK-03** | High | Visual / Engine | Page View Bounding Box Calibration & Custom Color | `[x] DONE` |
-| **TASK-04** | Medium | Legal / Docs | Commercial EULA & License Agreement Page | `[ ] OPEN` |
+| **TASK-04** | Medium | Legal / Docs | Commercial EULA & License Agreement Page | `[x] DONE` |
 | **TASK-05** | Medium | UI / Docs | In-App Help & User Guide Modal | `[x] DONE` |
 | **TASK-06** | Medium | Web / UI | "Check for Updates" Modal with GitHub Tag Diff | `[x] DONE` |
 | **TASK-07** | High | UI / Viewer | Page View & X-Ray Zoom / Magnifier Controls | `[x] DONE` |
@@ -82,7 +82,7 @@
 ---
 
 ### [TASK-04] Commercial EULA & License Agreement Page
-- **Status**: `[ ] OPEN`
+- **Status**: `[x] DONE` - Replaced placeholder GPLv3 with a formal commercial End User License Agreement (EULA) in `LICENSE` and `EULA.md`. Added `THIRD_PARTY_NOTICES.md` documenting all permissive dependencies. Redesigned `#license-dialog` in `index.html` with GNOME HIG tabbed panels ("Commercial Terms", "Privacy & Data", "Third-Party Notices"), styled in `app.css` and wired in `app.js`. Full 1:1 bilingual Turkish/English translations in `locales/`.
 - **Priority**: Medium
 - **Files**:
   - `src/diffanydoc/web/static/index.html` (modal `#dlg-license`)

@@ -309,12 +309,78 @@
   <div class="dialog-head">
     <div>
       <h2 class="dialog-title" id="license-title" data-i18n="license.title">License Agreement</h2>
-      <p class="dialog-meta">GNU General Public License v3.0</p>
+      <p class="dialog-meta" data-i18n="license.meta">DiffAnyDoc Commercial EULA &amp; Open Source Notices</p>
     </div>
   </div>
   <div class="dialog-body">
-    <p data-i18n="license.notice">This development build is distributed under the GNU General Public License v3.0. The final commercial license is still being decided.</p>
-    <pre class="license-text" id="license-text"></pre>
+    <div class="tabs license-tabs" role="tablist">
+      <button class="license-tab active" type="button" role="tab" aria-selected="true" data-license="terms" data-i18n="license.tab.terms">Commercial Terms</button>
+      <button class="license-tab" type="button" role="tab" aria-selected="false" data-license="privacy" data-i18n="license.tab.privacy">Privacy &amp; Data</button>
+      <button class="license-tab" type="button" role="tab" aria-selected="false" data-license="thirdparty" data-i18n="license.tab.thirdparty">Third-Party Notices</button>
+    </div>
+    <section class="license-panel" data-license-panel="terms" role="tabpanel">
+      <h4 data-i18n="license.terms.grant_title">1. Commercial License Grant</h4>
+      <p data-i18n="license.terms.grant_text">Licensor grants you a non-exclusive, non-transferable, revocable license to install and run DiffAnyDoc on compatible devices for internal business or personal document comparison.</p>
+      <h4 data-i18n="license.terms.ip_title">2. Intellectual Property &amp; Ownership</h4>
+      <p data-i18n="license.terms.ip_text">DiffAnyDoc is licensed, not sold. All source code, interfaces, visual diff algorithms, branding, and documentation remain the exclusive property of Mehmet Cagri Aksoy.</p>
+      <h4 data-i18n="license.terms.restrictions_title">3. Restrictions</h4>
+      <p data-i18n="license.terms.restrictions_text">You may not reverse engineer, decompile, resell, sublicense, or bundle DiffAnyDoc into a competing product or hosted SaaS without explicit written permission.</p>
+      <h4 data-i18n="license.terms.disclaimer_title">4. Disclaimer of Warranties &amp; Liability</h4>
+      <p data-i18n="license.terms.disclaimer_text">The Software is provided "AS IS", without warranty of any kind. To the maximum extent permitted by law, the author shall not be liable for any direct or indirect damages arising from use of the software.</p>
+    </section>
+    <section class="license-panel" data-license-panel="privacy" role="tabpanel" hidden>
+      <h4 data-i18n="license.privacy.offline_title">100% Offline Processing Guarantee</h4>
+      <p data-i18n="license.privacy.offline_text">All document parsing, text extraction, OCR, and visual pixel overlay diffing run completely offline on your local machine. No document or text data is ever sent across the network.</p>
+      <h4 data-i18n="license.privacy.telemetry_title">Zero Document Telemetry</h4>
+      <p data-i18n="license.privacy.telemetry_text">DiffAnyDoc contains no tracking scripts, analytics, or document telemetry. Your contracts, invoices, and source code stay 100% private and confidential.</p>
+      <h4 data-i18n="license.privacy.updates_title">User-Triggered Update Checks</h4>
+      <p data-i18n="license.privacy.updates_text">Update checks run only when you explicitly press Check now in the Updates dialog. The request only contacts public GitHub Releases and transmits no device or document identifiers.</p>
+    </section>
+    <section class="license-panel" data-license-panel="thirdparty" role="tabpanel" hidden>
+      <p data-i18n="license.thirdparty.intro">DiffAnyDoc utilizes the following open-source components under approved permissive licenses. No copyleft (GPL, AGPL) dependencies are used.</p>
+      <div class="license-card">
+        <div class="license-card-head">
+          <span class="license-card-name">RapidOCR (rapidocr-onnxruntime)</span>
+          <span class="license-card-badge">Apache-2.0</span>
+        </div>
+        <div class="license-card-meta" data-i18n="license.thirdparty.rapidocr">Embedded ONNX OCR engine</div>
+      </div>
+      <div class="license-card">
+        <div class="license-card-head">
+          <span class="license-card-name">pdfplumber</span>
+          <span class="license-card-badge">MIT</span>
+        </div>
+        <div class="license-card-meta" data-i18n="license.thirdparty.pdfplumber">PDF text, font metadata, and table extraction</div>
+      </div>
+      <div class="license-card">
+        <div class="license-card-head">
+          <span class="license-card-name">pypdfium2</span>
+          <span class="license-card-badge">Apache-2.0 / BSD-3</span>
+        </div>
+        <div class="license-card-meta" data-i18n="license.thirdparty.pypdfium2">High-performance PDF page rendering</div>
+      </div>
+      <div class="license-card">
+        <div class="license-card-head">
+          <span class="license-card-name">Pillow</span>
+          <span class="license-card-badge">HPND / MIT-CMU</span>
+        </div>
+        <div class="license-card-meta" data-i18n="license.thirdparty.pillow">Image processing, pixel diffing, and composite overlays</div>
+      </div>
+      <div class="license-card">
+        <div class="license-card-head">
+          <span class="license-card-name">FastAPI / Starlette / Uvicorn</span>
+          <span class="license-card-badge">MIT / BSD-3</span>
+        </div>
+        <div class="license-card-meta" data-i18n="license.thirdparty.fastapi">Local API server and static asset dispatch</div>
+      </div>
+      <div class="license-card">
+        <div class="license-card-head">
+          <span class="license-card-name">pywebview</span>
+          <span class="license-card-badge">BSD-3</span>
+        </div>
+        <div class="license-card-meta" data-i18n="license.thirdparty.pywebview">Native desktop window wrapper (WebKit2GTK / WebView2 / Cocoa)</div>
+      </div>
+    </section>
   </div>
   <div class="dialog-actions">
     <button class="suggested" type="button" data-close data-i18n="action.close">Close</button>

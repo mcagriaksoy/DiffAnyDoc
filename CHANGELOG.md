@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Check for Updates dialog (TASK-06)**: queries `/api/updates`, shows current vs latest version, release notes and a download link, or a green "latest version" state.
 - **Close the last tab (TASK-01)**: `×` and `Ctrl+W` return to a clean home screen.
 - **Release builds (TASK-08)**: Windows portable `.zip` + Inno Setup installer, Linux `.tar.gz` + AppImage, sdist/wheel and PyPI trusted publishing. The PyInstaller spec is now tracked.
+- **Commercial EULA & License Agreement Dialog (TASK-04)**: Replaced placeholder GPL text with a formal proprietary commercial End User License Agreement (`LICENSE`, `EULA.md`) and third-party open-source attributions (`THIRD_PARTY_NOTICES.md`). Upgraded `#license-dialog` to an Adwaita tabbed interface with Commercial Terms, 100% Offline Privacy Guarantee, and Permissive Third-Party Notices tabs.
 
 ### Changed
 - **Faster desktop start (TASK-02)**: the window opens at once with a splash while the local server starts in parallel; FastAPI is no longer imported on the GUI path.

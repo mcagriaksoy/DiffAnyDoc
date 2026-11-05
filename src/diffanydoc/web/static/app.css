@@ -1460,6 +1460,70 @@ kbd {
   font-size: var(--font-size-code);
 }
 
+.license-tabs {
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+
+.license-panel {
+  min-height: 220px;
+  max-height: 52vh;
+  overflow-y: auto;
+  padding-right: var(--space-1);
+}
+
+.license-panel h4 {
+  margin: var(--space-2) 0 var(--space-1);
+  color: var(--text-color);
+  font-size: var(--font-size-body);
+  font-weight: 600;
+}
+
+.license-panel h4:first-child {
+  margin-top: 0;
+}
+
+.license-panel p {
+  margin: 0 0 var(--space-2);
+  line-height: 1.55;
+  color: var(--dim-label-color);
+}
+
+.license-card {
+  margin-bottom: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg-color);
+}
+
+.license-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: 4px;
+}
+
+.license-card-name {
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.license-card-badge {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-subtle-color);
+  color: var(--accent-fg-color);
+}
+
+.license-card-meta {
+  font-size: 12px;
+  color: var(--dim-label-color);
+}
+
 .license-text {
   max-height: 46vh;
   margin: var(--space-2) 0 0;
