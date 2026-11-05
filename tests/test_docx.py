@@ -263,4 +263,22 @@ def test_docx_long_paragraph_highlights_only_changed_words(tmp_path: Path) -> No
     assert equal_len > len(left_para) * 0.75
 
 
+def test_docx_a4_pagination_and_page_rendering(tmp_path: Path) -> None:
+    from diffanydoc.core.render import is_renderable_path, render_page_png
+
+    doc_path = write_docx(
+        tmp_path / "sample.docx",
+        [
+            ("p", "Sözleşme Metni", "Heading1"),
+            ("p", "Bu bir test paragrafıdır ve A4 kağıt sayfasında mizanpajlanacaktır."),
+            ("table", [["Hücre 1", "Hücre 2"], ["Veri A", "Veri B"]]),
+        ],
+    )
+    assert is_renderable_path(doc_path) is True
+
+    png_bytes = render_page_png(doc_path, 0, dpi=72)
+    assert len(png_bytes) > 500
+    assert png_bytes.startswith(b"\x89PNG")
+
+
 

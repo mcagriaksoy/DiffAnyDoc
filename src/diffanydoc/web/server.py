@@ -415,8 +415,8 @@ def _run_compare(
         "right": [{"width": w, "height": h} for w, h in result.right_pages],
     }
     payload["renderable"] = {
-        "left": result.left_kind in ("pdf", "image"),
-        "right": result.right_kind in ("pdf", "image"),
+        "left": is_renderable_path(left_path) if left_path else True,
+        "right": is_renderable_path(right_path) if right_path else True,
     }
     payload["rects"] = _rects(result)
 

@@ -248,6 +248,11 @@ def compare(
     left_doc, left_ocr = _load_or_cached(left, left_hash, options)
     right_doc, right_ocr = _load_or_cached(right, right_hash, options)
 
+    from ..layout import paginate_document
+
+    left_doc = paginate_document(left_doc)
+    right_doc = paginate_document(right_doc)
+
     ocr: OcrStats | None = None
     for page_stats in (left_ocr, right_ocr):
         if page_stats is None:
@@ -307,8 +312,8 @@ def compare(
         byte_identical=bool(left_hash and left_hash == right_hash),
         left_sha256=left_hash,
         right_sha256=right_hash,
-        left_pages=[(p.width, p.height) for p in left_doc.pages],
-        right_pages=[(p.width, p.height) for p in right_doc.pages],
+        left_pages=[(p.width or 595.0, p.height or 842.0) for p in left_doc.pages],
+        right_pages=[(p.width or 595.0, p.height or 842.0) for p in right_doc.pages],
     )
 
 

@@ -240,3 +240,119 @@ def _continues(line: Block, nxt: Block, left_edge: float, right_edge: float) -> 
     if line.text.rstrip().endswith(":") and len(line.text) < 40:
         return False
     return True
+
+
+# --------------------------------------------------------------------------- #
+# A4 Sheet Pagination for Office and Plain Text Documents
+# --------------------------------------------------------------------------- #
+
+A4_WIDTH = 595.0
+A4_HEIGHT = 842.0
+A4_MARGIN = 54.0
+
+
+def paginate_document(
+    doc: "Document",
+    page_width: float = A4_WIDTH,
+    page_height: float = A4_HEIGHT,
+    margin: float = A4_MARGIN,
+) -> "Document":
+    """Paginate office/text documents without geometry into standard A4 pages."""
+    from .model import Document, Page
+
+    # If the document already has explicit geometry on its pages/blocks, keep it.
+    has_geometry = any(
+        p.width > 0 and p.height > 0 and any(b.bbox is not None for b in p.blocks)
+        for p in doc.pages
+    )
+    if has_geometry:
+        return doc
+
+    content_w = max(page_width - 2 * margin, 100.0)
+    max_y = page_height - margin
+    avg_char_w = 6.0
+
+    all_blocks: list[Block] = []
+    for p in doc.pages:
+        all_blocks.extend(p.blocks)
+
+    pages: list[Page] = []
+    current_page_idx = 0
+    current_blocks: list[Block] = []
+    y = margin
+
+    for block in all_blocks:
+        is_heading = bool(block.style.get("heading") or (block.style.get("bold") and len(block.text) < 80))
+        line_h = 22.0 if is_heading else 15.0
+        chars_per_line = max(int(content_w / avg_char_w), 20)
+
+        if block.kind == "table" and block.children:
+            n_rows = max(len(block.children), 1)
+            b_height = n_rows * 20.0 + 8.0
+        elif block.cells is not None:
+            b_height = 20.0
+        else:
+            n_lines = max(1, (len(block.text) + chars_per_line - 1) // chars_per_line)
+            b_height = n_lines * line_h
+
+        # Page break if block overflows sheet
+        if current_blocks and (y + b_height > max_y):
+            pages.append(
+                Page(
+                    index=current_page_idx,
+                    width=page_width,
+                    height=page_height,
+                    blocks=current_blocks,
+                )
+            )
+            current_page_idx += 1
+            current_blocks = []
+            y = margin
+
+        b_box: BBox = (
+            margin,
+            y,
+            min(margin + max(len(block.text) * avg_char_w, 20.0), page_width - margin),
+            y + b_height,
+        )
+        block.bbox = b_box
+
+        # Generate per-word spans so changed words can be boxed accurately
+        words = block.text.split()
+        spans: list[Span] = []
+        cur_x = margin
+        cur_y = y
+        char_idx = 0
+        for w in words:
+            w_idx = block.text.find(w, char_idx)
+            if w_idx != -1:
+                char_idx = w_idx
+            w_len_pt = max(len(w) * avg_char_w, 4.0)
+            if cur_x + w_len_pt > page_width - margin and cur_x > margin:
+                cur_x = margin
+                cur_y += line_h
+            w_box: BBox = (cur_x, cur_y, cur_x + w_len_pt, cur_y + line_h)
+            spans.append(Span(start=char_idx, end=char_idx + len(w), page=current_page_idx, bbox=w_box))
+            cur_x += w_len_pt + avg_char_w
+            char_idx += len(w)
+
+        block.spans = spans
+        current_blocks.append(block)
+        y += b_height + (8.0 if is_heading else 4.0)
+
+    if current_blocks or not pages:
+        pages.append(
+            Page(
+                index=current_page_idx,
+                width=page_width,
+                height=page_height,
+                blocks=current_blocks,
+            )
+        )
+
+    return Document(
+        path=doc.path,
+        kind=doc.kind,
+        pages=pages,
+        meta=dict(doc.meta),
+    )

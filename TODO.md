@@ -28,7 +28,7 @@
 | **TASK-10** | High | UI / UX | Difference Navigation Controls (Sticky Topbar & Keyboard Shortcuts) | `[x] DONE` |
 | **TASK-11** | High | Desktop / UX | Linux Desktop Drag-and-Drop (WebKit2GTK URI / File Drop) Fix | `[x] DONE` |
 | **TASK-12** | High | Integration / OS | File Manager Context Menu Integration ("Compare with DiffAnyDoc") | `[x] DONE` |
-| **TASK-13** | High | Engine / UI | Pure-stdlib A4 Page Layout & Sheet View for Office/Text Documents | `[ ] OPEN` |
+| **TASK-13** | High | Engine / UI | Pure-stdlib A4 Page Layout & Sheet View for Office/Text Documents | `[x] DONE` |
 
 ---
 
@@ -267,7 +267,7 @@
 ---
 
 ### [TASK-13] Pure-stdlib A4 Page Layout & Sheet View for Office/Text Documents
-- **Status**: `[ ] OPEN`
+- **Status**: `[x] DONE` - Implemented Option 1: pure-stdlib, zero-external-dependency A4 sheet pagination (`paginate_document`) in `core/layout.py` and A4 page rasterizer (`render_sheet_page`) in `core/render.py`. Enabled the Pages and X-Ray views for all supported office and text formats (`.docx`, `.doc`, `.odt`, `.rtf`, `.xlsx`, `.txt`) with bounding boxes, span diffing, and zoom support.
 - **Priority**: High
 - **Files**:
   - `src/diffanydoc/core/model.py` (`Page`, `renderable` flags)

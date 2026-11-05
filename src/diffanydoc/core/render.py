@@ -12,7 +12,7 @@ import threading
 from collections import OrderedDict
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 #: Images are large (a page at 96 dpi is ~2.3 MB in RGB); keep few of them.
 _MAX_IMAGES = 12
@@ -32,8 +32,126 @@ _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
 
 def is_renderable_path(path: str | Path) -> bool:
     """Whether a file on disk can be rasterised as page images."""
+    from .adapters import supported_extensions
+
     suffix = Path(path).suffix.lower()
-    return suffix == ".pdf" or suffix in _IMAGE_SUFFIXES
+    return suffix == ".pdf" or suffix in _IMAGE_SUFFIXES or suffix in supported_extensions()
+
+
+def _get_font(size: int, bold: bool = False) -> ImageFont.ImageFont:
+    font_names = (
+        ["LiberationSans-Bold.ttf", "DejaVuSans-Bold.ttf", "arialbd.ttf", "Cantarell-Bold.otf"]
+        if bold
+        else ["LiberationSans-Regular.ttf", "DejaVuSans.ttf", "arial.ttf", "Cantarell-Regular.otf"]
+    )
+    for name in font_names:
+        try:
+            return ImageFont.truetype(name, size)
+        except (OSError, ImportError):
+            continue
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:
+        return ImageFont.load_default()
+
+
+def render_sheet_page(path: str | Path, index: int, dpi: int = 96) -> Image.Image:
+    """Render one paginated page of an office/text document into an A4 sheet image."""
+    from .adapters import load
+    from .layout import paginate_document
+
+    target = Path(path)
+    doc = load(target)
+    doc = paginate_document(doc)
+
+    if index < 0 or index >= len(doc.pages):
+        raise IndexError(f"page {index} does not exist (total: {len(doc.pages)})")
+
+    page = doc.pages[index]
+    width_pt = page.width or 595.0
+    height_pt = page.height or 842.0
+    scale = max(dpi, 24) / 72.0
+
+    img_w = max(1, round(width_pt * scale))
+    img_h = max(1, round(height_pt * scale))
+
+    image = Image.new("RGB", (img_w, img_h), "#ffffff")
+    draw = ImageDraw.Draw(image)
+
+    title_font = _get_font(max(12, round(15 * scale)), bold=True)
+    body_font = _get_font(max(9, round(10.5 * scale)), bold=False)
+    bold_body_font = _get_font(max(9, round(10.5 * scale)), bold=True)
+    footer_font = _get_font(max(8, round(8.5 * scale)), bold=False)
+
+    for block in page.blocks:
+        if not block.bbox:
+            continue
+        bx0, btop, bx1, _ = block.bbox
+        px0 = bx0 * scale
+        ptop = btop * scale
+
+        if block.kind == "table" and block.children:
+            ty = ptop
+            for row in block.children:
+                cells = row.cells or [c.text for c in row.children] or [row.text]
+                if not cells:
+                    continue
+                cell_w = (bx1 - bx0) * scale / max(len(cells), 1)
+                row_h = 20.0 * scale
+                tx = px0
+                for cell_txt in cells:
+                    draw.rectangle([tx, ty, tx + cell_w, ty + row_h], outline="#d0d7de", fill="#fbfcfd")
+                    draw.text((tx + 4 * scale, ty + 3 * scale), str(cell_txt)[:50], fill="#24292e", font=body_font)
+                    tx += cell_w
+                ty += row_h
+            continue
+
+        if block.cells is not None:
+            cell_w = (bx1 - bx0) * scale / max(len(block.cells), 1)
+            row_h = 20.0 * scale
+            tx = px0
+            for cell_txt in block.cells:
+                draw.rectangle([tx, ptop, tx + cell_w, ptop + row_h], outline="#d0d7de", fill="#fbfcfd")
+                draw.text((tx + 4 * scale, ptop + 3 * scale), str(cell_txt)[:50], fill="#24292e", font=body_font)
+                tx += cell_w
+            continue
+
+        is_heading = bool(block.style.get("heading") or (block.style.get("bold") and len(block.text) < 80))
+        font = title_font if is_heading else (bold_body_font if block.style.get("bold") else body_font)
+        text_color = "#111827" if is_heading else "#24292e"
+
+        line_spacing = 22.0 * scale if is_heading else 15.0 * scale
+        text = block.text
+        if not text:
+            continue
+
+        max_chars = max(int(((bx1 - bx0) * scale) / (6.0 * scale)), 15)
+        words = text.split()
+        current_line: list[str] = []
+        cur_len = 0
+        cur_y = ptop
+
+        for w in words:
+            if cur_len + len(w) + 1 > max_chars and current_line:
+                draw.text((px0, cur_y), " ".join(current_line), fill=text_color, font=font)
+                cur_y += line_spacing
+                current_line = [w]
+                cur_len = len(w)
+            else:
+                current_line.append(w)
+                cur_len += len(w) + 1
+        if current_line:
+            draw.text((px0, cur_y), " ".join(current_line), fill=text_color, font=font)
+
+    footer_text = f"{index + 1} / {len(doc.pages)}"
+    draw.text(
+        ((width_pt - 54.0 - 20.0) * scale, (height_pt - 36.0) * scale),
+        footer_text,
+        fill="#9ca3af",
+        font=footer_font,
+    )
+
+    return image
 
 
 def render_page(path: str | Path, index: int, dpi: int = 96) -> Image.Image:
@@ -69,7 +187,7 @@ def render_page(path: str | Path, index: int, dpi: int = 96) -> Image.Image:
                 image = raw.convert("RGB")
                 if (out_w, out_h) != image.size:
                     image = image.resize((out_w, out_h), Image.Resampling.LANCZOS)
-        else:
+        elif target.suffix.lower() == ".pdf":
             import pypdfium2 as pdfium
 
             document = pdfium.PdfDocument(str(target))
@@ -84,6 +202,8 @@ def render_page(path: str | Path, index: int, dpi: int = 96) -> Image.Image:
                     bitmap.close()
             finally:
                 document.close()
+        else:
+            image = render_sheet_page(target, index, dpi)
 
         _IMAGES[key] = image
         _IMAGES.move_to_end(key)
