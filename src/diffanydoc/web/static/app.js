@@ -471,17 +471,7 @@ function setupDropZones() {
       e.preventDefault();
       e.stopPropagation();
       document.body.classList.remove("dragging");
-      const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
-      if (files.length) {
-        try {
-          input.files = e.dataTransfer.files;
-        } catch (_) {
-          /* some browsers refuse programmatic assignment; state is what matters */
-        }
-        assignDroppedFiles(files, side);
-        return;
-      }
-      await handleUriDrop(e.dataTransfer, side);
+      await processDroppedData(e.dataTransfer, side);
     });
 
     // Keyboard access: the drop zone behaves like a button.
@@ -530,12 +520,7 @@ function setupDropZones() {
     dragDepth = 0;
     if (e.defaultPrevented) return; // a drop zone already handled it
     e.preventDefault();
-    const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
-    if (files.length) {
-      assignDroppedFiles(files, null);
-      return;
-    }
-    await handleUriDrop(e.dataTransfer, null);
+    await processDroppedData(e.dataTransfer, null);
   });
 }
 
@@ -554,35 +539,71 @@ function hasFiles(event) {
   );
 }
 
-async function handleUriDrop(dataTransfer, preferredSide) {
-  if (!dataTransfer || !desktop.available || !window.pywebview || !window.pywebview.api) {
-    return;
-  }
-  const raw =
-    dataTransfer.getData("text/uri-list") ||
-    dataTransfer.getData("text/plain") ||
-    "";
-  if (!raw.trim()) return;
-  try {
-    const resolved = await window.pywebview.api.resolve_dropped_uris(raw);
-    if (!Array.isArray(resolved) || !resolved.length) return;
-    if (resolved.length >= 2) {
-      desktop.paths.left = resolved[0];
-      desktop.paths.right = resolved[1];
-      showPath("left", resolved[0]);
-      showPath("right", resolved[1]);
-    } else {
-      const side =
-        preferredSide ||
-        (!desktop.paths.left && !state.files.left
-          ? "left"
-          : !desktop.paths.right && !state.files.right
-            ? "right"
-            : "left");
-      desktop.paths[side] = resolved[0];
-      showPath(side, resolved[0]);
+async function processDroppedData(dataTransfer, preferredSide) {
+  if (!dataTransfer) return false;
+
+  // 1. In desktop mode, first check if text/uri-list or text/plain or files contain local OS paths
+  if (desktop.available && window.pywebview && window.pywebview.api) {
+    const raw =
+      dataTransfer.getData("text/uri-list") ||
+      dataTransfer.getData("text/plain") ||
+      "";
+    if (raw.trim()) {
+      try {
+        const resolved = await window.pywebview.api.resolve_dropped_uris(raw);
+        if (Array.isArray(resolved) && resolved.length > 0) {
+          applyResolvedDesktopPaths(resolved, preferredSide);
+          return true;
+        }
+      } catch (_) {}
     }
-    if (!$("#result-view").hidden) showUploadView();
+
+    // Check if DataTransfer files object has OS path properties (WebKit2GTK / Electron)
+    const dtFiles = Array.from(dataTransfer.files || []);
+    const filePaths = dtFiles
+      .map((f) => f.pywebviewFullPath || f.path)
+      .filter((p) => Boolean(p && typeof p === "string"));
+    if (filePaths.length > 0) {
+      applyResolvedDesktopPaths(filePaths, preferredSide);
+      return true;
+    }
+  }
+
+  // 2. Standard browser File objects fallback
+  const files = Array.from(dataTransfer.files || []);
+  if (files.length > 0) {
+    assignDroppedFiles(files, preferredSide);
+    return true;
+  }
+
+  return false;
+}
+
+function applyResolvedDesktopPaths(resolved, preferredSide) {
+  if (!Array.isArray(resolved) || !resolved.length) return;
+  if (resolved.length >= 2) {
+    desktop.paths.left = resolved[0];
+    desktop.paths.right = resolved[1];
+    showPath("left", resolved[0]);
+    showPath("right", resolved[1]);
+  } else {
+    const side =
+      preferredSide ||
+      (!desktop.paths.left && !state.files.left
+        ? "left"
+        : !desktop.paths.right && !state.files.right
+          ? "right"
+          : "left");
+    desktop.paths[side] = resolved[0];
+    showPath(side, resolved[0]);
+  }
+  if (!$("#result-view").hidden) showUploadView();
+  updateCompareButton();
+}
+
+async function handleUriDrop(dataTransfer, preferredSide) {
+  return processDroppedData(dataTransfer, preferredSide);
+}
     updateCompareButton();
   } catch (_) {
     /* ignore invalid drop payloads */
@@ -689,9 +710,16 @@ async function preloadSide(side) {
   }
 }
 
+function hasFile(side) {
+  return Boolean((desktop.available && desktop.paths[side]) || state.files[side]);
+}
+
 function isReady() {
-  if (desktop.available && desktop.paths.left && desktop.paths.right) return true;
-  return Boolean(state.files.left && state.files.right);
+  return hasFile("left") && hasFile("right");
+}
+
+function canReload() {
+  return isReady();
 }
 
 function updateCompareButton() {
@@ -739,8 +767,18 @@ async function comparisonRequest() {
   }
 
   const form = new FormData();
-  form.append("left", state.files.left);
-  form.append("right", state.files.right);
+  if (desktop.available && desktop.paths.left) {
+    form.append("left_path", desktop.paths.left);
+  } else if (state.files.left) {
+    form.append("left", state.files.left);
+  }
+
+  if (desktop.available && desktop.paths.right) {
+    form.append("right_path", desktop.paths.right);
+  } else if (state.files.right) {
+    form.append("right", state.files.right);
+  }
+
   form.append("case_sensitive", String(caseSensitive));
   form.append("collapse_whitespace", String(collapseWhitespace));
   form.append("compare_formatting", String(compareFormatting));
@@ -750,11 +788,6 @@ async function comparisonRequest() {
   form.append("ocr", String(ocr));
   form.append("ocr_language", ocrLanguage);
   return fetch("/api/compare", { method: "POST", body: form });
-}
-
-function canReload() {
-  if (desktop.available && desktop.paths.left && desktop.paths.right) return true;
-  return Boolean(state.files.left && state.files.right);
 }
 
 function setComparing(active) {

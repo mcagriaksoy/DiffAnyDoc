@@ -105,12 +105,14 @@ def test_open_external_rejects_unknown_schemes() -> None:
 def test_resolve_dropped_uris_handles_file_urls_and_paths(tmp_path: Path) -> None:
     first = tmp_path / "bosluklu dosya.docx"
     second = tmp_path / "ikinci.csv"
+    third = tmp_path / "üçüncü dosya.txt"
     first.write_text("a", encoding="utf-8")
     second.write_text("b", encoding="utf-8")
+    third.write_text("c", encoding="utf-8")
 
-    raw = f"{first.as_uri()}\r\n{second}\r\nfile:///olmayan/dosya.txt\r\n"
+    raw = f"copy\r\n{first.as_uri()}\r\n{second}\r\n\"{third}\"\r\nfile:///olmayan/dosya.txt\r\n"
     resolved = DesktopApi().resolve_dropped_uris(raw)
-    assert resolved == [str(first.resolve()), str(second.resolve())]
+    assert resolved == [str(first.resolve()), str(second.resolve()), str(third.resolve())]
 
 
 

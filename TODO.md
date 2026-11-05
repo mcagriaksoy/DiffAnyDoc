@@ -26,7 +26,7 @@
 | **TASK-08** | High | DevOps / CI | Automated Release Builds (Windows Exe, Installer, Linux, PyPI) | `[x] DONE` |
 | **TASK-09** | Medium | Design / Desktop | High-Resolution App Icon & OS Asset Integration | `[x] DONE` |
 | **TASK-10** | High | UI / UX | Difference Navigation Controls (Sticky Topbar & Keyboard Shortcuts) | `[x] DONE` |
-| **TASK-11** | High | Desktop / UX | Linux Desktop Drag-and-Drop (WebKit2GTK URI / File Drop) Fix | `[ ] OPEN` |
+| **TASK-11** | High | Desktop / UX | Linux Desktop Drag-and-Drop (WebKit2GTK URI / File Drop) Fix | `[x] DONE` |
 | **TASK-12** | High | Integration / OS | File Manager Context Menu Integration ("Compare with DiffAnyDoc") | `[ ] OPEN` |
 | **TASK-13** | High | Engine / UI | Pure-stdlib A4 Page Layout & Sheet View for Office/Text Documents | `[ ] OPEN` |
 
@@ -229,7 +229,7 @@
 ---
 
 ### [TASK-11] Linux Desktop Drag-and-Drop (WebKit2GTK / URI Drop) Fix
-- **Status**: `[ ] OPEN`
+- **Status**: `[x] DONE` - Prioritized IPC URI/path resolution (`text/uri-list`, `text/plain`, `pywebviewFullPath`), added Nautilus clipboard and unquoted path decoding in `resolve_dropped_uris`, added mixed-mode comparison support (path + upload) in `/api/compare` and `comparisonRequest`, and fixed `isReady()` validation.
 - **Priority**: High
 - **Files**:
   - `src/diffanydoc/desktop/app.py` (`resolve_dropped_uris`, GTK DND target signals)

@@ -184,8 +184,10 @@ def create_app() -> FastAPI:
 
     @app.post("/api/compare")
     async def compare_uploads(
-        left: UploadFile = File(...),
-        right: UploadFile = File(...),
+        left: UploadFile | None = File(None),
+        right: UploadFile | None = File(None),
+        left_path: str | None = Form(None),
+        right_path: str | None = Form(None),
         context: int = Form(3),
         case_sensitive: bool = Form(True),
         collapse_whitespace: bool = Form(True),
@@ -197,11 +199,23 @@ def create_app() -> FastAPI:
     ) -> JSONResponse:
         directory = Path(tempfile.mkdtemp(prefix="diffanydoc-"))
         try:
-            left_path = _store_upload(left, directory, "left")
-            right_path = _store_upload(right, directory, "right")
+            if left_path and Path(left_path).is_file():
+                resolved_left = Path(left_path).resolve()
+            elif left is not None:
+                resolved_left = _store_upload(left, directory, "left")
+            else:
+                raise HTTPException(status_code=400, detail="left file or left_path required")
+
+            if right_path and Path(right_path).is_file():
+                resolved_right = Path(right_path).resolve()
+            elif right is not None:
+                resolved_right = _store_upload(right, directory, "right")
+            else:
+                raise HTTPException(status_code=400, detail="right file or right_path required")
+
             comparison = _run_compare(
-                left_path,
-                right_path,
+                resolved_left,
+                resolved_right,
                 directory,
                 context,
                 case_sensitive,

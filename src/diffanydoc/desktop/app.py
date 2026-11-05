@@ -21,7 +21,7 @@ import webbrowser
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 from urllib.error import URLError
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname, urlopen
 
 from .. import __version__
@@ -197,19 +197,30 @@ class DesktopApi:
     def resolve_dropped_uris(self, raw: str) -> list[str]:
         """Resolve a ``text/uri-list`` or newline-separated path list dropped onto the window."""
         paths: list[str] = []
-        for line in str(raw or "").splitlines():
+        text = str(raw or "").replace("\r\n", "\n").replace("\r", "\n")
+        for line in text.splitlines():
             item = line.strip()
-            if not item or item.startswith("#"):
+            if not item or item.startswith("#") or item in ("copy", "cut"):
                 continue
+            if (item.startswith('"') and item.endswith('"')) or (item.startswith("'") and item.endswith("'")):
+                item = item[1:-1].strip()
             if item.startswith("file://"):
-                parsed = urlparse(item)
-                # Handles %20 and Windows drive letters (/C:/x).
-                candidate = Path(url2pathname(parsed.path))
+                try:
+                    parsed = urlparse(item)
+                    path_str = unquote(parsed.path)
+                    if parsed.netloc and parsed.netloc != "localhost" and sys.platform == "win32":
+                        candidate = Path(f"\\\\{parsed.netloc}{path_str}")
+                    else:
+                        candidate = Path(url2pathname(path_str))
+                except Exception:
+                    continue
             else:
-                candidate = Path(item).expanduser()
+                candidate = Path(unquote(item)).expanduser()
             try:
                 if candidate.is_file():
-                    paths.append(str(candidate.resolve()))
+                    resolved = str(candidate.resolve())
+                    if resolved not in paths:
+                        paths.append(resolved)
             except OSError:
                 continue
         return paths
