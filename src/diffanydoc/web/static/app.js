@@ -415,6 +415,9 @@ function setupDialogs() {
   $("#updates-open").addEventListener("click", (event) =>
     openExternal(event, $("#updates-open").getAttribute("href"))
   );
+  if ($("#integrate-menu")) {
+    $("#integrate-menu").addEventListener("click", toggleIntegration);
+  }
 }
 
 /* ---------- system accent ---------- */
@@ -2325,6 +2328,59 @@ $("#export").addEventListener("click", (event) => {
 /* ---------- wiring ---------- */
 setupDropZones();
 setupMenus();
+async function toggleIntegration() {
+  closeMenus();
+  const btn = $("#integrate-menu");
+  if (!btn) return;
+  const isInstalled = btn.dataset.installed === "true";
+  const action = isInstalled ? "uninstall" : "install";
+
+  try {
+    let result;
+    if (desktop.available && window.pywebview && window.pywebview.api && window.pywebview.api.integrate) {
+      result = await window.pywebview.api.integrate(action, i18n.lang);
+    } else {
+      const response = await fetch("/api/integrate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, language: i18n.lang }),
+      });
+      result = await response.json();
+    }
+
+    if (result && result.success) {
+      updateIntegrationState(result.installed);
+      showToast(i18n.t(result.installed ? "integrate.installed" : "integrate.removed"));
+    } else {
+      showToast(result.error || i18n.t("error.generic"), true);
+    }
+  } catch (err) {
+    showToast(err.message || i18n.t("error.generic"), true);
+  }
+}
+
+function updateIntegrationState(installed) {
+  const btn = $("#integrate-menu");
+  if (!btn) return;
+  btn.dataset.installed = String(Boolean(installed));
+  btn.textContent = i18n.t(installed ? "menu.integrateRemove" : "menu.integrate");
+}
+
+async function loadIntegrationStatus() {
+  const btn = $("#integrate-menu");
+  if (!btn) return;
+  try {
+    const response = await fetch("/api/integrate/status");
+    if (!response.ok) return;
+    const data = await response.json();
+    if (!data.supported) {
+      btn.hidden = true;
+      return;
+    }
+    updateIntegrationState(data.installed);
+  } catch (_) {}
+}
+
 setupDialogs();
 loadTheme();
 $("#compare").addEventListener("click", runComparison);
@@ -2504,6 +2560,7 @@ document.addEventListener("keydown", (event) => {
 async function init() {
   await loadLanguage(preferredLanguage());
   await loadOcrStatus();
+  await loadIntegrationStatus();
   await restoreFromUrl();
   if (window.pywebview && window.pywebview.api) initDesktop();
   try {

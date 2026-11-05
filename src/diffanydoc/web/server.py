@@ -90,6 +90,36 @@ def create_app() -> FastAPI:
             "languages": installed_languages(),
         }
 
+    @app.get("/api/integrate/status")
+    def integrate_status() -> dict[str, Any]:
+        from .. import integrate
+
+        return {
+            "supported": sys.platform in ("win32", "linux") or sys.platform.startswith("linux"),
+            "installed": integrate.is_installed(),
+        }
+
+    @app.post("/api/integrate")
+    def integrate_action(body: dict[str, Any]) -> dict[str, Any]:
+        from .. import integrate
+
+        action = str(body.get("action", "install"))
+        language = str(body.get("language", "en"))
+        try:
+            items = (
+                integrate.install(language)
+                if action == "install"
+                else integrate.uninstall(language)
+            )
+            return {
+                "success": True,
+                "action": action,
+                "installed": integrate.is_installed(),
+                "items": items,
+            }
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
     @app.post("/api/checksum")
     async def checksum_paths(body: dict[str, Any]) -> JSONResponse:
         left_path = Path(str(body.get("left", ""))).expanduser()

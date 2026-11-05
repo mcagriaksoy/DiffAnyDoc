@@ -27,7 +27,7 @@
 | **TASK-09** | Medium | Design / Desktop | High-Resolution App Icon & OS Asset Integration | `[x] DONE` |
 | **TASK-10** | High | UI / UX | Difference Navigation Controls (Sticky Topbar & Keyboard Shortcuts) | `[x] DONE` |
 | **TASK-11** | High | Desktop / UX | Linux Desktop Drag-and-Drop (WebKit2GTK URI / File Drop) Fix | `[x] DONE` |
-| **TASK-12** | High | Integration / OS | File Manager Context Menu Integration ("Compare with DiffAnyDoc") | `[ ] OPEN` |
+| **TASK-12** | High | Integration / OS | File Manager Context Menu Integration ("Compare with DiffAnyDoc") | `[x] DONE` |
 | **TASK-13** | High | Engine / UI | Pure-stdlib A4 Page Layout & Sheet View for Office/Text Documents | `[ ] OPEN` |
 
 ---
@@ -246,7 +246,7 @@
 ---
 
 ### [TASK-12] File Manager Context Menu Integration ("Compare with DiffAnyDoc")
-- **Status**: `[ ] OPEN`
+- **Status**: `[x] DONE` - Added "Compare with DiffAnyDoc" direct multi-file launch action to Nemo (`.nemo_action`), Nautilus scripts, Dolphin service menus, and Windows Explorer (`HKCU\Software\Classes\*\shell\DiffAnyDoc.Compare`), alongside existing Left/Right selection slots. Added in-app one-click Install/Uninstall integration action (`#integrate-menu`) and `/api/integrate` endpoints.
 - **Priority**: High
 - **Files**:
   - `src/diffanydoc/integrate.py`

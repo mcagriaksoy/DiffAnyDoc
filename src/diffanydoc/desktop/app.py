@@ -194,6 +194,31 @@ class DesktopApi:
             return False
         return webbrowser.open(url)
 
+    def integrate(self, action: str = "install", language: str = "en") -> dict[str, Any]:
+        """Install or remove file-manager context menu entries from within the app."""
+        from .. import integrate
+
+        try:
+            items = (
+                integrate.install(language)
+                if action == "install"
+                else integrate.uninstall(language)
+            )
+            return {
+                "success": True,
+                "action": action,
+                "installed": integrate.is_installed(),
+                "items": items,
+            }
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def is_integrated(self) -> bool:
+        """Return whether context menu entries currently exist."""
+        from .. import integrate
+
+        return integrate.is_installed()
+
     def resolve_dropped_uris(self, raw: str) -> list[str]:
         """Resolve a ``text/uri-list`` or newline-separated path list dropped onto the window."""
         paths: list[str] = []

@@ -37,23 +37,39 @@ def _windows_command(slot: str) -> str:
     return f'{subprocess.list2cmdline(argv)} "%1"'
 
 
+def _windows_compare_command() -> str:
+    argv = [*launcher_argv(), "desktop"]
+    return f'{subprocess.list2cmdline(argv)} "%1"'
+
+
 def _posix_command(slot: str) -> str:
     return shlex.join([*launcher_argv(), "select", slot])
 
 
+def _posix_compare_command() -> str:
+    return shlex.join([*launcher_argv(), "desktop"])
+
+
 def windows_entries(language: str) -> list[dict[str, str]]:
-    """Registry keys, labels and commands for both slots."""
+    """Registry keys, labels and commands for compare and slots."""
     lang = resolve_language(language)
-    entries: list[dict[str, str]] = []
-    for slot in ("left", "right"):
-        entries.append(
-            {
-                "key": rf"{WINDOWS_SHELL}\DiffAnyDoc.{slot.capitalize()}",
-                "label": t(f"integrate.{slot}", lang),
-                "command": _windows_command(slot),
-            }
-        )
-    return entries
+    return [
+        {
+            "key": rf"{WINDOWS_SHELL}\DiffAnyDoc.Compare",
+            "label": t("integrate.compare", lang),
+            "command": _windows_compare_command(),
+        },
+        {
+            "key": rf"{WINDOWS_SHELL}\DiffAnyDoc.Left",
+            "label": t("integrate.left", lang),
+            "command": _windows_command("left"),
+        },
+        {
+            "key": rf"{WINDOWS_SHELL}\DiffAnyDoc.Right",
+            "label": t("integrate.right", lang),
+            "command": _windows_command("right"),
+        },
+    ]
 
 
 def data_home() -> Path:
@@ -73,6 +89,19 @@ def nemo_dir() -> Path:
 
 
 def nautilus_script(slot: str, language: str) -> str:
+    if slot == "compare":
+        return f"""#!/bin/sh
+# Installed by DiffAnyDoc. Removed by `diffanydoc integrate uninstall`.
+first=$(printf '%s\\n' "$NAUTILUS_SCRIPT_SELECTED_FILE_PATHS" | head -n 1)
+second=$(printf '%s\\n' "$NAUTILUS_SCRIPT_SELECTED_FILE_PATHS" | head -n 2 | tail -n 1)
+[ -n "$first" ] || first="$1"
+[ -n "$second" ] || second="$2"
+if [ -n "$first" ] && [ -n "$second" ] && [ "$first" != "$second" ]; then
+    exec {_posix_compare_command()} "$first" "$second"
+elif [ -n "$first" ]; then
+    exec {_posix_compare_command()} "$first"
+fi
+"""
     return f"""#!/bin/sh
 # Installed by DiffAnyDoc. Removed by `diffanydoc integrate uninstall`.
 file=$(printf '%s\\n' "$NAUTILUS_SCRIPT_SELECTED_FILE_PATHS" | head -n 1)
@@ -87,16 +116,23 @@ def dolphin_service(language: str) -> str:
     return f"""[Desktop Entry]
 Type=Service
 MimeType=all/allfiles;
-Actions=selectLeft;selectRight;
+Actions=compare;selectLeft;selectRight;
 X-KDE-ServiceTypes=KonqPopupMenu/Plugin
 X-KDE-Priority=TopLevel
 
+[Desktop Action compare]
+Name={t("integrate.compare", lang)}
+Icon=diffanydoc
+Exec={_posix_compare_command()} %U
+
 [Desktop Action selectLeft]
 Name={t("integrate.left", lang)}
+Icon=diffanydoc
 Exec={_posix_command("left")} %f
 
 [Desktop Action selectRight]
 Name={t("integrate.right", lang)}
+Icon=diffanydoc
 Exec={_posix_command("right")} %f
 """
 
@@ -104,6 +140,15 @@ Exec={_posix_command("right")} %f
 def nemo_action(slot: str, language: str) -> str:
     """Nemo (Cinnamon) action: an Exec line plus the selected file."""
     lang = resolve_language(language)
+    if slot == "compare":
+        return f"""[Nemo Action]
+Name={t("integrate.compare", lang)}
+Exec={_posix_compare_command()} %F
+Icon-Name=diffanydoc
+Selection=notnone
+Extensions=nodirs;
+Quote=double
+"""
     return f"""[Nemo Action]
 Name={t(f"integrate.{slot}", lang)}
 Exec={_posix_command(slot)} %F
@@ -115,11 +160,28 @@ Quote=double
 
 
 def _nautilus_path(slot: str, language: str) -> Path:
-    return nautilus_dir() / t(f"integrate.{slot}", resolve_language(language))
+    key = "integrate.compare" if slot == "compare" else f"integrate.{slot}"
+    return nautilus_dir() / t(key, resolve_language(language))
 
 
 def _nemo_path(slot: str) -> Path:
-    return nemo_dir() / f"diffanydoc-select-{slot}.nemo_action"
+    return nemo_dir() / f"diffanydoc-{slot}.nemo_action"
+
+
+def is_installed() -> bool:
+    """Return whether context menu entries currently exist."""
+    if sys.platform == "win32":
+        try:
+            import winreg
+
+            key = rf"{WINDOWS_SHELL}\DiffAnyDoc.Compare"
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key):
+                return True
+        except Exception:
+            return False
+    if sys.platform.startswith("linux"):
+        return _nemo_path("compare").is_file() or (dolphin_dir() / _DOLPHIN_FILE).is_file()
+    return False
 
 
 def install(language: str = "en") -> list[str]:
@@ -165,7 +227,7 @@ def _uninstall_windows() -> list[str]:
     import winreg
 
     removed: list[str] = []
-    for slot in ("left", "right"):
+    for slot in ("compare", "left", "right"):
         key = rf"{WINDOWS_SHELL}\DiffAnyDoc.{slot.capitalize()}"
         for name in (key + r"\command", key):
             try:
@@ -186,14 +248,14 @@ def _install_linux(language: str) -> list[str]:
     installed: list[str] = []
 
     nautilus_dir().mkdir(parents=True, exist_ok=True)
-    for slot in ("left", "right"):
+    for slot in ("compare", "left", "right"):
         path = _nautilus_path(slot, lang)
         path.write_text(nautilus_script(slot, lang), encoding="utf-8")
         path.chmod(0o755)
         installed.append(str(path))
 
     nemo_dir().mkdir(parents=True, exist_ok=True)
-    for slot in ("left", "right"):
+    for slot in ("compare", "left", "right"):
         path = _nemo_path(slot)
         path.write_text(nemo_action(slot, lang), encoding="utf-8")
         installed.append(str(path))
@@ -209,11 +271,12 @@ def _uninstall_linux() -> list[str]:
     removed: list[str] = []
     candidates: set[Path] = {
         dolphin_dir() / _DOLPHIN_FILE,
+        _nemo_path("compare"),
         _nemo_path("left"),
         _nemo_path("right"),
     }
     for language in available_languages():
-        for slot in ("left", "right"):
+        for slot in ("compare", "left", "right"):
             candidates.add(_nautilus_path(slot, language))
     for path in sorted(candidates):
         try:
