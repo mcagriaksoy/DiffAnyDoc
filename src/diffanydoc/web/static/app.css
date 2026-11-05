@@ -1019,6 +1019,50 @@ body.panning .page-canvas {
   display: block;
   width: 100%;
   height: auto;
+  transition: opacity 0.2s ease;
+}
+
+.page-canvas.is-loading img {
+  opacity: 0.35;
+}
+
+.canvas-spinner {
+  display: none;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: color-mix(in srgb, var(--window-bg-color) 92%, transparent);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  z-index: 10;
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+}
+
+.page-canvas.is-loading .canvas-spinner {
+  display: flex;
+}
+
+.canvas-spinner-icon {
+  width: 30px;
+  height: 30px;
+  border: 3px solid color-mix(in srgb, var(--accent-color) 25%, transparent);
+  border-top-color: var(--accent-color);
+  border-radius: 50%;
+  animation: spin 0.75s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.canvas-spinner-label {
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--text-color);
 }
 
 .page-canvas.missing {
@@ -1067,6 +1111,22 @@ body[data-box-color="contrast"] {
 .rect.replace {
   background: var(--diff-mod-bg);
   outline: 1px solid var(--box-color);
+}
+
+.box-color-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-color);
+  font-size: var(--font-size-caption);
+}
+
+.box-color-label {
+  font-weight: 500;
+  user-select: none;
 }
 
 .box-swatch {

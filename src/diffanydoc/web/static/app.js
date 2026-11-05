@@ -1558,7 +1558,12 @@ function buildXrayCard(pair, pairIdx, visualPage) {
     height: Math.max(sizeL.height, sizeR.height),
   };
 
-  const canvas = el("div", { class: "page-canvas", style: canvasStyle(size) });
+  const canvas = el("div", { class: "page-canvas is-loading", style: canvasStyle(size) }, [
+    el("div", { class: "canvas-spinner", "aria-label": i18n.t("state.loading") }, [
+      el("span", { class: "canvas-spinner-icon", "aria-hidden": "true" }),
+      el("span", { class: "canvas-spinner-label", text: i18n.t("state.loading") }),
+    ]),
+  ]);
   canvas.append(
     pageImage(
       `/api/compare/${data.id}/xray/${pair.left}/${pair.right}.png`,
@@ -1641,7 +1646,12 @@ function buildPageCard(side, index, visualPage, pairIdx = 0) {
   }
 
   const size = data.pages[side][index] || { width: 595, height: 842 };
-  const canvas = el("div", { class: "page-canvas", style: canvasStyle(size) });
+  const canvas = el("div", { class: "page-canvas is-loading", style: canvasStyle(size) }, [
+    el("div", { class: "canvas-spinner", "aria-label": i18n.t("state.loading") }, [
+      el("span", { class: "canvas-spinner-icon", "aria-hidden": "true" }),
+      el("span", { class: "canvas-spinner-label", text: i18n.t("state.loading") }),
+    ]),
+  ]);
   canvas.append(
     pageImage(
       `/api/compare/${data.id}/page/${side}/${index}.png`,
@@ -2000,12 +2010,20 @@ function pageDpi() {
 }
 
 function pageImage(base, alt) {
-  return el("img", {
-    src: `${base}?dpi=${pageDpi()}`,
+  const img = el("img", {
     "data-base": base,
     alt,
     loading: "lazy",
   });
+  img.addEventListener("load", () => {
+    img.closest(".page-canvas")?.classList.remove("is-loading");
+    img.classList.add("loaded");
+  });
+  img.addEventListener("error", () => {
+    img.closest(".page-canvas")?.classList.remove("is-loading");
+  });
+  img.src = `${base}?dpi=${pageDpi()}`;
+  return img;
 }
 
 let dpiTimer = 0;
@@ -2015,7 +2033,10 @@ function scheduleDpiUpdate() {
     const dpi = pageDpi();
     for (const img of $$("#page-view img[data-base]")) {
       const next = `${img.dataset.base}?dpi=${dpi}`;
-      if (img.getAttribute("src") !== next) img.src = next;
+      if (img.getAttribute("src") !== next) {
+        img.closest(".page-canvas")?.classList.add("is-loading");
+        img.src = next;
+      }
     }
   }, 250);
 }

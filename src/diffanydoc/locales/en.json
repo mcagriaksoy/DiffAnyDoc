@@ -163,6 +163,7 @@
   "report.visual": "Visual match",
   "report.visualPages": "{changed} of {total} pages changed",
   "report.visualTruncated": "Visual comparison truncated",
+  "state.loading": "Loading…",
   "stats.added": "added",
   "stats.byteIdentical": "SHA-256 identical",
   "stats.changed": "changed",

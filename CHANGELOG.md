@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Box Color Label & Canvas Loading Indicator**: Added visible "Box color" label text to the color picker menu button in the header bar. Added smooth GNOME Adwaita spinner and loading indicator to Page and X-Ray canvas cards while rasterized/composite page images are being rendered and loaded from the server.
 - **Sticky Difference Navigation Controls**: Added GNOME Adwaita linked pill navigation controls in the top header (`#top-diff-nav`) with Previous change (`▲`), Next change (`▼`), and position counter (`current / total`), accessible at all times while scrolling. Supported shortcuts include `F7` / `Shift+F7`, `N` / `P`, `Alt+Up` / `Alt+Down`, and `F3` / `Shift+F3`.
 - **Page zoom and pan (TASK-07)**: Fit width, Fit page, 100 % and step zoom (25–400 %) in Pages and X-Ray; `Ctrl` + wheel, `Ctrl` `+` / `-` / `0`; `Space` + drag or middle-drag pans. Page images re-render at a DPI that follows the zoom.
 - **Box color presets (TASK-03)**: Amber, Ruby, Accent blue and High contrast outlines for change boxes, saved per browser.

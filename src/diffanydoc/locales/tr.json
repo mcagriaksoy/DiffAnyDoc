@@ -163,6 +163,7 @@
   "report.visual": "Görsel eşleşme",
   "report.visualPages": "{total} sayfanın {changed} tanesi değişmiş",
   "report.visualTruncated": "Görsel karşılaştırma kısaltıldı",
+  "state.loading": "Yükleniyor…",
   "stats.added": "eklendi",
   "stats.byteIdentical": "SHA-256 aynı",
   "stats.changed": "değişti",
