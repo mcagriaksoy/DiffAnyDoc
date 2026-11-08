@@ -19,6 +19,7 @@ from typing import Any
 from .. import __version__
 from ..core.adapters import AdapterError, supported_extensions
 from ..core.diff import DiffOptions, compare, file_sha256, preload_document
+from ..core.folder import compare_folders
 from ..core.model import DiffResult
 from ..core.ocr import OcrError, available as ocr_available, installed_languages
 from ..core.render import is_renderable_path, render_page_png
@@ -286,6 +287,22 @@ def create_app() -> FastAPI:
             float(body["numeric_tolerance"]) if body.get("numeric_tolerance") is not None else None,
         )
         return JSONResponse(_summary(comparison))
+
+    @app.post("/api/compare-directories")
+    async def compare_directories_endpoint(body: dict[str, Any]) -> JSONResponse:
+        left = str(body.get("left", "")).strip()
+        right = str(body.get("right", "")).strip()
+        if not left or not right:
+            raise HTTPException(status_code=400, detail="both left and right directory paths required")
+        l_path = Path(left).expanduser().resolve()
+        r_path = Path(right).expanduser().resolve()
+        if not l_path.is_dir() or not r_path.is_dir():
+            raise HTTPException(status_code=400, detail="both paths must be existing directories")
+        try:
+            diff_res = compare_folders(l_path, r_path)
+            return JSONResponse(diff_res.as_dict())
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc))
 
     @app.get("/api/compare/{comparison_id}")
     def get_comparison(comparison_id: str) -> JSONResponse:

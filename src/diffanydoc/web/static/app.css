@@ -1917,3 +1917,106 @@ mark.search-match.active {
   outline: 2px solid #ea580c;
   outline-offset: 1px;
 }
+
+/* ---------- Folder Comparison (TASK-19) ---------- */
+.folder-view {
+  max-width: 1280px;
+  margin: var(--space-3) auto;
+  padding: 0 var(--space-4);
+}
+
+.folder-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  background: var(--view-bg-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-3);
+}
+
+.folder-paths {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--font-size-base);
+}
+
+.folder-filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.folder-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--view-bg-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  font-size: var(--font-size-base);
+}
+
+.folder-table th,
+.folder-table td {
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.folder-table th {
+  background: var(--window-bg-color);
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--dim-label-color);
+  text-transform: uppercase;
+}
+
+.folder-table tr:hover {
+  background: var(--hover-tint);
+}
+
+.folder-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+}
+
+.badge-same {
+  background: color-mix(in srgb, var(--dim-label-color) 15%, transparent);
+  color: var(--dim-label-color);
+}
+
+.badge-mod {
+  background: var(--diff-mod-bg);
+  color: var(--warning-color);
+}
+
+.badge-add {
+  background: var(--diff-add-bg);
+  color: var(--success-color);
+}
+
+.badge-del {
+  background: var(--diff-del-bg);
+  color: var(--error-color);
+}
+
+.folder-diff-btn {
+  font-size: var(--font-size-caption);
+  padding: 2px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.folder-diff-btn:hover {
+  background: var(--accent-color);
+  color: var(--accent-fg-color);
+  border-color: var(--accent-color);
+}

@@ -812,6 +812,25 @@ async function runComparison() {
   hideError();
   setComparing(true);
 
+  if (desktop.available && desktop.paths.left && desktop.paths.right) {
+    try {
+      const dirResp = await fetch("/api/compare-directories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ left: desktop.paths.left, right: desktop.paths.right }),
+      });
+      if (dirResp.ok) {
+        const folderData = await dirResp.json();
+        renderFolderDiff(folderData);
+        setComparing(false);
+        updateCompareButton();
+        return;
+      }
+    } catch (_) {
+      /* not directories, proceed to regular document compare */
+    }
+  }
+
   try {
     const response = await comparisonRequest();
     if (!response.ok) throw new Error(await readError(response));
@@ -2347,8 +2366,10 @@ function setMode(mode) {
   state.mode = mode;
   $$(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.mode === mode));
   const isPageMode = mode === "pages" || mode === "xray";
+  const isFolderMode = mode === "folder";
   $("#text-view").hidden = mode !== "text";
   $("#page-view").hidden = !isPageMode;
+  if ($("#folder-view")) $("#folder-view").hidden = !isFolderMode;
   $("#only-diff-wrap").hidden = mode !== "text";
   $("#zoom-wrap").hidden = !isPageMode;
   $("#box-color-wrap").hidden = !isPageMode;
@@ -2370,6 +2391,128 @@ function setMode(mode) {
       "",
       `${location.pathname}?id=${state.comparison.id}${view}&lang=${i18n.lang}`
     );
+  }
+}
+
+function openFilePairInNewTab(leftPath, rightPath) {
+  createNewSessionTab();
+  desktop.paths.left = leftPath;
+  desktop.paths.right = rightPath;
+  showPath("left", leftPath);
+  showPath("right", rightPath);
+  updateCompareButton();
+  runComparison();
+}
+
+function renderFolderDiff(folderData) {
+  state.folderData = folderData;
+  $("#upload-view").hidden = true;
+  $("#result-view").hidden = false;
+  $("#view-tabs").hidden = false;
+  if ($("#tab-folder")) $("#tab-folder").hidden = false;
+  $("#text-view").hidden = true;
+  $("#page-view").hidden = true;
+  if ($("#folder-view")) $("#folder-view").hidden = false;
+  $("#tab-pages").disabled = true;
+  if ($("#tab-xray")) $("#tab-xray").disabled = true;
+  $("#only-diff-wrap").hidden = true;
+  $("#zoom-wrap").hidden = true;
+  $("#box-color-wrap").hidden = true;
+  if ($("#top-diff-nav")) $("#top-diff-nav").hidden = true;
+  if ($("#diff-minimap")) $("#diff-minimap").hidden = true;
+  if ($("#folder-view")) $("#folder-view").hidden = false;
+  if ($("#tab-folder")) $("#tab-folder").hidden = false;
+  setMode("folder");
+
+  const container = $("#folder-view");
+  if (!container) return;
+  container.replaceChildren();
+
+  const head = el("div", { class: "folder-head" }, [
+    el("div", { class: "folder-paths" }, [
+      el("div", { class: "f-path" }, [el("strong", { text: "A: " }), el("span", { text: folderData.left_path })]),
+      el("div", { class: "f-path" }, [el("strong", { text: "B: " }), el("span", { text: folderData.right_path })]),
+    ]),
+    el("div", { class: "folder-filters" }, [
+      el("button", { class: "filter-chip active", "data-f-filter": "all", text: `${i18n.t("folder.filterAll")} (${folderData.total_count})` }),
+      el("button", { class: "filter-chip chip-mod", "data-f-filter": "modified", text: `${i18n.t("folder.modified")} (${folderData.modified_count})` }),
+      el("button", { class: "filter-chip chip-add", "data-f-filter": "added", text: `${i18n.t("folder.added")} (${folderData.added_count})` }),
+      el("button", { class: "filter-chip chip-del", "data-f-filter": "removed", text: `${i18n.t("folder.removed")} (${folderData.removed_count})` }),
+      el("button", { class: "filter-chip", "data-f-filter": "identical", text: `${i18n.t("folder.identical")} (${folderData.identical_count})` }),
+    ]),
+  ]);
+  container.appendChild(head);
+
+  const table = el("table", { class: "folder-table" });
+  const thead = el("thead", {}, [
+    el("tr", {}, [
+      el("th", { style: "width: 110px;", text: i18n.t("folder.status") }),
+      el("th", { text: i18n.t("folder.path") }),
+      el("th", { style: "width: 120px;", text: `A ${i18n.t("folder.size")}` }),
+      el("th", { style: "width: 120px;", text: `B ${i18n.t("folder.size")}` }),
+      el("th", { style: "width: 140px; text-align: right;", text: "" }),
+    ]),
+  ]);
+  table.appendChild(thead);
+
+  const tbody = el("tbody");
+  const fmtBytes = (bytes) => {
+    if (bytes === null || bytes === undefined) return "—";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  for (const item of folderData.items) {
+    let badgeClass = "badge-same";
+    let badgeText = i18n.t("folder.identical");
+    if (item.status === "modified") {
+      badgeClass = "badge-mod";
+      badgeText = i18n.t("folder.modified");
+    } else if (item.status === "added") {
+      badgeClass = "badge-add";
+      badgeText = i18n.t("folder.added");
+    } else if (item.status === "removed") {
+      badgeClass = "badge-del";
+      badgeText = i18n.t("folder.removed");
+    }
+
+    const tr = el("tr", { class: `f-row f-row-${item.status}`, "data-status": item.status });
+    tr.appendChild(el("td", {}, [el("span", { class: `folder-badge ${badgeClass}`, text: badgeText })]));
+    tr.appendChild(el("td", { class: "f-rel-path", text: item.rel_path }));
+    tr.appendChild(el("td", { text: fmtBytes(item.left_size) }));
+    tr.appendChild(el("td", { text: fmtBytes(item.right_size) }));
+
+    const actionTd = el("td", { style: "text-align: right;" });
+    if (item.status === "modified" && item.left_path && item.right_path) {
+      const btn = el("button", {
+        class: "flat folder-diff-btn",
+        type: "button",
+        text: i18n.t("folder.compare"),
+        onclick: () => openFilePairInNewTab(item.left_path, item.right_path),
+      });
+      actionTd.appendChild(btn);
+      tr.addEventListener("dblclick", () => openFilePairInNewTab(item.left_path, item.right_path));
+    }
+    tr.appendChild(actionTd);
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  container.appendChild(table);
+
+  for (const chip of head.querySelectorAll(".filter-chip")) {
+    chip.addEventListener("click", () => {
+      head.querySelectorAll(".filter-chip").forEach((c) => c.classList.remove("active"));
+      chip.classList.add("active");
+      const filter = chip.dataset.fFilter;
+      for (const row of tbody.querySelectorAll(".f-row")) {
+        if (filter === "all" || row.dataset.status === filter) {
+          row.style.display = "";
+        } else {
+          row.style.display = "none";
+        }
+      }
+    });
   }
 }
 
@@ -2641,6 +2784,8 @@ function showUploadView() {
   if ($("#change-nav")) $("#change-nav").hidden = true;
   if ($("#top-diff-nav")) $("#top-diff-nav").hidden = true;
   if ($("#diff-minimap")) $("#diff-minimap").hidden = true;
+  if ($("#folder-view")) $("#folder-view").hidden = true;
+  if ($("#tab-folder")) $("#tab-folder").hidden = true;
   $("#stats").replaceChildren();
   state.visual = null;
   state.ocr = null;

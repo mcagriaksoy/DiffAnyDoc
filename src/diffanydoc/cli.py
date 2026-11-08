@@ -18,6 +18,7 @@ from pathlib import Path
 from . import __version__
 from .core.adapters import AdapterError, adapters, load, supported_extensions
 from .core.diff import DiffOptions, compare, supported_formats
+from .core.folder import compare_folders
 from .core.ocr import OcrError
 from .core.report.html import render_html, write_html_report
 from .core.report.json import result_to_dict
@@ -164,7 +165,39 @@ def _export_language(language: str) -> None:
     os.environ["DIFFANYDOC_LANG"] = language
 
 
+def _diff_folders(args: argparse.Namespace, language: str) -> int:
+    res = compare_folders(args.left, args.right)
+    fmt = args.format or _infer_format(args.output)
+    if fmt == "json":
+        payload = json.dumps(res.as_dict(), ensure_ascii=False, indent=2)
+        _emit(payload + "\n", args.output, language)
+    else:
+        out_lines = [
+            f"📁 {t('stats.docA', language)}: {res.left_path}",
+            f"📁 {t('stats.docB', language)}: {res.right_path}",
+            "═" * 65,
+            f"  [=] {t('folder.identical', language)}: {res.identical_count}",
+            f"  [~] {t('folder.modified', language)}:  {res.modified_count}",
+            f"  [+] {t('folder.added', language)}:     {res.added_count}",
+            f"  [-] {t('folder.removed', language)}:   {res.removed_count}",
+            "─" * 65,
+        ]
+        for item in res.items:
+            if item.status == "identical":
+                continue
+            mark = "~" if item.status == "modified" else ("+" if item.status == "added" else "-")
+            out_lines.append(f"  {mark} {item.rel_path} ({item.status})")
+        _emit("\n".join(out_lines) + "\n", args.output, language)
+
+    if args.fail_on_diff and not res.identical:
+        return 1
+    return 0
+
+
 def _diff(args: argparse.Namespace, language: str) -> int:
+    if args.left.is_dir() and args.right.is_dir():
+        return _diff_folders(args, language)
+
     options = DiffOptions(
         context=args.context,
         case_sensitive=not args.ignore_case,
