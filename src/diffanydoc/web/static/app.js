@@ -95,11 +95,30 @@ function reducedMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
+/* ---------- safe storage helpers ---------- */
+function safeStorageGet(key, fallback = null) {
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      const val = window.localStorage.getItem(key);
+      return val !== null ? val : fallback;
+    }
+  } catch (_) {}
+  return fallback;
+}
+
+function safeStorageSet(key, value) {
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      window.localStorage.setItem(key, String(value));
+    }
+  } catch (_) {}
+}
+
 /* ---------- language ---------- */
 function preferredLanguage() {
   const fromUrl = new URLSearchParams(location.search).get("lang");
   if (fromUrl) return fromUrl;
-  const saved = localStorage.getItem(LANG_KEY);
+  const saved = safeStorageGet(LANG_KEY);
   if (saved) return saved;
   return "en";
 }
@@ -178,7 +197,7 @@ function renderLanguageMenu() {
     );
     item.addEventListener("click", async () => {
       closeMenus();
-      localStorage.setItem(LANG_KEY, code);
+      safeStorageSet(LANG_KEY, code);
       await loadLanguage(code);
     });
     menu.append(item);
@@ -385,54 +404,64 @@ function openHelp() {
 }
 
 function setupDialogs() {
-  for (const dialog of $$("dialog")) {
-    dialog.addEventListener("click", (event) => {
-      if (event.target === dialog) dialog.close();
-    });
-    for (const button of dialog.querySelectorAll("[data-close]")) {
-      button.addEventListener("click", () => dialog.close());
+  try {
+    for (const dialog of $$("dialog")) {
+      dialog.addEventListener("click", (event) => {
+        if (event.target === dialog) dialog.close();
+      });
+      for (const button of dialog.querySelectorAll("[data-close]")) {
+        button.addEventListener("click", () => dialog.close());
+      }
     }
-  }
 
-  $("#about").addEventListener("click", () => {
-    closeMenus();
-    fillAbout();
-    $("#about-dialog").showModal();
-  });
-  $("#about-license").addEventListener("click", () => {
-    $("#about-dialog").close();
-    openLicense();
-  });
-  $("#license").addEventListener("click", openLicense);
-  for (const tab of $$(".license-tab")) {
-    tab.addEventListener("click", () => showLicensePanel(tab.dataset.license));
-  }
-  $("#help").addEventListener("click", openHelp);
-  for (const tab of $$(".help-tab")) {
-    tab.addEventListener("click", () => showHelpPanel(tab.dataset.help));
-  }
-  $("#updates").addEventListener("click", () => {
-    closeMenus();
-    fillUpdates();
-    $("#updates-dialog").showModal();
-    checkUpdates();
-  });
-  $("#updates-check").addEventListener("click", checkUpdates);
-  $("#updates-open").addEventListener("click", (event) =>
-    openExternal(event, $("#updates-open").getAttribute("href"))
-  );
-  if ($("#settings-menu-btn")) {
-    $("#settings-menu-btn").addEventListener("click", openSettings);
-  }
-  if ($("#settings-integrate-toggle")) {
-    $("#settings-integrate-toggle").addEventListener("click", toggleIntegration);
-  }
-  if ($("#settings-pending-clear")) {
-    $("#settings-pending-clear").addEventListener("click", clearPendingSelection);
-  }
-  if ($("#integrate-menu")) {
-    $("#integrate-menu").addEventListener("click", toggleIntegration);
-  }
+    if ($("#about")) {
+      $("#about").addEventListener("click", () => {
+        closeMenus();
+        fillAbout();
+        if ($("#about-dialog")) $("#about-dialog").showModal();
+      });
+    }
+    if ($("#about-license")) {
+      $("#about-license").addEventListener("click", () => {
+        if ($("#about-dialog")) $("#about-dialog").close();
+        openLicense();
+      });
+    }
+    if ($("#license")) $("#license").addEventListener("click", openLicense);
+    for (const tab of $$(".license-tab")) {
+      tab.addEventListener("click", () => showLicensePanel(tab.dataset.license));
+    }
+    if ($("#help")) $("#help").addEventListener("click", openHelp);
+    for (const tab of $$(".help-tab")) {
+      tab.addEventListener("click", () => showHelpPanel(tab.dataset.help));
+    }
+    if ($("#updates")) {
+      $("#updates").addEventListener("click", () => {
+        closeMenus();
+        fillUpdates();
+        if ($("#updates-dialog")) $("#updates-dialog").showModal();
+        checkUpdates();
+      });
+    }
+    if ($("#updates-check")) $("#updates-check").addEventListener("click", checkUpdates);
+    if ($("#updates-open")) {
+      $("#updates-open").addEventListener("click", (event) =>
+        openExternal(event, $("#updates-open").getAttribute("href"))
+      );
+    }
+    if ($("#settings-menu-btn")) {
+      $("#settings-menu-btn").addEventListener("click", openSettings);
+    }
+    if ($("#settings-integrate-toggle")) {
+      $("#settings-integrate-toggle").addEventListener("click", toggleIntegration);
+    }
+    if ($("#settings-pending-clear")) {
+      $("#settings-pending-clear").addEventListener("click", clearPendingSelection);
+    }
+    if ($("#integrate-menu")) {
+      $("#integrate-menu").addEventListener("click", toggleIntegration);
+    }
+  } catch (_) {}
 }
 
 function openSettings() {
@@ -753,8 +782,8 @@ function hideError() {
 
 /* ---------- comparison ---------- */
 async function comparisonRequest() {
-  const caseSensitive = !$("#opt-case").checked;
-  const collapseWhitespace = $("#opt-space").checked;
+  const caseSensitive = $("#opt-case") ? !$("#opt-case").checked : true;
+  const collapseWhitespace = $("#opt-space") ? $("#opt-space").checked : true;
   const formatCheckbox = $("#opt-format");
   const compareFormatting = Boolean(formatCheckbox && formatCheckbox.checked);
   const ocrCheckbox = $("#opt-ocr");
@@ -762,8 +791,11 @@ async function comparisonRequest() {
   const ocrLangSelect = $("#opt-ocr-lang");
   const ocrLanguage = (ocrLangSelect && ocrLangSelect.value) || (i18n.lang === "tr" ? "tur+eng" : "eng");
   const tolInput = $("#opt-tolerance");
-  const tolVal = tolInput && tolInput.value.trim() !== "" ? parseFloat(tolInput.value) : null;
-  const numericTolerance = Number.isFinite(tolVal) && tolVal >= 0 ? tolVal : null;
+  let numericTolerance = null;
+  if (tolInput && tolInput.value && tolInput.value.trim() !== "") {
+    const parsed = parseFloat(tolInput.value);
+    if (Number.isFinite(parsed) && parsed >= 0) numericTolerance = parsed;
+  }
 
   if (desktop.available && desktop.paths.left && desktop.paths.right) {
     return fetch("/api/compare-paths", {
@@ -815,34 +847,44 @@ async function comparisonRequest() {
 function setComparing(active) {
   state.comparing = active;
   const button = $("#compare");
-  const spinner = button.querySelector(".spinner");
-  button.disabled = active || !isReady();
-  spinner.hidden = !active;
+  if (button) {
+    const spinner = button.querySelector(".spinner");
+    button.disabled = active || !isReady();
+    if (spinner) spinner.hidden = !active;
+  }
   const reload = $("#reload");
   if (reload) reload.disabled = active;
 }
 
 async function runComparison() {
-  if (!isReady() || state.comparing) return;
+  if (state.comparing) return;
+  if (!isReady()) {
+    showError(i18n.t("error.generic"));
+    return;
+  }
   hideError();
   setComparing(true);
 
   if (desktop.available && desktop.paths.left && desktop.paths.right) {
-    try {
-      const dirResp = await fetch("/api/compare-directories", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ left: desktop.paths.left, right: desktop.paths.right }),
-      });
-      if (dirResp.ok) {
-        const folderData = await dirResp.json();
-        renderFolderDiff(folderData);
-        setComparing(false);
-        updateCompareButton();
-        return;
+    const isDoc = /\.(pdf|docx?|odt|rtf|xlsx?|xlsm|csv|tsv|png|jpe?g|tiff?|bmp|webp|txt|md|json|py|js|html?|css|xml|c|cpp|h|rs|go|java)$/i;
+    const bothAreDocs = isDoc.test(desktop.paths.left) && isDoc.test(desktop.paths.right);
+    if (!bothAreDocs) {
+      try {
+        const dirResp = await fetch("/api/compare-directories", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ left: desktop.paths.left, right: desktop.paths.right }),
+        });
+        if (dirResp.ok) {
+          const folderData = await dirResp.json();
+          renderFolderDiff(folderData);
+          setComparing(false);
+          updateCompareButton();
+          return;
+        }
+      } catch (_) {
+        /* not directories, proceed to regular document compare */
       }
-    } catch (_) {
-      /* not directories, proceed to regular document compare */
     }
   }
 
@@ -2546,22 +2588,13 @@ function applyBoxColor(name) {
 }
 
 function setupBoxColor() {
-  let saved = null;
-  try {
-    saved = localStorage.getItem(BOX_COLOR_KEY);
-  } catch (_) {
-    /* storage may be blocked */
-  }
+  const saved = safeStorageGet(BOX_COLOR_KEY);
   applyBoxColor(saved);
   for (const item of $$("#box-color-menu [data-color]")) {
     item.addEventListener("click", () => {
       closeMenus();
       applyBoxColor(item.dataset.color);
-      try {
-        localStorage.setItem(BOX_COLOR_KEY, item.dataset.color);
-      } catch (_) {
-        /* storage may be blocked */
-      }
+      safeStorageSet(BOX_COLOR_KEY, item.dataset.color);
     });
   }
 }
@@ -3017,9 +3050,9 @@ async function loadIntegrationStatus() {
 }
 
 function loadStoredPreferences() {
-  const prefSpace = localStorage.getItem("diffanydoc.pref.space");
-  const prefCase = localStorage.getItem("diffanydoc.pref.case");
-  const prefFormat = localStorage.getItem("diffanydoc.pref.format");
+  const prefSpace = safeStorageGet("diffanydoc.pref.space");
+  const prefCase = safeStorageGet("diffanydoc.pref.case");
+  const prefFormat = safeStorageGet("diffanydoc.pref.format");
 
   if (prefSpace !== null) {
     const val = prefSpace === "true";
@@ -3039,55 +3072,76 @@ function loadStoredPreferences() {
 }
 
 function setupPreferences() {
-  loadStoredPreferences();
+  try {
+    loadStoredPreferences();
 
-  const bindPref = (settingId, optId, key) => {
-    const settingEl = $(`#${settingId}`);
-    const optEl = $(`#${optId}`);
-    if (settingEl) {
-      settingEl.addEventListener("change", (e) => {
-        const val = e.target.checked;
-        localStorage.setItem(key, String(val));
-        if (optEl) optEl.checked = val;
-      });
-    }
-  };
+    const bindPref = (settingId, optId, key) => {
+      const settingEl = $(`#${settingId}`);
+      const optEl = $(`#${optId}`);
+      if (settingEl) {
+        settingEl.addEventListener("change", (e) => {
+          const val = e.target.checked;
+          safeStorageSet(key, String(val));
+          if (optEl) optEl.checked = val;
+        });
+      }
+      if (optEl) {
+        optEl.addEventListener("change", (e) => {
+          const val = e.target.checked;
+          safeStorageSet(key, String(val));
+          if (settingEl) settingEl.checked = val;
+        });
+      }
+    };
 
-  bindPref("settings-default-space", "opt-space", "diffanydoc.pref.space");
-  bindPref("settings-default-case", "opt-case", "diffanydoc.pref.case");
-  bindPref("settings-default-format", "opt-format", "diffanydoc.pref.format");
+    bindPref("settings-default-space", "opt-space", "diffanydoc.pref.space");
+    bindPref("settings-default-case", "opt-case", "diffanydoc.pref.case");
+    bindPref("settings-default-format", "opt-format", "diffanydoc.pref.format");
+  } catch (_) {}
 }
 
 function setupAdvancedExpander() {
-  const btn = $("#advanced-toggle-btn");
-  const panel = $("#advanced-panel");
-  if (!btn || !panel) return;
-  btn.addEventListener("click", () => {
-    const isExpanded = btn.getAttribute("aria-expanded") === "true";
-    btn.setAttribute("aria-expanded", String(!isExpanded));
-    panel.hidden = isExpanded;
+  try {
+    const btn = $("#advanced-toggle-btn");
+    const panel = $("#advanced-panel");
+    if (!btn || !panel) return;
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      const isExpanded = btn.getAttribute("aria-expanded") === "true";
+      btn.setAttribute("aria-expanded", String(!isExpanded));
+      panel.hidden = isExpanded;
+    });
+  } catch (_) {}
+}
+
+/* Action buttons */
+const compareBtn = $("#compare");
+if (compareBtn) {
+  compareBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    runComparison();
   });
 }
+const restartBtn = $("#restart");
+if (restartBtn) restartBtn.addEventListener("click", reset);
+if ($("#new-compare-btn")) $("#new-compare-btn").addEventListener("click", reset);
+if ($("#add-tab")) $("#add-tab").addEventListener("click", createNewSessionTab);
+if ($("#new-tab-btn")) $("#new-tab-btn").addEventListener("click", createNewSessionTab);
+if ($("#new-tab-menu")) $("#new-tab-menu").addEventListener("click", createNewSessionTab);
+if ($("#reload")) $("#reload").addEventListener("click", reloadComparison);
+if ($("#copy-all-to-right")) $("#copy-all-to-right").addEventListener("click", () => mergeAllToSide("left"));
+if ($("#copy-all-to-left")) $("#copy-all-to-left").addEventListener("click", () => mergeAllToSide("right"));
+if ($("#copy-changes")) $("#copy-changes").addEventListener("click", () => copyView("changes"));
+if ($("#copy-left")) $("#copy-left").addEventListener("click", () => copyView("left"));
+if ($("#copy-right")) $("#copy-right").addEventListener("click", () => copyView("right"));
+if ($("#copy-both")) $("#copy-both").addEventListener("click", () => copyView("both"));
+if ($("#download-left")) $("#download-left").addEventListener("click", () => downloadSideDocument("left"));
+if ($("#download-right")) $("#download-right").addEventListener("click", () => downloadSideDocument("right"));
 
 setupDialogs();
 setupAdvancedExpander();
 setupPreferences();
 loadTheme();
-$("#compare").addEventListener("click", runComparison);
-$("#restart").addEventListener("click", reset);
-if ($("#new-compare-btn")) $("#new-compare-btn").addEventListener("click", reset);
-if ($("#add-tab")) $("#add-tab").addEventListener("click", createNewSessionTab);
-if ($("#new-tab-btn")) $("#new-tab-btn").addEventListener("click", createNewSessionTab);
-if ($("#new-tab-menu")) $("#new-tab-menu").addEventListener("click", createNewSessionTab);
-$("#reload").addEventListener("click", reloadComparison);
-if ($("#copy-all-to-right")) $("#copy-all-to-right").addEventListener("click", () => mergeAllToSide("left"));
-if ($("#copy-all-to-left")) $("#copy-all-to-left").addEventListener("click", () => mergeAllToSide("right"));
-$("#copy-changes").addEventListener("click", () => copyView("changes"));
-$("#copy-left").addEventListener("click", () => copyView("left"));
-$("#copy-right").addEventListener("click", () => copyView("right"));
-$("#copy-both").addEventListener("click", () => copyView("both"));
-if ($("#download-left")) $("#download-left").addEventListener("click", () => downloadSideDocument("left"));
-if ($("#download-right")) $("#download-right").addEventListener("click", () => downloadSideDocument("right"));
 
 $$(".tab").forEach((tab) =>
   tab.addEventListener("click", () => {

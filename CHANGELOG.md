@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Smart Single-Line Context Menu Integration**: Replaced multi-item file manager entries with a single dynamic action across Nemo, Nautilus, Dolphin, and Windows Explorer. Right-clicking a file shows "Select as left file to compare"; once selected, subsequent right-clicks dynamically display "Compare to '<filename>'", instantly comparing both files upon click.
 - **Collapsible Advanced Comparison Options**: Cleaned up the upload view by moving options (ignore whitespace, ignore case, compare formatting, numeric tolerance) into an elegant Adwaita disclosure pill ("Advanced comparison options"), keeping the default screen minimal and focused.
 
+### Fixed
+- **Compare Button Initialization in WebKit2GTK**: Resolved an issue where clicking the "Compare" button did not trigger comparison due to unguarded `localStorage` access throwing security exceptions in sandboxed WebKit2GTK / Linux environments, halting event listener registration. Wrapped all client storage calls with defensive error handling and bound primary action controls prior to modal dialog initialization.
+
 ## [0.3.0] - 2026-11-08
 
 ### Added
