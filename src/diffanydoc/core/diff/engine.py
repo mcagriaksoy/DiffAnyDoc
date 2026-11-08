@@ -489,6 +489,29 @@ def _stats(left: Sequence[Line], right: Sequence[Line], rows: Sequence[Row]) -> 
 
     left_chars = sum(len(line.text) for line in left)
     right_chars = sum(len(line.text) for line in right)
+    left_words = sum(len(line.text.split()) for line in left)
+    right_words = sum(len(line.text.split()) for line in right)
+
+    left_reading_time = left_words / 200.0
+    right_reading_time = right_words / 200.0
+
+    words_added = 0
+    words_removed = 0
+    for row in rows:
+        if row.kind == "insert" and row.right:
+            words_added += len(row.right.text.split())
+        elif row.kind == "delete" and row.left:
+            words_removed += len(row.left.text.split())
+        elif row.kind == "replace":
+            if row.right_inline:
+                words_added += sum(len(s.text.split()) for s in row.right_inline if s.kind == "insert")
+            if row.left_inline:
+                words_removed += sum(len(s.text.split()) for s in row.left_inline if s.kind == "delete")
+
+    words_changed = words_added + words_removed
+    tot_words = max(left_words + right_words, 1)
+    change_density = min(words_changed / tot_words, 1.0)
+
     total = left_chars + right_chars
 
     # Matched characters, counting equal rows twice and the unchanged parts of
@@ -514,6 +537,16 @@ def _stats(left: Sequence[Line], right: Sequence[Line], rows: Sequence[Row]) -> 
         removed=removed,
         changed=changed,
         similarity=similarity,
+        left_words=left_words,
+        right_words=right_words,
+        left_chars=left_chars,
+        right_chars=right_chars,
+        left_reading_time_min=left_reading_time,
+        right_reading_time_min=right_reading_time,
+        words_added=words_added,
+        words_removed=words_removed,
+        words_changed=words_changed,
+        change_density=change_density,
     )
 
 

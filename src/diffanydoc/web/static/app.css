@@ -747,6 +747,63 @@ a {
   font-size: var(--font-size-caption);
 }
 
+.stats[role="button"] {
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  transition: background 0.1s ease;
+}
+
+.stats[role="button"]:hover {
+  background: var(--hover-tint);
+}
+
+.stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: var(--space-3);
+  font-size: var(--font-size-base);
+}
+
+.stats-table th,
+.stats-table td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.stats-table th {
+  font-weight: 600;
+  color: var(--dim-label-color);
+  font-size: var(--font-size-caption);
+  text-transform: uppercase;
+}
+
+.stats-breakdown {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.breakdown-card {
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--window-bg-color);
+  border: 1px solid var(--border-color);
+}
+
+.breakdown-card .b-label {
+  font-size: var(--font-size-caption);
+  color: var(--dim-label-color);
+}
+
+.breakdown-card .b-val {
+  font-size: 22px;
+  font-weight: 700;
+  margin-top: 4px;
+}
+
 .stat b {
   color: var(--text-color);
   font-weight: 600;

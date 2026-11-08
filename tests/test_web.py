@@ -260,5 +260,18 @@ def test_search_and_filters_markup_and_scripts() -> None:
     assert "search-match" in js
 
 
+def test_stats_detail_dialog_markup_and_scripts() -> None:
+    from diffanydoc.web import STATIC_DIR
+
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert 'id="stats-detail-dialog"' in html
+    assert 'id="stats-detail-tbody"' in html
+    assert 'id="stats-breakdown"' in html
+    assert "openStatsDetails" in js
+
+
+
 
 

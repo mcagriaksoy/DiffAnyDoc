@@ -1377,7 +1377,106 @@ function renderStats(stats) {
       ])
     );
   }
-  $("#stats").replaceChildren(...nodes);
+  const statsContainer = $("#stats");
+  statsContainer.replaceChildren(...nodes);
+  statsContainer.setAttribute("role", "button");
+  statsContainer.setAttribute("tabindex", "0");
+  statsContainer.setAttribute("title", i18n.t("stats.openDetails"));
+}
+
+function openStatsDetails() {
+  const dialog = $("#stats-detail-dialog");
+  if (!dialog || !state.comparison) return;
+
+  const data = state.comparison;
+  const stats = data.stats || {};
+  const docAName = data.left ? data.left.name : "Document A";
+  const docBName = data.right ? data.right.name : "Document B";
+
+  const thA = $("#stats-th-doc-a");
+  const thB = $("#stats-th-doc-b");
+  if (thA) thA.textContent = docAName;
+  if (thB) thB.textContent = docBName;
+
+  const tbody = $("#stats-detail-tbody");
+  if (tbody) {
+    tbody.replaceChildren();
+
+    const diffFmt = (diff) => {
+      if (diff > 0) return `+${diff}`;
+      if (diff < 0) return `${diff}`;
+      return "0";
+    };
+
+    const wordsDiff = (stats.right_words || 0) - (stats.left_words || 0);
+    const charsDiff = (stats.right_chars || 0) - (stats.left_chars || 0);
+    const linesDiff = (stats.right_lines || 0) - (stats.left_lines || 0);
+    const readDiff = (stats.right_reading_time_min || 0) - (stats.left_reading_time_min || 0);
+
+    const rows = [
+      {
+        name: i18n.t("stats.words"),
+        a: (stats.left_words || 0).toLocaleString(),
+        b: (stats.right_words || 0).toLocaleString(),
+        diff: diffFmt(wordsDiff),
+      },
+      {
+        name: i18n.t("stats.chars"),
+        a: (stats.left_chars || 0).toLocaleString(),
+        b: (stats.right_chars || 0).toLocaleString(),
+        diff: diffFmt(charsDiff),
+      },
+      {
+        name: i18n.t("stats.readingTime"),
+        a: i18n.t("stats.readingTimeVal", { min: (stats.left_reading_time_min || 0).toFixed(1) }),
+        b: i18n.t("stats.readingTimeVal", { min: (stats.right_reading_time_min || 0).toFixed(1) }),
+        diff: `${readDiff >= 0 ? "+" : ""}${readDiff.toFixed(1)} min`,
+      },
+      {
+        name: i18n.t("stats.lines"),
+        a: (stats.left_lines || 0).toLocaleString(),
+        b: (stats.right_lines || 0).toLocaleString(),
+        diff: diffFmt(linesDiff),
+      },
+    ];
+
+    for (const r of rows) {
+      const tr = el("tr", {}, [
+        el("td", { text: r.name, style: "font-weight: 500;" }),
+        el("td", { text: r.a }),
+        el("td", { text: r.b }),
+        el("td", {
+          text: r.diff,
+          style: r.diff.startsWith("+")
+            ? "color: var(--diff-ins-strong); font-weight: 600;"
+            : r.diff.startsWith("-")
+              ? "color: var(--diff-del-strong); font-weight: 600;"
+              : "color: var(--dim-label-color);",
+        }),
+      ]);
+      tbody.appendChild(tr);
+    }
+  }
+
+  const breakdown = $("#stats-breakdown");
+  if (breakdown) {
+    breakdown.replaceChildren(
+      el("div", { class: "breakdown-card" }, [
+        el("div", { class: "b-label", text: i18n.t("stats.wordsAdded") }),
+        el("div", { class: "b-val", text: `+${stats.words_added || 0}`, style: "color: var(--diff-ins-strong);" }),
+      ]),
+      el("div", { class: "breakdown-card" }, [
+        el("div", { class: "b-label", text: i18n.t("stats.wordsRemoved") }),
+        el("div", { class: "b-val", text: `−${stats.words_removed || 0}`, style: "color: var(--diff-del-strong);" }),
+      ]),
+      el("div", { class: "breakdown-card" }, [
+        el("div", { class: "b-label", text: i18n.t("stats.changeDensity") }),
+        el("div", { class: "b-val", text: `${((stats.change_density || 0) * 100).toFixed(1)}%`, style: "color: var(--accent-color);" }),
+      ])
+    );
+  }
+
+  dialog.showModal();
 }
 
 /* ---------- text view ---------- */
@@ -2780,6 +2879,17 @@ async function loadOcrStatus() {
 setupPageZoom();
 setupBoxColor();
 setupSearch();
+
+const statsBtn = $("#stats");
+if (statsBtn) {
+  statsBtn.addEventListener("click", openStatsDetails);
+  statsBtn.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      openStatsDetails();
+    }
+  });
+}
 
 if ($("#prev-change")) $("#prev-change").addEventListener("click", () => gotoChange(-1));
 if ($("#next-change")) $("#next-change").addEventListener("click", () => gotoChange(1));

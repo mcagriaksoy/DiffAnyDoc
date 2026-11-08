@@ -33,8 +33,8 @@
 | **TASK-15** | High | UI / Feature | Synchronized In-Document Search (Ctrl+F) & Kind Filters | `[x] DONE` |
 | **TASK-16** | High | Report / Export | Official PDF & Printable Comparison Report Generator | `[x] DONE` |
 | **TASK-17** | Medium | Engine / Data | Numeric Tolerance Comparison for Tables and Spreadsheets | `[x] DONE` |
-| **TASK-18** | Medium | UI / Stats | Detailed Document Reading & Vocabulary Comparison Metrics | `[⏳ IN PROGRESS: Antigravity]` |
-| **TASK-19** | High | Core / Desktop | Folder & Directory Tree Comparison Mode | `[ ] OPEN` |
+| **TASK-18** | Medium | UI / Stats | Detailed Document Reading & Vocabulary Comparison Metrics | `[x] DONE` |
+| **TASK-19** | High | Core / Desktop | Folder & Directory Tree Comparison Mode | `[⏳ IN PROGRESS: Antigravity]` |
 
 ---
 
@@ -359,7 +359,7 @@
 ---
 
 ### [TASK-18] Detailed Document Reading & Vocabulary Comparison Metrics
-- **Status**: `[ ] OPEN`
+- **Status**: `[x] DONE`
 - **Priority**: Medium
 - **Files**:
   - `src/diffanydoc/core/model.py` (`Stats` expansion: word count, reading time, unique words)

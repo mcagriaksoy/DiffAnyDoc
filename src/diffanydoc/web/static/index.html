@@ -439,6 +439,32 @@
   </div>
 </dialog>
 
+<dialog id="stats-detail-dialog" class="dialog dialog-wide" aria-labelledby="stats-detail-title">
+  <div class="dialog-head">
+    <div>
+      <h2 class="dialog-title" id="stats-detail-title" data-i18n="stats.detailsTitle">Document Metrics &amp; Reading Analysis</h2>
+      <p class="dialog-meta" data-i18n="stats.openDetails">Detailed word count, character, reading time, and change density comparison</p>
+    </div>
+  </div>
+  <div class="dialog-body">
+    <table class="stats-table">
+      <thead>
+        <tr>
+          <th data-i18n="stats.metric">Metric</th>
+          <th id="stats-th-doc-a" data-i18n="stats.docA">Document A</th>
+          <th id="stats-th-doc-b" data-i18n="stats.docB">Document B</th>
+          <th data-i18n="stats.diff">Difference</th>
+        </tr>
+      </thead>
+      <tbody id="stats-detail-tbody"></tbody>
+    </table>
+    <div class="stats-breakdown" id="stats-breakdown"></div>
+  </div>
+  <div class="dialog-actions">
+    <button class="suggested" type="button" data-close data-i18n="action.close">Close</button>
+  </div>
+</dialog>
+
 <dialog id="updates-dialog" class="dialog" aria-labelledby="updates-title">
   <div class="dialog-head">
     <div>

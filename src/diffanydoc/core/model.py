@@ -257,6 +257,16 @@ class Stats:
     removed: int = 0
     changed: int = 0
     similarity: float = 0.0
+    left_words: int = 0
+    right_words: int = 0
+    left_chars: int = 0
+    right_chars: int = 0
+    left_reading_time_min: float = 0.0
+    right_reading_time_min: float = 0.0
+    words_added: int = 0
+    words_removed: int = 0
+    words_changed: int = 0
+    change_density: float = 0.0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -266,6 +276,16 @@ class Stats:
             "removed": self.removed,
             "changed": self.changed,
             "similarity": round(self.similarity, 4),
+            "left_words": self.left_words,
+            "right_words": self.right_words,
+            "left_chars": self.left_chars,
+            "right_chars": self.right_chars,
+            "left_reading_time_min": round(self.left_reading_time_min, 1),
+            "right_reading_time_min": round(self.right_reading_time_min, 1),
+            "words_added": self.words_added,
+            "words_removed": self.words_removed,
+            "words_changed": self.words_changed,
+            "change_density": round(self.change_density, 4),
         }
 
 
