@@ -229,5 +229,17 @@ def test_preload_endpoints_warm_cache_and_detect_identical_second_file(tmp_path:
     assert r_up.json()["skipped_parse"] is False
 
 
+def test_app_js_syntax_and_integrity() -> None:
+    from diffanydoc.web import STATIC_DIR
+
+    js_file = STATIC_DIR / "app.js"
+    assert js_file.is_file()
+    content = js_file.read_text(encoding="utf-8")
+
+    assert content.count("{") == content.count("}")
+    assert content.count("(") == content.count(")")
+    assert content.count("[") == content.count("]")
+
+
 
 

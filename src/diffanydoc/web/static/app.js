@@ -592,11 +592,7 @@ function applyResolvedDesktopPaths(resolved, preferredSide) {
   } else {
     const side =
       preferredSide ||
-      (!desktop.paths.left && !state.files.left
-        ? "left"
-        : !desktop.paths.right && !state.files.right
-          ? "right"
-          : "left");
+      (!hasFile("left") ? "left" : !hasFile("right") ? "right" : "left");
     desktop.paths[side] = resolved[0];
     showPath(side, resolved[0]);
   }
@@ -607,11 +603,6 @@ function applyResolvedDesktopPaths(resolved, preferredSide) {
 async function handleUriDrop(dataTransfer, preferredSide) {
   return processDroppedData(dataTransfer, preferredSide);
 }
-    updateCompareButton();
-  } catch (_) {
-    /* ignore invalid drop payloads */
-  }
-}
 
 function assignDroppedFiles(files, preferredSide) {
   if (!files.length) return;
@@ -621,7 +612,7 @@ function assignDroppedFiles(files, preferredSide) {
   } else {
     const side =
       preferredSide ||
-      (!state.files.left ? "left" : !state.files.right ? "right" : "left");
+      (!hasFile("left") ? "left" : !hasFile("right") ? "right" : "left");
     setFile(side, files[0]);
   }
   if (!$("#result-view").hidden) showUploadView();
@@ -2482,8 +2473,7 @@ document.addEventListener("keydown", (event) => {
     !$("#upload-view").hidden
   ) {
     event.preventDefault();
-    const empty = !(state.files.left || desktop.paths.left) ? "left"
-      : !(state.files.right || desktop.paths.right) ? "right" : "left";
+    const empty = !hasFile("left") ? "left" : !hasFile("right") ? "right" : "left";
     chooseFile(empty);
     return;
   }
