@@ -30,8 +30,8 @@
 | **TASK-12** | High | Integration / OS | File Manager Context Menu Integration ("Compare with DiffAnyDoc") | `[x] DONE` |
 | **TASK-13** | High | Engine / UI | Pure-stdlib A4 Page Layout & Sheet View for Office/Text Documents | `[x] DONE` |
 | **TASK-14** | High | UI / UX | Vertical Diff Minimap & Overview Gutter Strip | `[x] DONE` |
-| **TASK-15** | High | UI / Feature | Synchronized In-Document Search (Ctrl+F) & Kind Filters | `[ ] OPEN` |
-| **TASK-16** | High | Report / Export | Official PDF & Printable Comparison Report Generator | `[ ] OPEN` |
+| **TASK-15** | High | UI / Feature | Synchronized In-Document Search (Ctrl+F) & Kind Filters | `[x] DONE` |
+| **TASK-16** | High | Report / Export | Official PDF & Printable Comparison Report Generator | `[⏳ IN PROGRESS: Antigravity]` |
 | **TASK-17** | Medium | Engine / Data | Numeric Tolerance Comparison for Tables and Spreadsheets | `[ ] OPEN` |
 | **TASK-18** | Medium | UI / Stats | Detailed Document Reading & Vocabulary Comparison Metrics | `[ ] OPEN` |
 | **TASK-19** | High | Core / Desktop | Folder & Directory Tree Comparison Mode | `[ ] OPEN` |
@@ -310,7 +310,7 @@
 ---
 
 ### [TASK-15] Synchronized In-Document Search (Ctrl+F) & Kind Filters
-- **Status**: `[ ] OPEN`
+- **Status**: `[x] DONE`
 - **Priority**: High
 - **Files**:
   - `src/diffanydoc/web/static/index.html` (`#diff-search-bar`)

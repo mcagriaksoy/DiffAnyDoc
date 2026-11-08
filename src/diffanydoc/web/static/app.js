@@ -17,6 +17,12 @@ const state = {
   annotations: [],
   nextAnnotationId: 1,
   preloadedHashes: { left: "", right: "" },
+  search: {
+    query: "",
+    matches: [],
+    index: -1,
+    filter: "all",
+  },
   tabs: [
     {
       id: "tab-1",
@@ -2030,6 +2036,202 @@ function setupMinimap() {
   });
 }
 
+/* ---------- in-document search & filtering (TASK-15) ---------- */
+function clearSearchHighlights() {
+  const marks = Array.from(document.querySelectorAll("#text-view mark.search-match"));
+  for (const mark of marks) {
+    const parent = mark.parentNode;
+    if (parent) {
+      mark.replaceWith(document.createTextNode(mark.textContent));
+      parent.normalize();
+    }
+  }
+}
+
+function highlightTextInContainer(container, lowerQ, matchLen) {
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+  const textNodes = [];
+  let node;
+  while ((node = walker.nextNode())) {
+    textNodes.push(node);
+  }
+
+  for (const textNode of textNodes) {
+    const str = textNode.nodeValue;
+    const lowerStr = str.toLowerCase();
+    let idx = lowerStr.indexOf(lowerQ);
+    if (idx === -1) continue;
+
+    const parent = textNode.parentNode;
+    const fragment = document.createDocumentFragment();
+    let lastIdx = 0;
+
+    while (idx !== -1) {
+      if (idx > lastIdx) {
+        fragment.appendChild(document.createTextNode(str.slice(lastIdx, idx)));
+      }
+      const mark = document.createElement("mark");
+      mark.className = "search-match";
+      mark.textContent = str.slice(idx, idx + matchLen);
+      fragment.appendChild(mark);
+      lastIdx = idx + matchLen;
+      idx = lowerStr.indexOf(lowerQ, lastIdx);
+    }
+    if (lastIdx < str.length) {
+      fragment.appendChild(document.createTextNode(str.slice(lastIdx)));
+    }
+    parent.replaceChild(fragment, textNode);
+  }
+}
+
+function updateSearchCount() {
+  const countEl = $("#search-count");
+  if (!countEl) return;
+  const total = state.search.matches.length;
+  const current = total === 0 ? 0 : state.search.index + 1;
+  countEl.textContent = `${current} / ${total}`;
+}
+
+function performSearch(query) {
+  clearSearchHighlights();
+  state.search.matches = [];
+  state.search.index = -1;
+  const q = (query || "").trim();
+  state.search.query = q;
+  if (!q) {
+    updateSearchCount();
+    return;
+  }
+
+  const rows = Array.from(document.querySelectorAll("#text-view .row"));
+  const lowerQ = q.toLowerCase();
+
+  for (const row of rows) {
+    if (row.offsetParent === null) continue; // Skip hidden rows
+    const textContainers = row.querySelectorAll(".cell .text");
+    for (const container of textContainers) {
+      highlightTextInContainer(container, lowerQ, q.length);
+    }
+  }
+
+  state.search.matches = Array.from(document.querySelectorAll("#text-view mark.search-match"));
+  if (state.search.matches.length > 0) {
+    state.search.index = 0;
+    state.search.matches[0].classList.add("active");
+    state.search.matches[0].scrollIntoView({
+      block: "center",
+      behavior: reducedMotion() ? "auto" : "smooth",
+    });
+  }
+  updateSearchCount();
+}
+
+function navigateSearch(delta) {
+  if (!state.search.matches.length) return;
+  if (state.search.matches[state.search.index]) {
+    state.search.matches[state.search.index].classList.remove("active");
+  }
+  state.search.index =
+    (state.search.index + delta + state.search.matches.length) % state.search.matches.length;
+  const current = state.search.matches[state.search.index];
+  if (current) {
+    current.classList.add("active");
+    current.scrollIntoView({
+      block: "center",
+      behavior: reducedMotion() ? "auto" : "smooth",
+    });
+  }
+  updateSearchCount();
+}
+
+function openSearch() {
+  const bar = $("#search-bar");
+  if (!bar) return;
+  bar.hidden = false;
+  const input = $("#search-input");
+  if (input) {
+    input.focus();
+    input.select();
+    if (input.value) performSearch(input.value);
+  }
+}
+
+function closeSearch() {
+  const bar = $("#search-bar");
+  if (!bar) return;
+  bar.hidden = true;
+  clearSearchHighlights();
+  state.search.matches = [];
+  state.search.index = -1;
+  updateSearchCount();
+}
+
+function toggleSearch() {
+  const bar = $("#search-bar");
+  if (!bar) return;
+  if (bar.hidden) openSearch();
+  else closeSearch();
+}
+
+function applyKindFilter(filterKind) {
+  state.search.filter = filterKind;
+  for (const chip of $$("#search-bar .filter-chip")) {
+    chip.classList.toggle("active", chip.dataset.filter === filterKind);
+  }
+  const rows = $$("#text-view .row");
+  for (const row of rows) {
+    if (filterKind === "all") {
+      row.style.display = "";
+    } else if (filterKind === "add") {
+      row.style.display = row.classList.contains("add") ? "" : "none";
+    } else if (filterKind === "del") {
+      row.style.display = row.classList.contains("del") ? "" : "none";
+    } else if (filterKind === "mod") {
+      row.style.display = row.classList.contains("mod") ? "" : "none";
+    }
+  }
+  collectChanges();
+  if (state.search.query) {
+    performSearch(state.search.query);
+  }
+}
+
+function setupSearch() {
+  const toggleBtn = $("#search-toggle");
+  if (toggleBtn) toggleBtn.addEventListener("click", toggleSearch);
+
+  const closeBtn = $("#search-close");
+  if (closeBtn) closeBtn.addEventListener("click", closeSearch);
+
+  const prevBtn = $("#search-prev");
+  if (prevBtn) prevBtn.addEventListener("click", () => navigateSearch(-1));
+
+  const nextBtn = $("#search-next");
+  if (nextBtn) nextBtn.addEventListener("click", () => navigateSearch(1));
+
+  const input = $("#search-input");
+  if (input) {
+    input.addEventListener("input", (e) => {
+      performSearch(e.target.value);
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        navigateSearch(e.shiftKey ? -1 : 1);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        closeSearch();
+      }
+    });
+  }
+
+  for (const chip of $$("#search-bar .filter-chip")) {
+    chip.addEventListener("click", () => {
+      applyKindFilter(chip.dataset.filter);
+    });
+  }
+}
+
 /* ---------- view switches ---------- */
 function setMode(mode) {
   const prevMode = state.mode;
@@ -2312,6 +2514,8 @@ function setupPageZoom() {
 }
 
 function showUploadView() {
+  closeSearch();
+  applyKindFilter("all");
   state.comparison = null;
   state.changes = [];
   state.changeIndex = -1;
@@ -2559,6 +2763,7 @@ async function loadOcrStatus() {
 
 setupPageZoom();
 setupBoxColor();
+setupSearch();
 
 if ($("#prev-change")) $("#prev-change").addEventListener("click", () => gotoChange(-1));
 if ($("#next-change")) $("#next-change").addEventListener("click", () => gotoChange(1));
@@ -2587,6 +2792,24 @@ document.addEventListener("keydown", (event) => {
     const empty = !hasFile("left") ? "left" : !hasFile("right") ? "right" : "left";
     chooseFile(empty);
     return;
+  }
+
+  if (
+    (event.ctrlKey || event.metaKey) &&
+    event.key.toLowerCase() === "f" &&
+    !$("#result-view").hidden
+  ) {
+    event.preventDefault();
+    openSearch();
+    return;
+  }
+
+  if (event.key === "Escape") {
+    const searchBar = $("#search-bar");
+    if (searchBar && !searchBar.hidden) {
+      closeSearch();
+      return;
+    }
   }
 
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "w") {

@@ -241,5 +241,24 @@ def test_app_js_syntax_and_integrity() -> None:
     assert content.count("[") == content.count("]")
 
 
+def test_search_and_filters_markup_and_scripts() -> None:
+    from diffanydoc.web import STATIC_DIR
+
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert 'id="search-bar"' in html
+    assert 'id="search-input"' in html
+    assert 'id="search-toggle"' in html
+    assert 'data-filter="all"' in html
+    assert 'data-filter="add"' in html
+    assert 'data-filter="del"' in html
+    assert 'data-filter="mod"' in html
+
+    assert "performSearch" in js
+    assert "applyKindFilter" in js
+    assert "search-match" in js
+
+
 
 

@@ -95,6 +95,10 @@
       </button>
     </div>
 
+    <button class="flat icon" id="search-toggle" type="button" data-result-only data-i18n-title="help.key.search" data-i18n-aria-label="help.key.search" hidden>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" cy="6.5" r="4.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10 10l4 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+    </button>
+
     <div class="menu-wrap">
       <button class="flat icon" id="lang-button" data-menu="lang-menu" aria-haspopup="menu" aria-expanded="false" data-i18n-title="lang.label" data-i18n-aria-label="lang.label">
         <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -239,6 +243,32 @@
       </div>
     </div>
 
+    <div class="search-bar" id="search-bar" hidden>
+      <div class="search-input-wrap">
+        <svg class="search-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" cy="6.5" r="4.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10 10l4 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <input type="text" id="search-input" placeholder="Search text…" data-i18n-placeholder="search.placeholder" autocomplete="off" spellcheck="false">
+        <span class="search-count" id="search-count" aria-live="polite">0 / 0</span>
+      </div>
+      <div class="search-nav">
+        <button class="flat icon search-btn" id="search-prev" type="button" data-i18n-title="search.prev" data-i18n-aria-label="search.prev">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m11 10-3-3-3 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="flat icon search-btn" id="search-next" type="button" data-i18n-title="search.next" data-i18n-aria-label="search.next">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 6 3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+      <div class="search-sep"></div>
+      <div class="search-filters" role="group" aria-label="Filters">
+        <button class="filter-chip active" type="button" data-filter="all" data-i18n="filter.all">All</button>
+        <button class="filter-chip chip-add" type="button" data-filter="add" data-i18n="filter.added">+Added</button>
+        <button class="filter-chip chip-del" type="button" data-filter="del" data-i18n="filter.removed">−Removed</button>
+        <button class="filter-chip chip-mod" type="button" data-filter="mod" data-i18n="filter.modified">~Changed</button>
+      </div>
+      <button class="flat icon search-close" id="search-close" type="button" data-i18n-title="action.close" data-i18n-aria-label="action.close">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+
     <div class="panes" id="text-view"></div>
     <div class="pages" id="page-view" hidden></div>
     <aside class="diff-minimap" id="diff-minimap" aria-label="Overview minimap" hidden>
@@ -305,6 +335,7 @@
       <table class="help-keys">
         <tbody>
           <tr><td><kbd>Ctrl</kbd> + <kbd>O</kbd></td><td data-i18n="help.key.open">Choose a file</td></tr>
+          <tr><td><kbd>Ctrl</kbd> + <kbd>F</kbd></td><td data-i18n="help.key.search">Find text in comparison</td></tr>
           <tr><td><kbd>Ctrl</kbd> + <kbd>Enter</kbd></td><td data-i18n="help.key.compare">Compare</td></tr>
           <tr><td><kbd>Ctrl</kbd> + <kbd>W</kbd></td><td data-i18n="help.key.closeTab">Close the comparison tab</td></tr>
           <tr><td><kbd>F7</kbd> / <kbd>Shift</kbd> + <kbd>F7</kbd>, <kbd>N</kbd> / <kbd>P</kbd></td><td data-i18n="help.key.nav">Next / previous change</td></tr>
