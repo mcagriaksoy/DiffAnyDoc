@@ -32,8 +32,8 @@
 | **TASK-14** | High | UI / UX | Vertical Diff Minimap & Overview Gutter Strip | `[x] DONE` |
 | **TASK-15** | High | UI / Feature | Synchronized In-Document Search (Ctrl+F) & Kind Filters | `[x] DONE` |
 | **TASK-16** | High | Report / Export | Official PDF & Printable Comparison Report Generator | `[x] DONE` |
-| **TASK-17** | Medium | Engine / Data | Numeric Tolerance Comparison for Tables and Spreadsheets | `[⏳ IN PROGRESS: Antigravity]` |
-| **TASK-18** | Medium | UI / Stats | Detailed Document Reading & Vocabulary Comparison Metrics | `[ ] OPEN` |
+| **TASK-17** | Medium | Engine / Data | Numeric Tolerance Comparison for Tables and Spreadsheets | `[x] DONE` |
+| **TASK-18** | Medium | UI / Stats | Detailed Document Reading & Vocabulary Comparison Metrics | `[⏳ IN PROGRESS: Antigravity]` |
 | **TASK-19** | High | Core / Desktop | Folder & Directory Tree Comparison Mode | `[ ] OPEN` |
 
 ---
@@ -344,7 +344,7 @@
 ---
 
 ### [TASK-17] Numeric Tolerance Comparison for Tables and Spreadsheets
-- **Status**: `[ ] OPEN`
+- **Status**: `[x] DONE`
 - **Priority**: Medium
 - **Files**:
   - `src/diffanydoc/core/diff/lines.py` (`cell_diff`, numeric tolerance check)

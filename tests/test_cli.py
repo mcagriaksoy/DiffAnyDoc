@@ -108,3 +108,15 @@ def test_integrate_command_installs_and_removes(monkeypatch, capsys) -> None:
 
     assert main(["integrate", "uninstall"]) == 0
     assert "removed" in capsys.readouterr().out
+
+
+def test_cli_diff_with_numeric_tolerance(tmp_path: Path, capsys) -> None:
+    f1 = tmp_path / "t1.csv"
+    f2 = tmp_path / "t2.csv"
+    f1.write_text("Cost\n100.50\n", encoding="utf-8")
+    f2.write_text("Cost\n100.5002\n", encoding="utf-8")
+
+    # With tolerance 0.01: files match within tolerance
+    code = main(["diff", str(f1), str(f2), "--tolerance", "0.01", "--fail-on-diff"])
+    assert code == 0
+

@@ -746,6 +746,9 @@ async function comparisonRequest() {
   const ocr = ocrCheckbox ? Boolean(ocrCheckbox.checked) : true;
   const ocrLangSelect = $("#opt-ocr-lang");
   const ocrLanguage = (ocrLangSelect && ocrLangSelect.value) || (i18n.lang === "tr" ? "tur+eng" : "eng");
+  const tolInput = $("#opt-tolerance");
+  const tolVal = tolInput && tolInput.value.trim() !== "" ? parseFloat(tolInput.value) : null;
+  const numericTolerance = Number.isFinite(tolVal) && tolVal >= 0 ? tolVal : null;
 
   if (desktop.available && desktop.paths.left && desktop.paths.right) {
     return fetch("/api/compare-paths", {
@@ -762,6 +765,7 @@ async function comparisonRequest() {
         visual: true,
         ocr,
         ocr_language: ocrLanguage,
+        numeric_tolerance: numericTolerance,
       }),
     });
   }
@@ -787,6 +791,9 @@ async function comparisonRequest() {
   form.append("visual", "true");
   form.append("ocr", String(ocr));
   form.append("ocr_language", ocrLanguage);
+  if (numericTolerance !== null) {
+    form.append("numeric_tolerance", String(numericTolerance));
+  }
   return fetch("/api/compare", { method: "POST", body: form });
 }
 

@@ -179,6 +179,10 @@
       <label class="check"><input type="checkbox" id="opt-case"> <span data-i18n="opt.ignoreCase">Ignore letter case</span></label>
       <label class="check"><input type="checkbox" id="opt-space" checked> <span data-i18n="opt.ignoreWhitespace">Ignore extra whitespace</span></label>
       <label class="check"><input type="checkbox" id="opt-format"> <span data-i18n="opt.formatDiff">Compare formatting (font, size, bold/italic)</span></label>
+      <label class="check" data-i18n-title="opt.toleranceTitle">
+        <span data-i18n="opt.tolerance">Numeric tolerance</span>
+        <input type="number" id="opt-tolerance" step="any" min="0" placeholder="0.01" data-i18n-placeholder="opt.tolerancePlaceholder" style="width: 72px; margin-left: 6px; padding: 2px 6px; font-size: 12px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--view-bg-color); color: var(--text-color);">
+      </label>
     </div>
 
     <div class="actions">

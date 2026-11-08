@@ -50,6 +50,8 @@ class DiffOptions:
     ocr_max_pages: int = 60
     #: None = per-user cache directory (``DIFFANYDOC_CACHE_DIR`` overrides).
     ocr_cache_dir: str | None = None
+    #: Numeric difference tolerance: numbers differing by <= this amount are treated as equal.
+    numeric_tolerance: float | None = None
 
 
 def file_sha256(path: str | Path) -> str:
@@ -359,7 +361,12 @@ def _build_rows(
             rows.extend(_single_row(None, b, "insert") for b in right[j1:j2])
             continue
         rows.extend(
-            _refine_replacement(left[i1:i2], right[j1:j2], options.pair_threshold)
+            _refine_replacement(
+                left[i1:i2],
+                right[j1:j2],
+                options.pair_threshold,
+                tolerance=options.numeric_tolerance,
+            )
         )
     return rows
 
@@ -395,11 +402,27 @@ def _single_row(left: Line | None, right: Line | None, kind: str) -> Row:
     return Row(kind=kind, left=left, right=right)  # type: ignore[arg-type]
 
 
-def _replace_row(left: Line, right: Line) -> Row:
+def _replace_row(left: Line, right: Line, tolerance: float | None = None) -> Row:
     if left.cells is not None and right.cells is not None:
-        left_inline, right_inline = cell_diff(left.cells, right.cells)
+        left_inline, right_inline = cell_diff(left.cells, right.cells, tolerance=tolerance)
     else:
-        left_inline, right_inline = inline_diff(left.text, right.text)
+        left_inline, right_inline = inline_diff(left.text, right.text, tolerance=tolerance)
+
+    if (
+        tolerance is not None
+        and left_inline
+        and right_inline
+        and all(s.kind == "equal" for s in left_inline)
+        and all(s.kind == "equal" for s in right_inline)
+    ):
+        return Row(
+            kind="equal",
+            left=left,
+            right=right,
+            left_inline=left_inline,
+            right_inline=right_inline,
+        )
+
     return Row(
         kind="replace",
         left=left,
@@ -410,7 +433,10 @@ def _replace_row(left: Line, right: Line) -> Row:
 
 
 def _refine_replacement(
-    left: Sequence[Line], right: Sequence[Line], threshold: float
+    left: Sequence[Line],
+    right: Sequence[Line],
+    threshold: float,
+    tolerance: float | None = None,
 ) -> list[Row]:
     """Pair up changed lines so a rewrite does not look like delete+insert.
 
@@ -423,7 +449,7 @@ def _refine_replacement(
         a, b = left[i], right[j]
         sim = line_similarity(a, b)
         if sim >= threshold or (len(left) == len(right) and sim >= 0.2):
-            rows.append(_replace_row(a, b))
+            rows.append(_replace_row(a, b, tolerance=tolerance))
             i += 1
             j += 1
             continue
@@ -435,7 +461,7 @@ def _refine_replacement(
             line_similarity(a, right[j + 1]) if j + 1 < len(right) else -1.0
         )
         if ahead_left < threshold and ahead_right < threshold and sim >= 0.18:
-            rows.append(_replace_row(a, b))
+            rows.append(_replace_row(a, b, tolerance=tolerance))
             i += 1
             j += 1
             continue

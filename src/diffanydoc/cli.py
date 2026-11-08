@@ -79,6 +79,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="also report formatting/style differences (font, size, bold, italic)",
     )
     diff.add_argument(
+        "--tolerance",
+        type=float,
+        default=None,
+        metavar="FLOAT",
+        help="numeric difference tolerance (e.g. 0.01 for rounding)",
+    )
+    diff.add_argument(
         "--no-fast-check",
         action="store_true",
         help="always parse both files even when their SHA-256 checksums match",
@@ -167,6 +174,7 @@ def _diff(args: argparse.Namespace, language: str) -> int:
         visual=args.visual,
         ocr=args.ocr,
         ocr_language=args.ocr_lang,
+        numeric_tolerance=args.tolerance,
     )
     result = compare(args.left, args.right, options)
     fmt = args.format or _infer_format(args.output)

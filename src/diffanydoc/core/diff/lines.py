@@ -12,6 +12,75 @@ from ..normalize import normalize_line
 _WORD = re.compile(r"\S+|\s+")
 
 
+def try_parse_number(text: str) -> float | None:
+    """Try parsing text as a number (float), handling currency, commas and percentages."""
+    if not text:
+        return None
+    cleaned = text.strip()
+    if not cleaned:
+        return None
+
+    is_negative = False
+    if cleaned.startswith("(") and cleaned.endswith(")"):
+        is_negative = True
+        cleaned = cleaned[1:-1].strip()
+
+    # Remove leading non-digit characters except minus/plus
+    cleaned = re.sub(r"^[^\d\-+]+", "", cleaned)
+    # Remove trailing non-digit characters
+    cleaned = re.sub(r"[^\d]+$", "", cleaned)
+    if not cleaned or cleaned in ("-", "+"):
+        return None
+
+    # Handle thousands and decimal separators
+    if "," in cleaned and "." in cleaned:
+        if cleaned.rfind(".") > cleaned.rfind(","):
+            cleaned = cleaned.replace(",", "")
+        else:
+            cleaned = cleaned.replace(".", "").replace(",", ".")
+    elif "," in cleaned:
+        parts = cleaned.split(",")
+        if len(parts) == 2:
+            cleaned = cleaned.replace(",", ".")
+        else:
+            cleaned = cleaned.replace(",", "")
+
+    try:
+        val = float(cleaned)
+        return -val if is_negative and val > 0 else val
+    except (ValueError, OverflowError):
+        return None
+
+
+def is_numeric_equal(a: str, b: str, tolerance: float) -> bool:
+    """Return True if both strings have matching units/currency and numeric diff <= tolerance."""
+    sa = a.strip()
+    sb = b.strip()
+    if sa == sb:
+        return True
+
+    m_pref_a = re.match(r"^[^\d\-+]*", sa)
+    m_pref_b = re.match(r"^[^\d\-+]*", sb)
+    pref_a = m_pref_a.group(0) if m_pref_a else ""
+    pref_b = m_pref_b.group(0) if m_pref_b else ""
+    if pref_a != pref_b:
+        return False
+
+    m_suf_a = re.search(r"[^\d]*$", sa)
+    m_suf_b = re.search(r"[^\d]*$", sb)
+    suf_a = m_suf_a.group(0) if m_suf_a else ""
+    suf_b = m_suf_b.group(0) if m_suf_b else ""
+    if suf_a != suf_b:
+        return False
+
+    num_a = try_parse_number(sa)
+    num_b = try_parse_number(sb)
+    if num_a is None or num_b is None:
+        return False
+
+    return abs(num_a - num_b) <= tolerance
+
+
 def style_summary(style: dict[str, object] | None) -> str:
     """Short human-readable formatting signature for style comparison."""
     if not style:
@@ -133,13 +202,14 @@ def line_similarity(a: Line, b: Line) -> float:
 
 
 def inline_diff(
-    left: str, right: str
+    left: str, right: str, tolerance: float | None = None
 ) -> tuple[list[Segment], list[Segment]]:
     """Word-level diff inside a pair of changed lines.
 
     Whitespace is kept as its own token so the reconstructed text is exact.
     Normalized word keys are compared first so smart-quote or case/spacing
     variations do not cause the entire paragraph to look replaced.
+    Optional numeric tolerance treats minor rounding differences as equal.
     """
     a_tokens = _WORD.findall(left)
     b_tokens = _WORD.findall(right)
@@ -173,12 +243,21 @@ def inline_diff(
                 elif normalize_line(a_tok, collapse_whitespace=False) == normalize_line(b_tok, collapse_whitespace=False) and not a_tok.isspace():
                     push(left_segments, "equal", a_tok)
                     push(right_segments, "equal", b_tok)
+                elif tolerance is not None and is_numeric_equal(a_tok, b_tok, tolerance):
+                    push(left_segments, "equal", a_tok)
+                    push(right_segments, "equal", b_tok)
                 else:
                     push(left_segments, "delete", a_tok)
                     push(right_segments, "insert", b_tok)
         elif tag == "replace":
+            tok_a_str = "".join(a_tokens[i1:i2])
+            tok_b_str = "".join(b_tokens[j1:j2])
+            if tolerance is not None and is_numeric_equal(tok_a_str, tok_b_str, tolerance):
+                push(left_segments, "equal", tok_a_str)
+                push(right_segments, "equal", tok_b_str)
+                continue
             # Refine punctuation-attached tokens (e.g. "word," vs "word.")
-            for a_sub, b_sub in [_subtoken_diff("".join(a_tokens[i1:i2]), "".join(b_tokens[j1:j2]))]:
+            for a_sub, b_sub in [_subtoken_diff(tok_a_str, tok_b_str, tolerance=tolerance)]:
                 for seg in a_sub:
                     push(left_segments, seg.kind, seg.text)
                 for seg in b_sub:
@@ -225,8 +304,16 @@ def _coalesce_whitespace_segments(segments: list[Segment]) -> list[Segment]:
 _SUBWORD = re.compile(r"\w+|[^\w]+")
 
 
-def _subtoken_diff(left: str, right: str) -> tuple[list[Segment], list[Segment]]:
+def _subtoken_diff(
+    left: str, right: str, tolerance: float | None = None
+) -> tuple[list[Segment], list[Segment]]:
     """Refine a replaced word span by splitting words from attached punctuation."""
+    if tolerance is not None and is_numeric_equal(left, right, tolerance):
+        return (
+            [Segment(kind="equal", text=left)] if left else [],
+            [Segment(kind="equal", text=right)] if right else [],
+        )
+
     a_sub = _SUBWORD.findall(left)
     b_sub = _SUBWORD.findall(right)
     if len(a_sub) <= 1 and len(b_sub) <= 1:
@@ -238,25 +325,34 @@ def _subtoken_diff(left: str, right: str) -> tuple[list[Segment], list[Segment]]
     l_out: list[Segment] = []
     r_out: list[Segment] = []
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        if tag == "equal" and not "".join(a_sub[i1:i2]).isspace():
-            l_out.append(Segment(kind="equal", text="".join(a_sub[i1:i2])))
-            r_out.append(Segment(kind="equal", text="".join(b_sub[j1:j2])))
+        sub_a = "".join(a_sub[i1:i2])
+        sub_b = "".join(b_sub[j1:j2])
+        if tag == "equal" and not sub_a.isspace():
+            l_out.append(Segment(kind="equal", text=sub_a))
+            r_out.append(Segment(kind="equal", text=sub_b))
+        elif tolerance is not None and i1 < i2 and j1 < j2 and is_numeric_equal(sub_a, sub_b, tolerance):
+            l_out.append(Segment(kind="equal", text=sub_a))
+            r_out.append(Segment(kind="equal", text=sub_b))
         else:
             if i1 < i2:
-                l_out.append(Segment(kind="delete", text="".join(a_sub[i1:i2])))
+                l_out.append(Segment(kind="delete", text=sub_a))
             if j1 < j2:
-                r_out.append(Segment(kind="insert", text="".join(b_sub[j1:j2])))
+                r_out.append(Segment(kind="insert", text=sub_b))
     return _coalesce_whitespace_segments(l_out), _coalesce_whitespace_segments(r_out)
 
 
 def cell_diff(
-    left: list[str], right: list[str], sep: str = " | "
+    left: list[str],
+    right: list[str],
+    sep: str = " | ",
+    tolerance: float | None = None,
 ) -> tuple[list[Segment], list[Segment]]:
     """Word-level diff of two table rows, aligned cell by cell.
 
     Cells are matched with the same LCS used for lines, so inserting a column
     does not mark every later cell as changed. Each side's segments rebuild
     that side's own ``sep.join(cells)`` exactly.
+    Optional numeric tolerance treats minor numeric differences as equal.
     """
     matcher = SequenceMatcher(
         None,
@@ -301,7 +397,11 @@ def cell_diff(
                 a = left[i1 + offset] if i1 + offset < i2 else None
                 b = right[j1 + offset] if j1 + offset < j2 else None
                 if a is not None and b is not None:
-                    left_inline, right_inline = inline_diff(a, b)
+                    if tolerance is not None and is_numeric_equal(a, b, tolerance):
+                        add_left("equal", a)
+                        add_right("equal", b)
+                        continue
+                    left_inline, right_inline = inline_diff(a, b, tolerance=tolerance)
                     if have_left:
                         push(left_segments, "equal", sep)
                     have_left = True

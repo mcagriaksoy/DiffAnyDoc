@@ -171,6 +171,7 @@ def create_app() -> FastAPI:
         other_sha256: str = Form(""),
         ocr: bool = Form(True),
         ocr_language: str = Form("tur+eng"),
+        numeric_tolerance: float | None = Form(None),
     ) -> JSONResponse:
         directory = Path(tempfile.mkdtemp(prefix="diffanydoc-pre-"))
         try:
@@ -227,6 +228,7 @@ def create_app() -> FastAPI:
         visual: bool = Form(True),
         ocr: bool = Form(True),
         ocr_language: str = Form("tur+eng"),
+        numeric_tolerance: float | None = Form(None),
     ) -> JSONResponse:
         directory = Path(tempfile.mkdtemp(prefix="diffanydoc-"))
         try:
@@ -256,6 +258,7 @@ def create_app() -> FastAPI:
                 ocr,
                 ocr_language,
                 compare_formatting,
+                numeric_tolerance,
             )
         except Exception:
             shutil.rmtree(directory, ignore_errors=True)
@@ -280,6 +283,7 @@ def create_app() -> FastAPI:
             bool(body.get("ocr", True)),
             str(body.get("ocr_language") or "tur+eng"),
             bool(body.get("compare_formatting", False)),
+            float(body["numeric_tolerance"]) if body.get("numeric_tolerance") is not None else None,
         )
         return JSONResponse(_summary(comparison))
 
@@ -411,6 +415,7 @@ def _run_compare(
     ocr: bool = False,
     ocr_language: str = "eng",
     compare_formatting: bool = False,
+    numeric_tolerance: float | None = None,
 ) -> Comparison:
     options = DiffOptions(
         context=context,
@@ -421,6 +426,7 @@ def _run_compare(
         visual=visual,
         ocr=ocr,
         ocr_language=ocr_language,
+        numeric_tolerance=numeric_tolerance,
     )
     result = compare(left_path, right_path, options)
 

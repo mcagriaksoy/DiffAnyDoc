@@ -204,3 +204,53 @@ def test_xlsx_merged_cells_are_expanded(tmp_path: Path) -> None:
     ]
     assert table.children[0].children[1].style.get("merged_from") == "A1"
 
+
+def test_numeric_tolerance_spreadsheet_rounding(tmp_path: Path) -> None:
+    left = write_xlsx(
+        tmp_path / "tol_left.xlsx",
+        [
+            (
+                "Sheet1",
+                [
+                    ["Account", "Balance"],
+                    ["Cash", "104.50"],
+                    ["Equities", "2500.005"],
+                ],
+            )
+        ],
+    )
+    right = write_xlsx(
+        tmp_path / "tol_right.xlsx",
+        [
+            (
+                "Sheet1",
+                [
+                    ["Account", "Balance"],
+                    ["Cash", "104.5001"],  # diff 0.0001
+                    ["Equities", "2500.004"],  # diff 0.001
+                ],
+            )
+        ],
+    )
+
+    # Without tolerance: both rows are marked modified
+    strict_res = compare(left, right, DiffOptions(numeric_tolerance=None))
+    assert strict_res.stats.changed == 2
+
+    # With tolerance 0.01: both rows are within tolerance and treated as equal
+    tol_res = compare(left, right, DiffOptions(numeric_tolerance=0.01))
+    assert tol_res.stats.changed == 0
+    assert tol_res.stats.similarity == 1.0
+
+
+def test_numeric_tolerance_threshold_respected(tmp_path: Path) -> None:
+    f1 = tmp_path / "n1.csv"
+    f2 = tmp_path / "n2.csv"
+    f1.write_text("ID,Amount\n1,$100.50\n2,$200.00\n", encoding="utf-8")
+    f2.write_text("ID,Amount\n1,$100.504\n2,$250.00\n", encoding="utf-8")
+
+    res = compare(f1, f2, DiffOptions(numeric_tolerance=0.01))
+    # Row 1 is within tolerance (diff 0.004 <= 0.01), row 2 exceeds tolerance ($200 vs $250)
+    assert res.stats.changed == 1
+
+
