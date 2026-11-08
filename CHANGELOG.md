@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-08
+
 ### Added
 - **Folder & Directory Tree Comparison Mode (TASK-19)**: Added recursive directory comparison engine (`diffanydoc.core.folder`) featuring fast SHA-256 matching for 0 ms identification of byte-identical files, modification detection, and tracking of added and removed files. Added `/api/compare-directories` API endpoint, CLI recursive diff (`diffanydoc diff dirA dirB`), and interactive UI Folder View with status badges, size comparisons, quick filters (All, Modified, Added, Removed, Identical), and double-click or "Compare file" action opening individual file diffs directly in new session tabs.
 - **Comparative Reading & Vocabulary Analysis Metrics (TASK-18)**: Expanded diff statistics with word counts (Left vs Right), character counts, estimated reading time (~200 words/min), words added/removed, and overall content change density. Added interactive click action on the topbar stats pill opening an Adwaita modal dialog (`#stats-detail-dialog`) showing side-by-side comparative metrics and change breakdown cards.
