@@ -1317,6 +1317,9 @@ function renderResult() {
   $("#reload").hidden = !canReload();
 
   $("#export").href = `/api/compare/${data.id}/report?lang=${i18n.lang}`;
+  if ($("#export-pdf")) {
+    $("#export-pdf").href = `/api/compare/${data.id}/report.pdf?lang=${i18n.lang}`;
+  }
 
   syncActiveTab();
   renderText();
@@ -2629,6 +2632,12 @@ $("#export").addEventListener("click", (event) => {
   closeMenus();
   openExternal(event, $("#export").getAttribute("href"));
 });
+if ($("#export-pdf")) {
+  $("#export-pdf").addEventListener("click", (event) => {
+    closeMenus();
+    openExternal(event, $("#export-pdf").getAttribute("href"));
+  });
+}
 
 /* ---------- wiring ---------- */
 setupDropZones();

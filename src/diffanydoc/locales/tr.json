@@ -8,6 +8,7 @@
   "action.newTab": "Yeni sekmede karşılaştırma aç",
   "action.reload": "Dosyaları yenile",
   "action.report": "HTML rapor",
+  "action.reportPdf": "PDF raporu",
   "annotate.clear": "İşaretleri temizle",
   "annotate.cleared": "Elle eklenen işaretler temizlendi.",
   "annotate.defaultNote": "İşaretlenen fark",

@@ -21,6 +21,7 @@ from .core.diff import DiffOptions, compare, supported_formats
 from .core.ocr import OcrError
 from .core.report.html import render_html, write_html_report
 from .core.report.json import result_to_dict
+from .core.report.pdf import render_pdf, write_pdf_report
 from .i18n import available_languages, resolve_language, t
 
 
@@ -44,7 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     diff.add_argument("-o", "--output", type=Path, help="write the report to this file")
     diff.add_argument(
         "--format",
-        choices=("html", "json", "text"),
+        choices=("html", "json", "text", "pdf"),
         help="output format (default: from the -o suffix, otherwise text)",
     )
     diff.add_argument(
@@ -179,6 +180,12 @@ def _diff(args: argparse.Namespace, language: str) -> int:
             print(t("cli.report", language, path=args.output), file=sys.stderr)
         else:
             _emit(render_html(result, language=language), None, language)
+    elif fmt == "pdf":
+        if args.output:
+            write_pdf_report(result, args.output, language=language)
+            print(t("cli.report", language, path=args.output), file=sys.stderr)
+        else:
+            sys.stdout.buffer.write(render_pdf(result, language=language))
     else:
         _emit(_render_text(result, language), args.output, language)
 
@@ -195,6 +202,8 @@ def _infer_format(output: Path | None) -> str:
         return "html"
     if suffix == ".json":
         return "json"
+    if suffix == ".pdf":
+        return "pdf"
     return "html"
 
 

@@ -8,6 +8,7 @@
   "action.newTab": "Open new comparison tab",
   "action.reload": "Reload files",
   "action.report": "HTML report",
+  "action.reportPdf": "PDF report",
   "annotate.clear": "Clear manual marks",
   "annotate.cleared": "Manual marks cleared.",
   "annotate.defaultNote": "Marked difference",

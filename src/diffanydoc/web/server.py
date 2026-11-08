@@ -24,6 +24,7 @@ from ..core.ocr import OcrError, available as ocr_available, installed_languages
 from ..core.render import is_renderable_path, render_page_png
 from ..core.report.html import render_html
 from ..core.report.json import result_to_dict
+from ..core.report.pdf import render_pdf
 from ..core.visual import render_xray_page_png
 from ..i18n import available_languages, resolve_language, strings
 from ..system import accent_color
@@ -289,6 +290,21 @@ def create_app() -> FastAPI:
     @app.get("/api/compare/{comparison_id}/report", response_class=HTMLResponse)
     def get_report(comparison_id: str, lang: str | None = None) -> HTMLResponse:
         return HTMLResponse(render_html(_get(comparison_id).result, language=lang))
+
+    @app.get("/api/compare/{comparison_id}/report.pdf")
+    def get_pdf_report(
+        comparison_id: str,
+        lang: str | None = None,
+        diff_only: bool = False,
+    ) -> Response:
+        comparison = _get(comparison_id)
+        pdf_bytes = render_pdf(comparison.result, language=lang, diff_only=diff_only)
+        filename = f"diffanydoc-report-{comparison_id[:8]}.pdf"
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'inline; filename="{filename}"'},
+        )
 
     @app.get("/api/compare/{comparison_id}/export/{side}")
     def export_merged(comparison_id: str, side: str) -> Response:
