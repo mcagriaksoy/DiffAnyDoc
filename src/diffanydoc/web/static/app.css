@@ -1639,3 +1639,66 @@ kbd {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* ---------- Overview Diff Minimap (TASK-14) ---------- */
+.diff-minimap {
+  position: fixed;
+  right: 0;
+  top: 48px;
+  bottom: 0;
+  width: 14px;
+  background: color-mix(in srgb, var(--view-bg-color) 82%, transparent);
+  border-left: 1px solid var(--border-color);
+  z-index: 30;
+  cursor: pointer;
+  user-select: none;
+  backdrop-filter: blur(4px);
+  transition: width 0.15s ease, background 0.15s ease;
+}
+
+.diff-minimap:hover {
+  width: 18px;
+  background: color-mix(in srgb, var(--view-bg-color) 92%, transparent);
+}
+
+.minimap-track {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.minimap-mark {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  height: 3px;
+  min-height: 2px;
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+.minimap-mark.add {
+  background: var(--diff-ins-strong);
+}
+
+.minimap-mark.del {
+  background: var(--diff-del-strong);
+}
+
+.minimap-mark.mod {
+  background: var(--warning-color);
+}
+
+.minimap-viewport {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 40px;
+  background: color-mix(in srgb, var(--accent-color) 22%, transparent);
+  border: 1px solid var(--accent-color);
+  border-radius: 2px;
+  pointer-events: none;
+  box-shadow: 0 0 4px color-mix(in srgb, var(--accent-color) 30%, transparent);
+  transition: height 0.05s ease;
+}

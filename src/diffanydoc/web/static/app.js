@@ -1873,6 +1873,7 @@ function collectChanges() {
   }
   state.changeIndex = -1;
   updateChangeNav();
+  renderMinimap();
 }
 
 function updateChangeNav() {
@@ -1919,6 +1920,114 @@ function gotoChange(delta) {
   if (index < 0) index = state.changes.length - 1;
   if (index >= state.changes.length) index = 0;
   setCurrentChange(index);
+}
+
+/* ---------- diff overview minimap (TASK-14) ---------- */
+function renderMinimap() {
+  const minimap = $("#diff-minimap");
+  const track = $("#minimap-track");
+  if (!minimap || !track) return;
+
+  if ($("#result-view").hidden || !state.comparison || !state.changes.length) {
+    minimap.hidden = true;
+    return;
+  }
+
+  minimap.hidden = false;
+  const viewport = $("#minimap-viewport");
+  track.replaceChildren(viewport);
+
+  const docHeight = Math.max(
+    document.documentElement.scrollHeight,
+    document.body.scrollHeight,
+    window.innerHeight
+  );
+  const trackHeight = track.clientHeight || (window.innerHeight - 48);
+
+  const fragment = document.createDocumentFragment();
+  for (const node of state.changes) {
+    const rect = node.getBoundingClientRect();
+    const elemTop = rect.top + window.scrollY;
+    const ratio = Math.min(Math.max(elemTop / docHeight, 0), 1);
+    const topPx = Math.round(ratio * trackHeight);
+
+    let kind = "mod";
+    if (node.classList.contains("add")) kind = "add";
+    else if (node.classList.contains("del")) kind = "del";
+    else if (node.classList.contains("mod")) kind = "mod";
+
+    const mark = el("div", {
+      class: `minimap-mark ${kind}`,
+      style: `top: ${topPx}px`,
+    });
+    fragment.appendChild(mark);
+  }
+  track.appendChild(fragment);
+  updateMinimapViewport();
+}
+
+function updateMinimapViewport() {
+  const minimap = $("#diff-minimap");
+  const track = $("#minimap-track");
+  const viewport = $("#minimap-viewport");
+  if (!minimap || minimap.hidden || !track || !viewport) return;
+
+  const docHeight = Math.max(
+    document.documentElement.scrollHeight,
+    document.body.scrollHeight,
+    window.innerHeight
+  );
+  const trackHeight = track.clientHeight || (window.innerHeight - 48);
+  const scrollY = window.scrollY;
+  const viewHeight = window.innerHeight;
+
+  const topRatio = Math.min(Math.max(scrollY / docHeight, 0), 1);
+  const heightRatio = Math.min(Math.max(viewHeight / docHeight, 0.04), 1);
+
+  viewport.style.top = `${Math.round(topRatio * trackHeight)}px`;
+  viewport.style.height = `${Math.round(heightRatio * trackHeight)}px`;
+}
+
+function setupMinimap() {
+  const minimap = $("#diff-minimap");
+  const track = $("#minimap-track");
+  if (!minimap || !track) return;
+
+  let isDragging = false;
+
+  function scrollToMinimapPos(clientY) {
+    const rect = track.getBoundingClientRect();
+    const offsetY = clientY - rect.top;
+    const ratio = Math.min(Math.max(offsetY / rect.height, 0), 1);
+    const docHeight = Math.max(
+      document.documentElement.scrollHeight,
+      document.body.scrollHeight,
+      window.innerHeight
+    );
+    window.scrollTo({
+      top: ratio * docHeight - window.innerHeight / 2,
+      behavior: isDragging ? "auto" : "smooth",
+    });
+  }
+
+  minimap.addEventListener("mousedown", (e) => {
+    isDragging = true;
+    scrollToMinimapPos(e.clientY);
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!isDragging) return;
+    scrollToMinimapPos(e.clientY);
+  });
+
+  window.addEventListener("mouseup", () => {
+    isDragging = false;
+  });
+
+  window.addEventListener("scroll", updateMinimapViewport, { passive: true });
+  window.addEventListener("resize", () => {
+    if (!minimap.hidden) renderMinimap();
+  });
 }
 
 /* ---------- view switches ---------- */
@@ -2218,6 +2327,7 @@ function showUploadView() {
   if ($("#annotate-clear")) $("#annotate-clear").hidden = true;
   if ($("#change-nav")) $("#change-nav").hidden = true;
   if ($("#top-diff-nav")) $("#top-diff-nav").hidden = true;
+  if ($("#diff-minimap")) $("#diff-minimap").hidden = true;
   $("#stats").replaceChildren();
   state.visual = null;
   state.ocr = null;
@@ -2318,6 +2428,7 @@ $("#export").addEventListener("click", (event) => {
 
 /* ---------- wiring ---------- */
 setupDropZones();
+setupMinimap();
 setupMenus();
 async function toggleIntegration() {
   closeMenus();

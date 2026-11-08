@@ -29,6 +29,12 @@
 | **TASK-11** | High | Desktop / UX | Linux Desktop Drag-and-Drop (WebKit2GTK URI / File Drop) Fix | `[x] DONE` |
 | **TASK-12** | High | Integration / OS | File Manager Context Menu Integration ("Compare with DiffAnyDoc") | `[x] DONE` |
 | **TASK-13** | High | Engine / UI | Pure-stdlib A4 Page Layout & Sheet View for Office/Text Documents | `[x] DONE` |
+| **TASK-14** | High | UI / UX | Vertical Diff Minimap & Overview Gutter Strip | `[x] DONE` |
+| **TASK-15** | High | UI / Feature | Synchronized In-Document Search (Ctrl+F) & Kind Filters | `[ ] OPEN` |
+| **TASK-16** | High | Report / Export | Official PDF & Printable Comparison Report Generator | `[ ] OPEN` |
+| **TASK-17** | Medium | Engine / Data | Numeric Tolerance Comparison for Tables and Spreadsheets | `[ ] OPEN` |
+| **TASK-18** | Medium | UI / Stats | Detailed Document Reading & Vocabulary Comparison Metrics | `[ ] OPEN` |
+| **TASK-19** | High | Core / Desktop | Folder & Directory Tree Comparison Mode | `[ ] OPEN` |
 
 ---
 
@@ -281,3 +287,104 @@
   - Paginate paragraphs, headings, and tables into standard A4 sheets (approx. 595 × 842 pt / 1123 × 794 px at 96 DPI).
   - Enable the **Pages** tab for office formats, rendering interactive A4 card views with highlighted inline word diffs, bounding boxes, and box color switching.
   - Comply 100% with commercial permissive licensing (no LibreOffice/Word runtime requirements).
+
+---
+
+### [TASK-14] Vertical Diff Minimap & Overview Gutter Strip
+- **Status**: `[x] DONE` - Added a sleek, vertical diff minimap gutter (`#diff-minimap`) on the right edge with color-coded difference tick marks (green/red/amber), active viewport position tracking, and smooth click/drag navigation across Text, Pages, and X-Ray views.
+- **Priority**: High
+- **Files**:
+  - `src/diffanydoc/web/static/index.html` (`#diff-minimap`)
+  - `src/diffanydoc/web/static/app.css` (`.diff-minimap`, `.minimap-mark`, `.minimap-viewport`)
+  - `src/diffanydoc/web/static/app.js` (`renderMinimap`, `updateMinimapViewport`, click/drag to scroll)
+  - `src/diffanydoc/locales/en.json`, `src/diffanydoc/locales/tr.json`
+- **Problem Statement**:
+  - In long multi-page or multi-thousand-line documents, users cannot see where differences are distributed without scrolling through the whole document.
+- **Requirements**:
+  - Display a sleek, narrow vertical overview strip on the right edge of the comparison view.
+  - Render color-coded marks for added (green), deleted (red), and modified (amber/blue) differences proportional to their vertical document positions.
+  - Show a semi-transparent viewport indicator reflecting the current scroll position and window height.
+  - Clicking or dragging on the minimap smoothly scrolls the view to that exact relative position.
+  - Adhere to GNOME Adwaita & Cinnamon desktop tokens (subtle borders, translucent background, no distracting shadows).
+
+---
+
+### [TASK-15] Synchronized In-Document Search (Ctrl+F) & Kind Filters
+- **Status**: `[ ] OPEN`
+- **Priority**: High
+- **Files**:
+  - `src/diffanydoc/web/static/index.html` (`#diff-search-bar`)
+  - `src/diffanydoc/web/static/app.css` (`.search-bar`, `.search-highlight`)
+  - `src/diffanydoc/web/static/app.js` (`setupSearch`, `highlightSearchMatches`, `<kbd>Ctrl+F</kbd>` listener)
+  - `src/diffanydoc/locales/en.json`, `src/diffanydoc/locales/tr.json`
+- **Problem Statement**:
+  - Users need to quickly find specific text or numbers (e.g. monetary amounts, contract clauses) across both documents simultaneously.
+- **Requirements**:
+  - Implement a synchronized in-document search bar toggled by <kbd>Ctrl</kbd>+<kbd>F</kbd> or <kbd>Cmd</kbd>+<kbd>F</kbd>.
+  - Match and highlight search terms in both left and right panes concurrently with match count (e.g., `3 / 18`).
+  - Next (<kbd>Enter</kbd> / down arrow) and Previous (<kbd>Shift+Enter</kbd> / up arrow) navigation.
+  - Add quick filter chips next to search: "All", "Added only", "Removed only", "Modified only".
+
+---
+
+### [TASK-16] Official PDF & Printable Comparison Report Generator
+- **Status**: `[ ] OPEN`
+- **Priority**: High
+- **Files**:
+  - `src/diffanydoc/core/report/pdf.py` (Pure-stdlib / Pillow + layout PDF report generator)
+  - `src/diffanydoc/web/server.py` (`/api/compare/{id}/report.pdf`)
+  - `src/diffanydoc/web/static/index.html` (Export menu options: HTML & PDF report)
+  - `src/diffanydoc/locales/en.json`, `src/diffanydoc/locales/tr.json`
+- **Problem Statement**:
+  - Legal, compliance, and enterprise users require an official, printable PDF diff report for documentation and signature packets.
+- **Requirements**:
+  - Generate a professional PDF diff report with a summary cover (document titles, timestamp, SHA-256 hashes, similarity %) followed by paginated diff tables and page diff visuals.
+  - Comply with permissive licensing (Pillow image-to-PDF / report generator, zero copyleft).
+
+---
+
+### [TASK-17] Numeric Tolerance Comparison for Tables and Spreadsheets
+- **Status**: `[ ] OPEN`
+- **Priority**: Medium
+- **Files**:
+  - `src/diffanydoc/core/diff/lines.py` (`cell_diff`, numeric tolerance check)
+  - `src/diffanydoc/core/diff/engine.py` (`DiffOptions.numeric_tolerance`)
+  - `src/diffanydoc/web/static/index.html` (Numeric tolerance setting in options)
+  - `src/diffanydoc/locales/en.json`, `src/diffanydoc/locales/tr.json`
+- **Problem Statement**:
+  - Spreadsheet comparisons flag insignificant floating-point or rounding differences (e.g., `100.00` vs `100.002`) as changes, cluttering diffs.
+- **Requirements**:
+  - Add optional numerical tolerance threshold (e.g. `±0.01`). When enabled, numeric cells differing by less than the tolerance are treated as equal.
+
+---
+
+### [TASK-18] Detailed Document Reading & Vocabulary Comparison Metrics
+- **Status**: `[ ] OPEN`
+- **Priority**: Medium
+- **Files**:
+  - `src/diffanydoc/core/model.py` (`Stats` expansion: word count, reading time, unique words)
+  - `src/diffanydoc/web/static/index.html` (`#stats-detail-dialog`)
+  - `src/diffanydoc/web/static/app.js` (`showStatsDetail`)
+  - `src/diffanydoc/locales/en.json`, `src/diffanydoc/locales/tr.json`
+- **Problem Statement**:
+  - Contract and technical reviewers need high-level comparative metrics: total word count difference, estimated reading time, and change density.
+- **Requirements**:
+  - Compute word count (Left vs Right), character count, and change density.
+  - Clicking on the stats pill opens a GNOME Adwaita detail dialog showing the full breakdown.
+
+---
+
+### [TASK-19] Folder & Directory Tree Comparison Mode
+- **Status**: `[ ] OPEN`
+- **Priority**: High
+- **Files**:
+  - `src/diffanydoc/core/folder.py` (Directory walker, fast SHA-256 hash comparison)
+  - `src/diffanydoc/web/server.py` (`/api/compare-directories`)
+  - `src/diffanydoc/web/static/index.html` (Folder compare mode view)
+  - `src/diffanydoc/web/static/app.js` (Folder tree rendering, click to compare file pair)
+- **Problem Statement**:
+  - Beyond Compare's killer feature is directory comparison. DiffAnyDoc currently only compares pairs of individual files.
+- **Requirements**:
+  - Allow choosing Folder A and Folder B.
+  - Compare directory trees recursively: identical files (0 ms fast check), modified files, and orphaned files (left-only / right-only).
+  - Double-clicking a modified file opens its file comparison directly in a new session tab.
