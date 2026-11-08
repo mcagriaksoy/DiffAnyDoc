@@ -421,9 +421,24 @@ function setupDialogs() {
   $("#updates-open").addEventListener("click", (event) =>
     openExternal(event, $("#updates-open").getAttribute("href"))
   );
+  if ($("#settings-menu-btn")) {
+    $("#settings-menu-btn").addEventListener("click", openSettings);
+  }
+  if ($("#settings-integrate-toggle")) {
+    $("#settings-integrate-toggle").addEventListener("click", toggleIntegration);
+  }
+  if ($("#settings-pending-clear")) {
+    $("#settings-pending-clear").addEventListener("click", clearPendingSelection);
+  }
   if ($("#integrate-menu")) {
     $("#integrate-menu").addEventListener("click", toggleIntegration);
   }
+}
+
+function openSettings() {
+  closeMenus();
+  loadIntegrationStatus();
+  if ($("#settings-dialog")) $("#settings-dialog").showModal();
 }
 
 /* ---------- system accent ---------- */
@@ -2894,11 +2909,47 @@ if ($("#export-pdf")) {
 setupDropZones();
 setupMinimap();
 setupMenus();
+function updateIntegrationUI(data) {
+  const pill = $("#settings-integrate-pill");
+  const toggleBtn = $("#settings-integrate-toggle");
+  const pendingRow = $("#settings-pending-row");
+  const pendingPath = $("#settings-pending-path");
+  const legacyBtn = $("#integrate-menu");
+
+  const installed = Boolean(data && data.installed);
+  if (pill) {
+    pill.dataset.installed = String(installed);
+    pill.className = `pref-status-pill ${installed ? "installed" : "not-installed"}`;
+    pill.textContent = i18n.t(installed ? "settings.integrate.statusInstalled" : "settings.integrate.statusNotInstalled");
+  }
+  if (toggleBtn) {
+    toggleBtn.dataset.installed = String(installed);
+    toggleBtn.className = installed ? "flat" : "suggested";
+    toggleBtn.textContent = i18n.t(installed ? "menu.integrateRemove" : "menu.integrate");
+  }
+  if (pendingRow && pendingPath) {
+    if (data && data.pending_name) {
+      pendingRow.hidden = false;
+      pendingPath.textContent = data.pending_name;
+    } else {
+      pendingRow.hidden = true;
+      pendingPath.textContent = i18n.t("settings.integrate.noPending");
+    }
+  }
+  if (legacyBtn) {
+    legacyBtn.dataset.installed = String(installed);
+    legacyBtn.textContent = i18n.t(installed ? "menu.integrateRemove" : "menu.integrate");
+  }
+}
+
 async function toggleIntegration() {
-  closeMenus();
-  const btn = $("#integrate-menu");
-  if (!btn) return;
-  const isInstalled = btn.dataset.installed === "true";
+  const pill = $("#settings-integrate-pill");
+  const legacyBtn = $("#integrate-menu");
+  const isInstalled = pill
+    ? pill.dataset.installed === "true"
+    : legacyBtn
+      ? legacyBtn.dataset.installed === "true"
+      : false;
   const action = isInstalled ? "uninstall" : "install";
 
   try {
@@ -2915,10 +2966,32 @@ async function toggleIntegration() {
     }
 
     if (result && result.success) {
-      updateIntegrationState(result.installed);
+      updateIntegrationUI(result);
       showToast(i18n.t(result.installed ? "integrate.installed" : "integrate.removed"));
     } else {
-      showToast(result.error || i18n.t("error.generic"), true);
+      showToast((result && result.error) || i18n.t("error.generic"), true);
+    }
+  } catch (err) {
+    showToast(err.message || i18n.t("error.generic"), true);
+  }
+}
+
+async function clearPendingSelection() {
+  try {
+    let result;
+    if (desktop.available && window.pywebview && window.pywebview.api && window.pywebview.api.integrate) {
+      result = await window.pywebview.api.integrate("clear_pending", i18n.lang);
+    } else {
+      const response = await fetch("/api/integrate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clear_pending", language: i18n.lang }),
+      });
+      result = await response.json();
+    }
+    if (result && result.success) {
+      updateIntegrationUI(result);
+      showToast(i18n.t("settings.integrate.clearPending"));
     }
   } catch (err) {
     showToast(err.message || i18n.t("error.generic"), true);
@@ -2926,28 +2999,79 @@ async function toggleIntegration() {
 }
 
 function updateIntegrationState(installed) {
-  const btn = $("#integrate-menu");
-  if (!btn) return;
-  btn.dataset.installed = String(Boolean(installed));
-  btn.textContent = i18n.t(installed ? "menu.integrateRemove" : "menu.integrate");
+  updateIntegrationUI({ installed });
 }
 
 async function loadIntegrationStatus() {
-  const btn = $("#integrate-menu");
-  if (!btn) return;
   try {
-    const response = await fetch("/api/integrate/status");
-    if (!response.ok) return;
-    const data = await response.json();
-    if (!data.supported) {
-      btn.hidden = true;
-      return;
+    let data;
+    if (desktop.available && window.pywebview && window.pywebview.api && window.pywebview.api.get_integrate_status) {
+      data = await window.pywebview.api.get_integrate_status();
+    } else {
+      const response = await fetch("/api/integrate/status");
+      if (!response.ok) return;
+      data = await response.json();
     }
-    updateIntegrationState(data.installed);
+    updateIntegrationUI(data);
   } catch (_) {}
 }
 
+function loadStoredPreferences() {
+  const prefSpace = localStorage.getItem("diffanydoc.pref.space");
+  const prefCase = localStorage.getItem("diffanydoc.pref.case");
+  const prefFormat = localStorage.getItem("diffanydoc.pref.format");
+
+  if (prefSpace !== null) {
+    const val = prefSpace === "true";
+    if ($("#opt-space")) $("#opt-space").checked = val;
+    if ($("#settings-default-space")) $("#settings-default-space").checked = val;
+  }
+  if (prefCase !== null) {
+    const val = prefCase === "true";
+    if ($("#opt-case")) $("#opt-case").checked = val;
+    if ($("#settings-default-case")) $("#settings-default-case").checked = val;
+  }
+  if (prefFormat !== null) {
+    const val = prefFormat === "true";
+    if ($("#opt-format")) $("#opt-format").checked = val;
+    if ($("#settings-default-format")) $("#settings-default-format").checked = val;
+  }
+}
+
+function setupPreferences() {
+  loadStoredPreferences();
+
+  const bindPref = (settingId, optId, key) => {
+    const settingEl = $(`#${settingId}`);
+    const optEl = $(`#${optId}`);
+    if (settingEl) {
+      settingEl.addEventListener("change", (e) => {
+        const val = e.target.checked;
+        localStorage.setItem(key, String(val));
+        if (optEl) optEl.checked = val;
+      });
+    }
+  };
+
+  bindPref("settings-default-space", "opt-space", "diffanydoc.pref.space");
+  bindPref("settings-default-case", "opt-case", "diffanydoc.pref.case");
+  bindPref("settings-default-format", "opt-format", "diffanydoc.pref.format");
+}
+
+function setupAdvancedExpander() {
+  const btn = $("#advanced-toggle-btn");
+  const panel = $("#advanced-panel");
+  if (!btn || !panel) return;
+  btn.addEventListener("click", () => {
+    const isExpanded = btn.getAttribute("aria-expanded") === "true";
+    btn.setAttribute("aria-expanded", String(!isExpanded));
+    panel.hidden = isExpanded;
+  });
+}
+
 setupDialogs();
+setupAdvancedExpander();
+setupPreferences();
 loadTheme();
 $("#compare").addEventListener("click", runComparison);
 $("#restart").addEventListener("click", reset);
@@ -3051,6 +3175,12 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "F1") {
     event.preventDefault();
     openHelp();
+    return;
+  }
+
+  if ((event.ctrlKey || event.metaKey) && event.key === ",") {
+    event.preventDefault();
+    openSettings();
     return;
   }
 

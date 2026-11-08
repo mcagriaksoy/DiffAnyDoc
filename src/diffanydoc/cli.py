@@ -127,6 +127,11 @@ def build_parser() -> argparse.ArgumentParser:
         "integrate", help="install or remove file-manager context menu entries"
     )
     integrate.add_argument("action", choices=("install", "uninstall"))
+
+    ctx = subparsers.add_parser(
+        "context-action", help="handle single-entry file-manager context menu action"
+    )
+    ctx.add_argument("files", nargs="*", type=Path, help="file(s) selected from context menu")
     return parser
 
 
@@ -150,6 +155,8 @@ def main(argv: list[str] | None = None) -> int:
             return _select(args, language)
         if args.command == "integrate":
             return _integrate(args, language)
+        if args.command == "context-action":
+            return _context_action(args, language)
     except (AdapterError, FileNotFoundError, OcrError) as exc:
         print(t("cli.error", language, message=exc), file=sys.stderr)
         return 2
@@ -406,6 +413,61 @@ def _select(args: argparse.Namespace, language: str) -> int:
         return 2
     _export_language(language)
     return run_desktop([path], slots=[args.slot], language=language)
+
+
+def _context_action(args: argparse.Namespace, language: str) -> int:
+    """Smart single-line context menu action.
+
+    - If 2+ files are provided: immediately launch comparison.
+    - If 1 file is provided:
+        - If a different file was previously selected as the left file: launch comparison and reset.
+        - Otherwise: store this file as the pending left file, notify the user, and update menu label.
+    """
+    from . import integrate
+
+    raw_files = [Path(p).expanduser().resolve() for p in args.files]
+    files = [p for p in raw_files if p.exists()]
+    if not files:
+        return 0
+
+    if len(files) >= 2:
+        integrate.clear_pending_selection(language)
+        return _launch_comparison(files[0], files[1], language)
+
+    current = files[0]
+    pending = integrate.get_pending_selection()
+
+    if pending and pending.exists() and pending != current:
+        integrate.clear_pending_selection(language)
+        return _launch_comparison(pending, current, language)
+
+    integrate.set_pending_selection(current, language)
+    from .session import send_selection
+
+    send_selection("left", current)
+    integrate.notify_selection(current, language)
+    return 0
+
+
+def _launch_comparison(left: Path, right: Path, language: str) -> int:
+    """Send both files to running window or open a new desktop window."""
+    from .session import send_selection
+
+    if send_selection("left", left) and send_selection("right", right):
+        return 0
+
+    try:
+        from .desktop import run_desktop
+    except ImportError as exc:
+        print(
+            "the desktop shell needs extra dependencies:\n"
+            "  pip install 'diffanydoc[desktop]'",
+            file=sys.stderr,
+        )
+        print(f"({exc})", file=sys.stderr)
+        return 2
+    _export_language(language)
+    return run_desktop([left, right], language=language)
 
 
 def _integrate(args: argparse.Namespace, language: str) -> int:

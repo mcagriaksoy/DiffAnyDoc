@@ -195,29 +195,45 @@ class DesktopApi:
         return webbrowser.open(url)
 
     def integrate(self, action: str = "install", language: str = "en") -> dict[str, Any]:
-        """Install or remove file-manager context menu entries from within the app."""
+        """Install, remove, or clear file-manager context menu entries from within the app."""
         from .. import integrate
 
         try:
-            items = (
-                integrate.install(language)
-                if action == "install"
-                else integrate.uninstall(language)
-            )
+            if action == "install":
+                items = integrate.install(language)
+            elif action == "clear_pending":
+                integrate.clear_pending_selection(language)
+                items = []
+            else:
+                items = integrate.uninstall(language)
+            pending = integrate.get_pending_selection()
             return {
                 "success": True,
                 "action": action,
                 "installed": integrate.is_installed(),
                 "items": items,
+                "pending": str(pending) if pending else None,
+                "pending_name": pending.name if pending else None,
             }
         except Exception as exc:
-            return {"success": False, "error": str(exc)}
+            return {"success": False, "error": str(exc), "installed": integrate.is_installed()}
 
     def is_integrated(self) -> bool:
         """Return whether context menu entries currently exist."""
         from .. import integrate
 
         return integrate.is_installed()
+
+    def get_integrate_status(self) -> dict[str, Any]:
+        """Return integration and pending selection status."""
+        from .. import integrate
+
+        pending = integrate.get_pending_selection()
+        return {
+            "installed": integrate.is_installed(),
+            "pending": str(pending) if pending else None,
+            "pending_name": pending.name if pending else None,
+        }
 
     def resolve_dropped_uris(self, raw: str) -> list[str]:
         """Resolve a ``text/uri-list`` or newline-separated path list dropped onto the window."""

@@ -18,6 +18,7 @@ COMMANDS = {
     "desktop",
     "select",
     "integrate",
+    "context-action",
     "check-update",
 }
 

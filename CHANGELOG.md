@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Preferences & Settings Window (`Ctrl+,`)**: Added a dedicated GNOME libadwaita Preferences modal dialog (`#settings-dialog`) accessible from the main menu and via `Ctrl+,`. Groups system integrations and default comparison preferences into clean Adwaita action rows.
+- **Smart Single-Line Context Menu Integration**: Replaced multi-item file manager entries with a single dynamic action across Nemo, Nautilus, Dolphin, and Windows Explorer. Right-clicking a file shows "Select as left file to compare"; once selected, subsequent right-clicks dynamically display "Compare to '<filename>'", instantly comparing both files upon click.
+- **Collapsible Advanced Comparison Options**: Cleaned up the upload view by moving options (ignore whitespace, ignore case, compare formatting, numeric tolerance) into an elegant Adwaita disclosure pill ("Advanced comparison options"), keeping the default screen minimal and focused.
+
 ## [0.3.0] - 2026-11-08
 
 ### Added

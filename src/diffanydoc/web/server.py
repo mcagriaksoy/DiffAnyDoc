@@ -96,9 +96,12 @@ def create_app() -> FastAPI:
     def integrate_status() -> dict[str, Any]:
         from .. import integrate
 
+        pending = integrate.get_pending_selection()
         return {
             "supported": sys.platform in ("win32", "linux") or sys.platform.startswith("linux"),
             "installed": integrate.is_installed(),
+            "pending": str(pending) if pending else None,
+            "pending_name": pending.name if pending else None,
         }
 
     @app.post("/api/integrate")
@@ -108,19 +111,24 @@ def create_app() -> FastAPI:
         action = str(body.get("action", "install"))
         language = str(body.get("language", "en"))
         try:
-            items = (
-                integrate.install(language)
-                if action == "install"
-                else integrate.uninstall(language)
-            )
+            if action == "install":
+                items = integrate.install(language)
+            elif action == "clear_pending":
+                integrate.clear_pending_selection(language)
+                items = []
+            else:
+                items = integrate.uninstall(language)
+            pending = integrate.get_pending_selection()
             return {
                 "success": True,
                 "action": action,
                 "installed": integrate.is_installed(),
                 "items": items,
+                "pending": str(pending) if pending else None,
+                "pending_name": pending.name if pending else None,
             }
         except Exception as exc:
-            return {"success": False, "error": str(exc)}
+            return {"success": False, "error": str(exc), "installed": integrate.is_installed()}
 
     @app.post("/api/checksum")
     async def checksum_paths(body: dict[str, Any]) -> JSONResponse:

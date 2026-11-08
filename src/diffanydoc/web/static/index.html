@@ -127,7 +127,7 @@
         <div class="menu-sep" id="more-sep" data-result-only hidden></div>
         <button class="menu-item" id="help" type="button" data-i18n="menu.help">Help</button>
         <button class="menu-item" id="about" type="button" data-i18n="menu.about">About DiffAnyDoc</button>
-        <button class="menu-item" id="integrate-menu" type="button" data-i18n="menu.integrate">Install file manager integration</button>
+        <button class="menu-item" id="settings-menu-btn" type="button" data-i18n="menu.settings">Settings</button>
         <button class="menu-item" id="license" type="button" data-i18n="menu.license">License Agreement</button>
         <button class="menu-item" id="updates" type="button" data-i18n="menu.updates">Check for Updates</button>
         <div class="menu-sep"></div>
@@ -176,14 +176,22 @@
       </label>
     </div>
 
-    <div class="options">
-      <label class="check"><input type="checkbox" id="opt-case"> <span data-i18n="opt.ignoreCase">Ignore letter case</span></label>
-      <label class="check"><input type="checkbox" id="opt-space" checked> <span data-i18n="opt.ignoreWhitespace">Ignore extra whitespace</span></label>
-      <label class="check"><input type="checkbox" id="opt-format"> <span data-i18n="opt.formatDiff">Compare formatting (font, size, bold/italic)</span></label>
-      <label class="check" data-i18n-title="opt.toleranceTitle">
-        <span data-i18n="opt.tolerance">Numeric tolerance</span>
-        <input type="number" id="opt-tolerance" step="any" min="0" placeholder="0.01" data-i18n-placeholder="opt.tolerancePlaceholder" style="width: 72px; margin-left: 6px; padding: 2px 6px; font-size: 12px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--view-bg-color); color: var(--text-color);">
-      </label>
+    <div class="advanced-expander" id="advanced-expander">
+      <button class="flat advanced-toggle-btn" id="advanced-toggle-btn" type="button" aria-expanded="false" aria-controls="advanced-panel">
+        <svg class="expander-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span data-i18n="opt.advanced">Advanced comparison options</span>
+      </button>
+      <div class="advanced-panel" id="advanced-panel" hidden>
+        <div class="options">
+          <label class="check"><input type="checkbox" id="opt-case"> <span data-i18n="opt.ignoreCase">Ignore letter case</span></label>
+          <label class="check"><input type="checkbox" id="opt-space" checked> <span data-i18n="opt.ignoreWhitespace">Ignore extra whitespace</span></label>
+          <label class="check"><input type="checkbox" id="opt-format"> <span data-i18n="opt.formatDiff">Compare formatting (font, size, bold/italic)</span></label>
+          <label class="check" data-i18n-title="opt.toleranceTitle">
+            <span data-i18n="opt.tolerance">Numeric tolerance</span>
+            <input type="number" id="opt-tolerance" step="any" min="0" placeholder="0.01" data-i18n-placeholder="opt.tolerancePlaceholder" class="tolerance-input">
+          </label>
+        </div>
+      </div>
     </div>
 
     <div class="actions">
@@ -482,6 +490,90 @@
   <div class="dialog-actions">
     <a class="flat" id="updates-open" target="_blank" rel="noopener" data-i18n="updates.open" hidden>Open the download page</a>
     <button class="flat" id="updates-check" type="button" data-i18n="updates.check">Check now</button>
+    <button class="suggested" type="button" data-close data-i18n="action.close">Close</button>
+  </div>
+</dialog>
+
+<dialog id="settings-dialog" class="dialog dialog-wide" aria-labelledby="settings-title">
+  <div class="dialog-head">
+    <div>
+      <h2 class="dialog-title" id="settings-title" data-i18n="settings.title">Settings</h2>
+      <p class="dialog-meta" data-i18n="settings.meta">Preferences and system integration</p>
+    </div>
+  </div>
+  <div class="dialog-body">
+    <!-- File Manager Integration Group -->
+    <div class="pref-group">
+      <h3 class="pref-group-title" data-i18n="settings.integrate.title">File Manager Integration</h3>
+      <p class="pref-group-desc" data-i18n="settings.integrate.desc">Adds a single context menu entry to your file manager. Select a file as the left side, then right-click another file to compare them.</p>
+      
+      <div class="pref-card">
+        <div class="pref-row">
+          <div class="pref-row-info">
+            <span class="pref-row-title" data-i18n="settings.integrate.statusLabel">Integration status</span>
+            <span class="pref-row-subtitle">
+              <span class="pref-status-pill not-installed" id="settings-integrate-pill" data-i18n="settings.integrate.statusNotInstalled">Not installed</span>
+            </span>
+          </div>
+          <div class="pref-row-actions">
+            <button class="suggested" id="settings-integrate-toggle" type="button" data-i18n="menu.integrate">Install file manager integration</button>
+          </div>
+        </div>
+
+        <div class="pref-row" id="settings-pending-row" hidden>
+          <div class="pref-row-info">
+            <span class="pref-row-title" data-i18n="settings.integrate.pendingLabel">Selected left file</span>
+            <span class="pref-row-subtitle mono" id="settings-pending-path">None</span>
+          </div>
+          <div class="pref-row-actions">
+            <button class="flat" id="settings-pending-clear" type="button" data-i18n="settings.integrate.clearPending">Clear selection</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Comparison Defaults Group -->
+    <div class="pref-group">
+      <h3 class="pref-group-title" data-i18n="settings.defaults.title">Comparison Defaults</h3>
+      <p class="pref-group-desc" data-i18n="settings.defaults.desc">Default options applied to new comparisons.</p>
+      
+      <div class="pref-card">
+        <div class="pref-row">
+          <div class="pref-row-info">
+            <span class="pref-row-title" data-i18n="opt.ignoreWhitespace">Ignore extra whitespace</span>
+            <span class="pref-row-subtitle" data-i18n="settings.defaults.spaceDesc">Collapse multiple spaces and ignore indentation differences</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="settings-default-space" checked>
+            <span data-i18n="opt.ignoreWhitespace">Ignore extra whitespace</span>
+          </label>
+        </div>
+
+        <div class="pref-row">
+          <div class="pref-row-info">
+            <span class="pref-row-title" data-i18n="opt.ignoreCase">Ignore letter case</span>
+            <span class="pref-row-subtitle" data-i18n="settings.defaults.caseDesc">Treat uppercase and lowercase characters as equal</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="settings-default-case">
+            <span data-i18n="opt.ignoreCase">Ignore letter case</span>
+          </label>
+        </div>
+
+        <div class="pref-row">
+          <div class="pref-row-info">
+            <span class="pref-row-title" data-i18n="opt.formatDiff">Compare formatting</span>
+            <span class="pref-row-subtitle" data-i18n="settings.defaults.formatDesc">Highlight differences in font size, boldness, and italics</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="settings-default-format">
+            <span data-i18n="opt.formatDiff">Compare formatting</span>
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="dialog-actions">
     <button class="suggested" type="button" data-close data-i18n="action.close">Close</button>
   </div>
 </dialog>

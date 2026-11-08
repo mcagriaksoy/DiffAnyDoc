@@ -35,6 +35,7 @@
 | **TASK-17** | Medium | Engine / Data | Numeric Tolerance Comparison for Tables and Spreadsheets | `[x] DONE` |
 | **TASK-18** | Medium | UI / Stats | Detailed Document Reading & Vocabulary Comparison Metrics | `[x] DONE` |
 | **TASK-19** | High | Core / Desktop | Folder & Directory Tree Comparison Mode | `[x] DONE` |
+| **TASK-20** | High | UX / Desktop | Settings Dialog, Collapsible Upload Options & Single-Line Context Action | `[x] DONE` |
 
 ---
 
