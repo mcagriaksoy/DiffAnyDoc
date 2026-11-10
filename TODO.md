@@ -169,7 +169,7 @@
 ---
 
 ### [TASK-08] Automated Release Builds (Windows Exe, Installer, Linux, PyPI)
-- **Status**: `[x] DONE` - `tools/build.py` targets per OS: Windows portable zip + Inno Setup installer (`packaging/windows/installer.iss`), Linux tar.gz + AppImage; fails early if `ISCC`/`appimagetool` is missing. `packaging/diffanydoc.spec` is now tracked. `release.yml` adds sdist/wheel and PyPI trusted publishing. Not yet run end to end: first tag build is the real test; the `pypi` environment must be set up on GitHub/PyPI.
+- **Status**: `[x] DONE` - `tools/build.py` targets per OS: Windows standalone portable single-file executable (`DiffAnyDoc-portable.exe`) + portable zip + Inno Setup installer (`packaging/windows/installer.iss`), Linux tar.gz + AppImage; fails early if `ISCC`/`appimagetool` is missing. `packaging/diffanydoc.spec` configured with standalone onefile Windows portable target. `release.yml` adds sdist/wheel and PyPI trusted publishing.
 - **Priority**: High
 - **Files**:
   - `.github/workflows/release.yml`
@@ -183,13 +183,14 @@
     - Linux standalone executable, `.AppImage`, and `.tar.gz`.
     - PyPI package release workflow (`python -m build && twine upload`).
 - **Requirements**:
-  - In `tools/build.py`, support building both portable `.zip` and Inno Setup installer for Windows.
+  - In `tools/build.py`, support building standalone portable `.exe`, portable `.zip`, and Inno Setup installer for Windows.
   - In `.github/workflows/release.yml`, produce:
-    1. `DiffAnyDoc-<ver>-windows-x86_64-portable.zip`
-    2. `DiffAnyDoc-<ver>-windows-x86_64-installer.exe`
-    3. `DiffAnyDoc-<ver>-linux-x86_64.AppImage`
-    4. `DiffAnyDoc-<ver>-linux-x86_64.tar.gz`
-    5. Python source distribution `.tar.gz` and wheel `.whl`.
+    1. `DiffAnyDoc-<ver>-windows-x86_64-portable.exe`
+    2. `DiffAnyDoc-<ver>-windows-x86_64-portable.zip`
+    3. `DiffAnyDoc-<ver>-windows-x86_64-installer.exe`
+    4. `DiffAnyDoc-<ver>-linux-x86_64.AppImage`
+    5. `DiffAnyDoc-<ver>-linux-x86_64.tar.gz`
+    6. Python source distribution `.tar.gz` and wheel `.whl`.
 
 ---
 

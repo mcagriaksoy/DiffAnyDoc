@@ -70,6 +70,7 @@ def test_artifact_names_and_targets_per_platform() -> None:
         for kind in build.targets(plat)
     }
     assert names == {
+        "DiffAnyDoc-1.2.3-windows-x86_64-portable.exe",
         "DiffAnyDoc-1.2.3-windows-x86_64-portable.zip",
         "DiffAnyDoc-1.2.3-windows-x86_64-installer.exe",
         "DiffAnyDoc-1.2.3-linux-x86_64.AppImage",

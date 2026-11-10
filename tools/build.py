@@ -33,12 +33,13 @@ APP = DIST / "DiffAnyDoc"
 WINDOWS = sys.platform == "win32"
 STATIC = ROOT / "src" / "diffanydoc" / "web" / "static"
 SUFFIX = {
+    "portable": "-portable.exe",
     "zip": "-portable.zip",
     "installer": "-installer.exe",
     "tar": ".tar.gz",
     "appimage": ".AppImage",
 }
-TARGETS = {"windows": ("zip", "installer"), "linux": ("tar", "appimage")}
+TARGETS = {"windows": ("portable", "zip", "installer"), "linux": ("tar", "appimage")}
 # kind -> (program, install hint); only kinds that need an external tool.
 TOOLS = {
     "installer": ("ISCC", "install Inno Setup 6 (https://jrsoftware.org/isdl.php)"),
@@ -155,6 +156,14 @@ def smoke_test() -> None:
     print("smoke test passed")
 
 
+def portable_exe() -> Path:
+    target = artifact("portable")
+    source = DIST / ("DiffAnyDoc-portable.exe" if WINDOWS else "DiffAnyDoc-portable")
+    if source.exists() and source != target:
+        shutil.copy2(source, target)
+    return target
+
+
 def archive_zip() -> Path:
     target = artifact("zip")
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as bundle:
@@ -213,6 +222,7 @@ def appimage() -> Path:
 
 
 BUILDERS = {
+    "portable": portable_exe,
     "zip": archive_zip,
     "installer": installer,
     "tar": archive_tar,

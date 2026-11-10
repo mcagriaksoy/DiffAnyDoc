@@ -46,3 +46,18 @@ cli = EXE(
     name="diffanydoc-cli", console=True, **win_only,
 )
 COLLECT(gui, cli, analysis.binaries, analysis.datas, name="DiffAnyDoc")
+
+# Single-file standalone portable executable for 64-bit Windows
+if WIN:
+    portable = EXE(
+        pyz,
+        analysis.scripts,
+        analysis.binaries,
+        analysis.zipfiles,
+        analysis.datas,
+        [],
+        name="DiffAnyDoc-portable",
+        console=False,
+        upx=False,
+        **win_only,
+    )
