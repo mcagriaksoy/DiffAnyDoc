@@ -90,6 +90,28 @@ def render_sheet_page(path: str | Path, index: int, dpi: int = 96) -> Image.Imag
         px0 = bx0 * scale
         ptop = btop * scale
 
+        if block.kind == "image":
+            img_data = block.source_ref.get("data")
+            pic_w = max(1, round((bx1 - bx0) * scale))
+            pic_h = max(1, round((block.bbox[3] - btop) * scale))
+            pasted = False
+            if img_data:
+                try:
+                    import io
+                    with Image.open(io.BytesIO(img_data)) as pic:
+                        pic_rgb = pic.convert("RGB")
+                        if (pic_w, pic_h) != pic_rgb.size:
+                            pic_rgb = pic_rgb.resize((pic_w, pic_h), Image.Resampling.LANCZOS)
+                        image.paste(pic_rgb, (round(px0), round(ptop)))
+                        pasted = True
+                except Exception:
+                    pasted = False
+            if not pasted:
+                draw.rectangle([px0, ptop, px0 + pic_w, ptop + pic_h], outline="#d0d7de", fill="#f6f8fa")
+                name = block.source_ref.get("name") or "Image"
+                draw.text((px0 + 6 * scale, ptop + 6 * scale), f"[{name}]", fill="#57606a", font=body_font)
+            continue
+
         if block.kind == "table" and block.children:
             ty = ptop
             for row in block.children:
@@ -177,8 +199,12 @@ def render_page(path: str | Path, index: int, dpi: int = 96) -> Image.Image:
                 if n_frames > 1:
                     raw.seek(index)
                 dpi_info = raw.info.get("dpi")
-                src_dpi_x = float(dpi_info[0]) if dpi_info and dpi_info[0] > 0 else 96.0
-                src_dpi_y = float(dpi_info[1]) if dpi_info and dpi_info[1] > 0 else 96.0
+                if dpi_info and dpi_info[0] >= 140.0 and target.suffix.lower() in (".tif", ".tiff"):
+                    src_dpi_x = float(dpi_info[0])
+                    src_dpi_y = float(dpi_info[1]) if dpi_info[1] > 0 else src_dpi_x
+                else:
+                    src_dpi_x = 96.0
+                    src_dpi_y = 96.0
                 width_pt = raw.width * 72.0 / src_dpi_x
                 height_pt = raw.height * 72.0 / src_dpi_y
                 scale = max(dpi, 24) / 72.0

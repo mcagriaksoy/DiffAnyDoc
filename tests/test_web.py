@@ -189,6 +189,11 @@ def test_xray_page_endpoint_returns_composite_png(tmp_path: Path) -> None:
     assert xray.headers["content-type"] == "image/png"
     assert xray.content.startswith(b"\x89PNG")
 
+    # Second request must hit the cache
+    xray_cached = client.get(f"/api/compare/{comp['id']}/xray/0/0.png?dpi=96")
+    assert xray_cached.status_code == 200
+    assert xray_cached.content == xray.content
+
 
 def test_preload_endpoints_warm_cache_and_detect_identical_second_file(tmp_path: Path) -> None:
     first = tmp_path / "p1.txt"

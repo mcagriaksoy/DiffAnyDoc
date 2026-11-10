@@ -85,6 +85,35 @@ def test_change_rects_box_changed_words(tmp_path: Path) -> None:
     assert words[0]["row"] == 1
 
 
+def test_table_diff_rectangles_only_cover_changed_cells_not_whole_table(tmp_path: Path) -> None:
+    left_tsv = "Name\tTeam\tRole\nAdam\tBAL\tCatcher\nPaul\tAL\tCatcher\n"
+    right_tsv = "Name\tTeam\tRole\nAdam\tBAL\tCatcher\nPaul\tBAL\tCatcher\n"
+
+    p_left = tmp_path / "left.tsv"
+    p_right = tmp_path / "right.tsv"
+    p_left.write_text(left_tsv)
+    p_right.write_text(right_tsv)
+
+    result = compare(p_left, p_right, DiffOptions(fold_equal=False))
+    rects = change_rects(result)
+
+    # In row 2 ("Paul"), only the "Team" column changed from "AL" to "BAL".
+    left_words = [r for r in rects["left"]["0"] if r["level"] == "word"]
+    right_words = [r for r in rects["right"]["0"] if r["level"] == "word"]
+    assert len(left_words) == 1
+    assert left_words[0]["text"] == "AL"
+    assert len(right_words) == 1
+    assert right_words[0]["text"] == "BAL"
+
+    # Crucially, the height of the changed rectangle must be a single row (20 pt), NOT the whole table
+    row_height = left_words[0]["bottom"] - left_words[0]["top"]
+    assert abs(row_height - 20.0) < 1.0
+    # And width must be a single column (~162 pt), NOT the full table width (487 pt)
+    col_width = left_words[0]["x1"] - left_words[0]["x0"]
+    assert col_width < 250.0
+
+
+
 def _rows(n: int, changed: set[int]) -> list[Row]:
     return [Row(kind="replace" if i in changed else "equal") for i in range(n)]
 

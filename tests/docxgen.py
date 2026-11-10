@@ -31,6 +31,21 @@ def _page_break() -> str:
     return '<w:p><w:r><w:br w:type="page"/></w:r></w:p>'
 
 
+def _image_drawing(r_id: str, filename: str, cx: int = 1905000, cy: int = 1428750) -> str:
+    return (
+        '<w:p><w:r><w:drawing>'
+        '<wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">'
+        f'<wp:extent cx="{cx}" cy="{cy}"/>'
+        f'<wp:docPr id="1" name="{escape(filename)}"/>'
+        '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+        '<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+        '<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+        f'<pic:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="{escape(r_id)}"/></pic:blipFill>'
+        '</pic:pic></a:graphicData></a:graphic>'
+        '</wp:inline></w:drawing></w:r></w:p>'
+    )
+
+
 def _table(rows: list[list[str]], header: bool = True) -> str:
     out = ['<w:tbl><w:tblPr><w:tblStyle w:val="TableGrid"/></w:tblPr>']
     for index, row in enumerate(rows):
@@ -57,6 +72,8 @@ def _body(blocks: list[Block]) -> str:
             parts.append(_page_break())
         elif kind == "table":
             parts.append(_table(block[1]))  # type: ignore[arg-type]
+        elif kind == "image":
+            parts.append(_image_drawing(str(block[1]), str(block[2]), block[3] if len(block) > 3 else 1905000, block[4] if len(block) > 4 else 1428750))  # type: ignore[arg-type]
         else:  # pragma: no cover - test helper misuse
             raise ValueError(f"unknown block {kind!r}")
     return "".join(parts)
@@ -68,6 +85,7 @@ def write_docx(
     *,
     title: str | None = None,
     creator: str | None = None,
+    images: list[tuple[str, str, bytes]] | None = None,
 ) -> Path:
     document = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -95,6 +113,20 @@ def write_docx(
         package.writestr("[Content_Types].xml", content_types)
         package.writestr("_rels/.rels", relationships)
         package.writestr("word/document.xml", document)
+        if images:
+            rels_items = [
+                f'<Relationship Id="{escape(r_id)}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/{escape(name)}"/>'
+                for r_id, name, _ in images
+            ]
+            doc_rels = (
+                '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                + "".join(rels_items)
+                + "</Relationships>"
+            )
+            package.writestr("word/_rels/document.xml.rels", doc_rels)
+            for _, name, data in images:
+                package.writestr(f"word/media/{name}", data)
         if title or creator:
             core = (
                 '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'

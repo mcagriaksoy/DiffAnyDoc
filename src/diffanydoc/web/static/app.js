@@ -1369,6 +1369,8 @@ function renderResult() {
   const data = state.comparison;
   $("#upload-view").hidden = true;
   $("#result-view").hidden = false;
+  const stickyHeader = $(".result-sticky-header");
+  if (stickyHeader) stickyHeader.hidden = false;
   $("#view-tabs").hidden = false;
 
   for (const node of $$("[data-result-only]")) node.hidden = false;
@@ -1785,14 +1787,22 @@ function buildXrayCard(pair, pairIdx, visualPage) {
   canvas.append(
     pageImage(
       `/api/compare/${data.id}/xray/${pair.left}/${pair.right}.png`,
-      `${label} ${pageText}`
+      `${label} ${pageText}`,
+      pairIdx === 0
     )
   );
 
   // Also show OCR/text diff boxes and visual boxes so hovering shows the text
   const rectsL = (data.rects.left && data.rects.left[String(pair.left)]) || [];
   const rectsR = (data.rects.right && data.rects.right[String(pair.right)]) || [];
-  for (const rect of [...rectsL, ...rectsR]) {
+  const combinedRects = [...rectsL, ...rectsR];
+  const xrayRowsWithWords = new Set(
+    combinedRects.filter((r) => r.level === "word").map((r) => r.row)
+  );
+  const activeXrayRects = combinedRects.filter(
+    (r) => !(r.level === "line" && xrayRowsWithWords.has(r.row))
+  );
+  for (const rect of activeXrayRects) {
     addRect(
       canvas,
       [rect.x0, rect.top, rect.x1, rect.bottom],
@@ -1873,12 +1883,19 @@ function buildPageCard(side, index, visualPage, pairIdx = 0) {
   canvas.append(
     pageImage(
       `/api/compare/${data.id}/page/${side}/${index}.png`,
-      `${name} ${i18n.t("page.label", { n: index + 1 })}`
+      `${name} ${i18n.t("page.label", { n: index + 1 })}`,
+      pairIdx === 0
     )
   );
 
   const rects = (data.rects[side] && data.rects[side][String(index)]) || [];
-  for (const rect of rects) {
+  const rowsWithWords = new Set(
+    rects.filter((r) => r.level === "word").map((r) => r.row)
+  );
+  const activeRects = rects.filter(
+    (r) => !(r.level === "line" && rowsWithWords.has(r.row))
+  );
+  for (const rect of activeRects) {
     addRect(
       canvas,
       [rect.x0, rect.top, rect.x1, rect.bottom],
@@ -2077,6 +2094,10 @@ function updateChangeNav() {
     nav.hidden = count === 0;
     const cnt = $("#change-count");
     if (cnt) cnt.textContent = text;
+    const prev = $("#prev-change");
+    const next = $("#next-change");
+    if (prev) prev.disabled = count === 0;
+    if (next) next.disabled = count === 0;
   }
 
   const topNav = $("#top-diff-nav");
@@ -2427,6 +2448,8 @@ function setMode(mode) {
   $("#text-view").hidden = mode !== "text";
   $("#page-view").hidden = !isPageMode;
   if ($("#folder-view")) $("#folder-view").hidden = !isFolderMode;
+  const stickyHeader = $(".result-sticky-header");
+  if (stickyHeader) stickyHeader.hidden = isFolderMode;
   $("#only-diff-wrap").hidden = mode !== "text";
   $("#zoom-wrap").hidden = !isPageMode;
   $("#box-color-wrap").hidden = !isPageMode;
@@ -2647,11 +2670,11 @@ function pageDpi() {
   return Math.max(120, Math.min(300, Math.ceil(need / 30) * 30));
 }
 
-function pageImage(base, alt) {
+function pageImage(base, alt, eager = false) {
   const img = el("img", {
     "data-base": base,
     alt,
-    loading: "lazy",
+    loading: eager ? "eager" : "lazy",
   });
   img.addEventListener("load", () => {
     img.closest(".page-canvas")?.classList.remove("is-loading");
@@ -2684,7 +2707,9 @@ function resolveZoom() {
   const view = $("#page-view");
   if (!view.clientWidth) return state.zoomValue;
   const extent = pageExtent();
-  const cols = state.mode === "xray" ? 1 : 2;
+  // In xray mode, using cols = 1 with full window width stretches a single page across the whole wide screen.
+  // Instead, size it comfortably (matching side-by-side page size or max 1.05 actual scale).
+  const cols = 2;
   const style = getComputedStyle(view);
   const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
   const row = view.querySelector(".page-row");
@@ -2699,8 +2724,12 @@ function resolveZoom() {
     : 0;
   const avail = view.clientWidth - padding - cols * chrome - (cols - 1) * gap - 1;
   let zoom = avail / (cols * extent.width * PT_TO_PX);
+  if (state.mode === "xray" && state.zoom === "width") {
+    zoom = Math.min(zoom, 1.05);
+  }
   if (state.zoom === "page") {
-    const top = $(".topbar").offsetHeight + $(".result-head").offsetHeight;
+    const stickyHeader = $(".result-sticky-header");
+    const top = $(".topbar").offsetHeight + (stickyHeader ? stickyHeader.offsetHeight : ($(".result-head") ? $(".result-head").offsetHeight : 0));
     const label = 40;
     zoom = Math.min(
       zoom,

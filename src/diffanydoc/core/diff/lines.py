@@ -153,6 +153,24 @@ def document_lines(
                         label=block.label,
                     )
                 )
+            elif block.kind == "image":
+                name = block.source_ref.get("name") or block.style.get("name") or "image"
+                display_text = block.text or f"[Image: {name}]"
+                lines.append(
+                    Line(
+                        text=display_text,
+                        norm=normalize_line(
+                            display_text,
+                            case_sensitive=case_sensitive,
+                            collapse_whitespace=collapse_whitespace,
+                        ),
+                        page=page.index,
+                        number=len(lines) + 1,
+                        bbox=block.bbox,
+                        style=dict(block.style),
+                        label="Image",
+                    )
+                )
             elif block.kind == "table":
                 for row in block.children:
                     if row.kind != "table_row":
@@ -173,6 +191,7 @@ def document_lines(
                             bbox=row.bbox or block.bbox,
                             style={**row.style, "table": True},
                             cells=[cell.text for cell in row.children],
+                            spans=list(row.spans),
                         )
                     )
     return lines

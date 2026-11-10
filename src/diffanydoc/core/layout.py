@@ -291,6 +291,20 @@ def paginate_document(
             b_height = n_rows * 20.0 + 8.0
         elif block.cells is not None:
             b_height = 20.0
+        elif block.kind == "image":
+            w_pt = float(block.source_ref.get("width_pt") or block.style.get("width_pt") or 200.0)
+            h_pt = float(block.source_ref.get("height_pt") or block.style.get("height_pt") or 150.0)
+            avail_w = max(page_width - 2 * margin, 50.0)
+            avail_h = max(page_height - 2 * margin, 50.0)
+            if w_pt > avail_w:
+                ratio = avail_w / w_pt
+                w_pt = avail_w
+                h_pt = max(20.0, h_pt * ratio)
+            if h_pt > avail_h:
+                ratio = avail_h / h_pt
+                h_pt = avail_h
+                w_pt = max(20.0, w_pt * ratio)
+            b_height = h_pt
         else:
             n_lines = max(1, (len(block.text) + chars_per_line - 1) // chars_per_line)
             b_height = n_lines * line_h
@@ -309,12 +323,49 @@ def paginate_document(
             current_blocks = []
             y = margin
 
-        b_box: BBox = (
-            margin,
-            y,
-            min(margin + max(len(block.text) * avg_char_w, 20.0), page_width - margin),
-            y + b_height,
-        )
+        if block.kind == "table" and block.children:
+            table_w = page_width - 2 * margin
+            block.bbox = (margin, y, page_width - margin, y + b_height)
+            row_y = y
+            row_h = 20.0
+            for row in block.children:
+                cells = row.cells or [c.text for c in row.children] or [row.text]
+                cell_count = max(len(cells), 1)
+                cell_w = table_w / cell_count
+                row.bbox = (margin, row_y, page_width - margin, row_y + row_h)
+
+                row_text = row.text or " | ".join(cells)
+                row_spans: list[Span] = []
+                cur_cell_x = margin
+                char_offset = 0
+                for cell_str in cells:
+                    c_box: BBox = (cur_cell_x, row_y, cur_cell_x + cell_w, row_y + row_h)
+                    pos = row_text.find(cell_str, char_offset)
+                    if pos == -1:
+                        pos = char_offset
+                    start = pos
+                    end = pos + len(cell_str)
+                    char_offset = end
+                    row_spans.append(Span(start=start, end=end, page=current_page_idx, bbox=c_box))
+                    cur_cell_x += cell_w
+                row.spans = row_spans
+                row_y += row_h
+            current_blocks.append(block)
+            y += b_height + 8.0
+            continue
+
+        if block.kind == "image":
+            w_pt = float(block.source_ref.get("width_pt") or block.style.get("width_pt") or 200.0)
+            avail_w = max(page_width - 2 * margin, 50.0)
+            w_pt = min(w_pt, avail_w)
+            b_box: BBox = (margin, y, margin + w_pt, y + b_height)
+        else:
+            b_box: BBox = (
+                margin,
+                y,
+                min(margin + max(len(block.text) * avg_char_w, 20.0), page_width - margin),
+                y + b_height,
+            )
         block.bbox = b_box
 
         # Generate per-word spans so changed words can be boxed accurately

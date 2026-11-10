@@ -18,7 +18,7 @@ from typing import Any
 
 from .. import __version__
 from ..core.adapters import AdapterError, supported_extensions
-from ..core.diff import DiffOptions, compare, file_sha256, preload_document
+from ..core.diff import DiffOptions, change_rects, compare, file_sha256, preload_document
 from ..core.folder import compare_folders
 from ..core.model import DiffResult
 from ..core.ocr import OcrError, available as ocr_available, installed_languages
@@ -52,6 +52,8 @@ class Comparison:
 
 
 _COMPARISONS: "OrderedDict[str, Comparison]" = OrderedDict()
+_XRAY_CACHE: "OrderedDict[tuple[str, int, int, int], bytes]" = OrderedDict()
+_XRAY_CACHE_LIMIT = 64
 
 
 # --------------------------------------------------------------------------- #
@@ -390,14 +392,26 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=404, detail="both files must be renderable for X-Ray view"
             )
+        target_dpi = max(60, min(dpi, 300))
+        cache_key = (comparison_id, left_index, right_index, target_dpi)
+        if cache_key in _XRAY_CACHE:
+            _XRAY_CACHE.move_to_end(cache_key)
+            return Response(
+                content=_XRAY_CACHE[cache_key],
+                media_type="image/png",
+                headers={"Cache-Control": "private, max-age=3600"},
+            )
         try:
             data = render_xray_page_png(
                 comparison.left,
                 left_index,
                 comparison.right,
                 right_index,
-                dpi=max(60, min(dpi, 300)),
+                dpi=target_dpi,
             )
+            _XRAY_CACHE[cache_key] = data
+            if len(_XRAY_CACHE) > _XRAY_CACHE_LIMIT:
+                _XRAY_CACHE.popitem(last=False)
         except Exception as exc:  # pragma: no cover - renderer specific
             raise HTTPException(status_code=500, detail=f"xray render failed: {exc}") from exc
         return Response(
@@ -465,7 +479,7 @@ def _run_compare(
         "left": is_renderable_path(left_path) if left_path else True,
         "right": is_renderable_path(right_path) if right_path else True,
     }
-    payload["rects"] = _rects(result)
+    payload["rects"] = change_rects(result)
 
     comparison = Comparison(
         id=payload["id"] or uuid.uuid4().hex,

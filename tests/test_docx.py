@@ -281,4 +281,76 @@ def test_docx_a4_pagination_and_page_rendering(tmp_path: Path) -> None:
     assert png_bytes.startswith(b"\x89PNG")
 
 
+def test_docx_image_extraction_and_rendering(tmp_path: Path) -> None:
+    import io
+    from PIL import Image
+    from diffanydoc.core.render import render_page
+
+    img = Image.new("RGB", (60, 40), "#e02222")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    img_data = buf.getvalue()
+
+    doc_path = write_docx(
+        tmp_path / "with_image.docx",
+        [
+            ("p", "Firma Logosu"),
+            ("image", "rIdLogo", "company_logo.png", 1270000, 846666),
+            ("p", "Alt Metin"),
+        ],
+        images=[("rIdLogo", "company_logo.png", img_data)],
+    )
+
+    doc = load(doc_path)
+    assert doc.meta["images"] == 1
+    image_blocks = [b for b in doc.pages[0].blocks if b.kind == "image"]
+    assert len(image_blocks) == 1
+    assert image_blocks[0].source_ref["name"] == "company_logo.png"
+    assert image_blocks[0].source_ref["data"] == img_data
+    assert image_blocks[0].style["width_pt"] == 100.0
+
+    rendered = render_page(doc_path, 0, dpi=96)
+    assert rendered.width > 0 and rendered.height > 0
+    # Red pixels from the company logo must be present on the rendered sheet
+    rgb_im = rendered.convert("RGB")
+    red_count = 0
+    for y in range(rgb_im.height):
+        for x in range(rgb_im.width):
+            p = rgb_im.getpixel((x, y))
+            if p[0] > 200 and p[1] < 50 and p[2] < 50:
+                red_count += 1
+    assert red_count > 50
+
+
+def test_docx_image_diffing(tmp_path: Path) -> None:
+    import io
+    from PIL import Image
+
+    img_a = Image.new("RGB", (40, 40), "#112233")
+    buf_a = io.BytesIO()
+    img_a.save(buf_a, format="PNG")
+
+    img_b = Image.new("RGB", (40, 40), "#998877")
+    buf_b = io.BytesIO()
+    img_b.save(buf_b, format="PNG")
+
+    doc_a = write_docx(
+        tmp_path / "img_a.docx",
+        [("image", "rId1", "logo_v1.png")],
+        images=[("rId1", "logo_v1.png", buf_a.getvalue())],
+    )
+    doc_b = write_docx(
+        tmp_path / "img_b.docx",
+        [("image", "rId1", "logo_v2.png")],
+        images=[("rId1", "logo_v2.png", buf_b.getvalue())],
+    )
+
+    res = compare(doc_a, doc_b)
+    assert len(res.rows) == 1
+    assert res.rows[0].kind == "replace"
+    assert res.rows[0].left.text == "[Image: logo_v1.png]"
+    assert res.rows[0].right.text == "[Image: logo_v2.png]"
+
+
+
 

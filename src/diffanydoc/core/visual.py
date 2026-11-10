@@ -118,8 +118,16 @@ def _compare_page(
     )
     right_shifted = _canvas(right, width, height, dx=shift[0], dy=shift[1])
 
+    # JPEG and lossy WebP suffer from 8x8 DCT ringing and chroma subsampling noise.
+    # When comparing lossy formats against PNG or each other, use artifact-tolerant threshold.
+    is_lossy = (
+        Path(left_path).suffix.lower() in (".jpg", ".jpeg", ".webp")
+        or Path(right_path).suffix.lower() in (".jpg", ".jpeg", ".webp")
+    )
+    eff_tolerance = max(options.tolerance, 34) if is_lossy and options.tolerance == 24 else options.tolerance
+
     diff = _difference(left_canvas, right_shifted)
-    mask = diff.point(lambda value: 255 if value > options.tolerance else 0)
+    mask = diff.point(lambda value: 255 if value > eff_tolerance else 0)
 
     # Median removes isolated scan specks; Max closes one-pixel gaps so a
     # dashed or anti-aliased glyph becomes one readable box instead of many.
@@ -146,6 +154,9 @@ def _compare_page(
         )
         if right_box is not None:
             right_regions.append(right_box)
+
+    if not left_regions and not right_regions:
+        changed_pixels = 0
 
     return VisualPage(
         left=left_index,
@@ -285,7 +296,7 @@ def _mask_regions(mask: Image.Image, scale: float) -> list[BBox]:
         band_boxes: list[BBox] = []
         for x0, x1 in _runs(_column_projection(band), gap=column_gap):
             pixels = band.crop((x0, 0, x1, band_height)).histogram()[255]
-            if pixels < 6:
+            if pixels < 18 or (x1 - x0 < 6 and band_height < 6):
                 continue
             band_boxes.append(
                 (
@@ -355,8 +366,14 @@ def render_xray_page_png(
     right_shifted = _canvas(right, width, height, dx=shift[0], dy=shift[1])
     right_shifted_l = right_shifted.convert("L")
 
+    is_lossy = (
+        Path(left_path).suffix.lower() in (".jpg", ".jpeg", ".webp")
+        or Path(right_path).suffix.lower() in (".jpg", ".jpeg", ".webp")
+    )
+    eff_tolerance = max(tolerance, 34) if is_lossy and tolerance == 24 else tolerance
+
     diff = _difference(left_canvas, right_shifted)
-    mask = diff.point(lambda value: 255 if value > tolerance else 0)
+    mask = diff.point(lambda value: 255 if value > eff_tolerance else 0)
     mask = mask.filter(ImageFilter.MedianFilter(3))
     mask = mask.filter(ImageFilter.MaxFilter(3))
 
@@ -371,11 +388,12 @@ def render_xray_page_png(
     red_layer = Image.new("RGB", (width, height), (224, 27, 36))
     green_layer = Image.new("RGB", (width, height), (38, 162, 105))
 
+    polarity_threshold = 22 if is_lossy else 14
     left_darker = ImageChops.subtract(right_shifted_l, left_l).point(
-        lambda v: 255 if v > 12 else 0
+        lambda v: 255 if v > polarity_threshold else 0
     )
     right_darker = ImageChops.subtract(left_l, right_shifted_l).point(
-        lambda v: 255 if v > 12 else 0
+        lambda v: 255 if v > polarity_threshold else 0
     )
     highlight = Image.composite(red_layer, highlight, left_darker)
     highlight = Image.composite(green_layer, highlight, right_darker)

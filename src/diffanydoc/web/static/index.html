@@ -206,81 +206,83 @@
 
   <!-- Result view -->
   <section id="result-view" hidden>
-    <div class="result-head">
-      <div class="files">
-        <div class="file"><span class="side-badge">A</span><b id="name-left"></b><span class="meta" id="meta-left"></span></div>
-        <span class="arrow">↔</span>
-        <div class="file"><span class="side-badge">B</span><b id="name-right"></b><span class="meta" id="meta-right"></span></div>
-      </div>
+    <div class="result-sticky-header">
+      <div class="result-head">
+        <div class="files">
+          <div class="file"><span class="side-badge">A</span><b id="name-left"></b><span class="meta" id="meta-left"></span></div>
+          <span class="arrow">↔</span>
+          <div class="file"><span class="side-badge">B</span><b id="name-right"></b><span class="meta" id="meta-right"></span></div>
+        </div>
 
-      <div class="head-end">
-        <div class="result-tools">
-          <button class="flat" id="new-compare-btn" type="button" data-i18n-title="app.newComparison" data-i18n-aria-label="app.newComparison">
-            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-            <span data-i18n="app.newComparison">New comparison</span>
-          </button>
-          <button class="flat icon" id="new-tab-btn" type="button" data-i18n-title="action.newTab" data-i18n-aria-label="action.newTab">
-            <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3.5" width="9" height="9" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M10 3.5h3.5V7M9 7l4.5-4.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </button>
-          <button class="flat icon" id="reload" type="button" data-i18n-title="action.reload" data-i18n-aria-label="action.reload">
-            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 3v3.5H9.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </button>
-          <div class="menu-wrap">
-            <button class="flat" id="copy-button" type="button" data-menu="copy-menu" aria-haspopup="menu" aria-expanded="false" data-i18n-title="action.copy" data-i18n-aria-label="action.copy">
-              <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M10.5 5.5V3.9A1.4 1.4 0 0 0 9.1 2.5H3.9A1.4 1.4 0 0 0 2.5 3.9v5.2a1.4 1.4 0 0 0 1.4 1.4h1.6" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
-              <span data-i18n="action.copy">Copy</span>
+        <div class="head-end">
+          <div class="result-tools">
+            <button class="flat" id="new-compare-btn" type="button" data-i18n-title="app.newComparison" data-i18n-aria-label="app.newComparison">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+              <span data-i18n="app.newComparison">New comparison</span>
             </button>
-            <div class="menu" id="copy-menu" role="menu" hidden>
-              <button class="menu-item" id="copy-all-to-right" type="button" role="menuitem" data-i18n="merge.allToRight">Apply all left to right (A → B)</button>
-              <button class="menu-item" id="copy-all-to-left" type="button" role="menuitem" data-i18n="merge.allToLeft">Apply all right to left (B → A)</button>
-              <div class="menu-sep"></div>
-              <button class="menu-item" id="copy-changes" type="button" role="menuitem" data-i18n="copy.changes">Copy all changes</button>
-              <button class="menu-item" id="copy-left" type="button" role="menuitem" data-i18n="copy.left">Copy left text</button>
-              <button class="menu-item" id="copy-right" type="button" role="menuitem" data-i18n="copy.right">Copy right text</button>
-              <button class="menu-item" id="copy-both" type="button" role="menuitem" data-i18n="copy.both">Copy both sides</button>
-              <div class="menu-sep"></div>
-              <button class="menu-item" id="download-left" type="button" role="menuitem" data-i18n="merge.downloadLeft">Download left document (A)</button>
-              <button class="menu-item" id="download-right" type="button" role="menuitem" data-i18n="merge.downloadRight">Download right document (B)</button>
+            <button class="flat icon" id="new-tab-btn" type="button" data-i18n-title="action.newTab" data-i18n-aria-label="action.newTab">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3.5" width="9" height="9" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M10 3.5h3.5V7M9 7l4.5-4.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <button class="flat icon" id="reload" type="button" data-i18n-title="action.reload" data-i18n-aria-label="action.reload">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 3v3.5H9.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <div class="menu-wrap">
+              <button class="flat" id="copy-button" type="button" data-menu="copy-menu" aria-haspopup="menu" aria-expanded="false" data-i18n-title="action.copy" data-i18n-aria-label="action.copy">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M10.5 5.5V3.9A1.4 1.4 0 0 0 9.1 2.5H3.9A1.4 1.4 0 0 0 2.5 3.9v5.2a1.4 1.4 0 0 0 1.4 1.4h1.6" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
+                <span data-i18n="action.copy">Copy</span>
+              </button>
+              <div class="menu" id="copy-menu" role="menu" hidden>
+                <button class="menu-item" id="copy-all-to-right" type="button" role="menuitem" data-i18n="merge.allToRight">Apply all left to right (A → B)</button>
+                <button class="menu-item" id="copy-all-to-left" type="button" role="menuitem" data-i18n="merge.allToLeft">Apply all right to left (B → A)</button>
+                <div class="menu-sep"></div>
+                <button class="menu-item" id="copy-changes" type="button" role="menuitem" data-i18n="copy.changes">Copy all changes</button>
+                <button class="menu-item" id="copy-left" type="button" role="menuitem" data-i18n="copy.left">Copy left text</button>
+                <button class="menu-item" id="copy-right" type="button" role="menuitem" data-i18n="copy.right">Copy right text</button>
+                <button class="menu-item" id="copy-both" type="button" role="menuitem" data-i18n="copy.both">Copy both sides</button>
+                <div class="menu-sep"></div>
+                <button class="menu-item" id="download-left" type="button" role="menuitem" data-i18n="merge.downloadLeft">Download left document (A)</button>
+                <button class="menu-item" id="download-right" type="button" role="menuitem" data-i18n="merge.downloadRight">Download right document (B)</button>
+              </div>
             </div>
           </div>
+          <div class="change-nav" id="change-nav" hidden>
+            <button class="flat icon" id="prev-change" data-i18n-title="nav.prev" data-i18n-aria-label="nav.prev">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <span class="change-count" id="change-count" aria-live="polite">0 / 0</span>
+            <button class="flat icon" id="next-change" data-i18n-title="nav.next" data-i18n-aria-label="nav.next">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+          <div class="stats" id="stats"></div>
         </div>
-        <div class="change-nav" id="change-nav" hidden>
-          <button class="flat icon" id="prev-change" data-i18n-title="nav.prev" data-i18n-aria-label="nav.prev">
-            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </button>
-          <span class="change-count" id="change-count" aria-live="polite">0 / 0</span>
-          <button class="flat icon" id="next-change" data-i18n-title="nav.next" data-i18n-aria-label="nav.next">
-            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </button>
-        </div>
-        <div class="stats" id="stats"></div>
       </div>
-    </div>
 
-    <div class="search-bar" id="search-bar" hidden>
-      <div class="search-input-wrap">
-        <svg class="search-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" cy="6.5" r="4.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10 10l4 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-        <input type="text" id="search-input" placeholder="Search text…" data-i18n-placeholder="search.placeholder" autocomplete="off" spellcheck="false">
-        <span class="search-count" id="search-count" aria-live="polite">0 / 0</span>
-      </div>
-      <div class="search-nav">
-        <button class="flat icon search-btn" id="search-prev" type="button" data-i18n-title="search.prev" data-i18n-aria-label="search.prev">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m11 10-3-3-3 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div class="search-bar" id="search-bar" hidden>
+        <div class="search-input-wrap">
+          <svg class="search-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" cy="6.5" r="4.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10 10l4 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          <input type="text" id="search-input" placeholder="Search text…" data-i18n-placeholder="search.placeholder" autocomplete="off" spellcheck="false">
+          <span class="search-count" id="search-count" aria-live="polite">0 / 0</span>
+        </div>
+        <div class="search-nav">
+          <button class="flat icon search-btn" id="search-prev" type="button" data-i18n-title="search.prev" data-i18n-aria-label="search.prev">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m11 10-3-3-3 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button class="flat icon search-btn" id="search-next" type="button" data-i18n-title="search.next" data-i18n-aria-label="search.next">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 6 3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+        <div class="search-sep"></div>
+        <div class="search-filters" role="group" aria-label="Filters">
+          <button class="filter-chip active" type="button" data-filter="all" data-i18n="filter.all">All</button>
+          <button class="filter-chip chip-add" type="button" data-filter="add" data-i18n="filter.added">+Added</button>
+          <button class="filter-chip chip-del" type="button" data-filter="del" data-i18n="filter.removed">−Removed</button>
+          <button class="filter-chip chip-mod" type="button" data-filter="mod" data-i18n="filter.modified">~Changed</button>
+        </div>
+        <button class="flat icon search-close" id="search-close" type="button" data-i18n-title="action.close" data-i18n-aria-label="action.close">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
         </button>
-        <button class="flat icon search-btn" id="search-next" type="button" data-i18n-title="search.next" data-i18n-aria-label="search.next">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 6 3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button>
       </div>
-      <div class="search-sep"></div>
-      <div class="search-filters" role="group" aria-label="Filters">
-        <button class="filter-chip active" type="button" data-filter="all" data-i18n="filter.all">All</button>
-        <button class="filter-chip chip-add" type="button" data-filter="add" data-i18n="filter.added">+Added</button>
-        <button class="filter-chip chip-del" type="button" data-filter="del" data-i18n="filter.removed">−Removed</button>
-        <button class="filter-chip chip-mod" type="button" data-filter="mod" data-i18n="filter.modified">~Changed</button>
-      </div>
-      <button class="flat icon search-close" id="search-close" type="button" data-i18n-title="action.close" data-i18n-aria-label="action.close">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-      </button>
     </div>
 
     <div class="panes" id="text-view"></div>
