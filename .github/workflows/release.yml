@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-portable:
+    name: Windows Portable (.exe)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -e ".[web,desktop]" pyinstaller
+      - name: Build portable .exe
+        run: python tools/build.py --targets portable
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $v = python -c "import diffanydoc; print(diffanydoc.__version__)"
+          echo "tag=v$v" >> $env:GITHUB_OUTPUT
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DiffAnyDoc-windows-portable
+          path: dist/*-portable.exe
+          if-no-files-found: error
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: DiffAnyDoc ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
+          files: dist/*-portable.exe

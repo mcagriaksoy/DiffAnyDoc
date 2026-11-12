@@ -1,0 +1,2 @@
+# Root .gitignore hides *.spec; this one is source.
+!*.spec

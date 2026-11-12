@@ -31,6 +31,8 @@ class DiffOptions:
     pair_threshold: float = 0.4
     #: Fold long unchanged runs (HTML report). The API asks for full rows.
     fold_equal: bool = True
+    #: Join the visual lines of a paragraph before comparing (PDF/OCR).
+    reflow: bool = True
     #: Fast-check SHA-256 checksums before parsing; skip loading if identical.
     fast_check: bool = True
     #: Render both PDFs and compare pixels, not just extracted text.
@@ -48,6 +50,10 @@ class DiffOptions:
     ocr_max_pages: int = 60
     #: None = per-user cache directory (``DIFFANYDOC_CACHE_DIR`` overrides).
     ocr_cache_dir: str | None = None
+    #: Numeric difference tolerance: numbers differing by <= this amount are treated as equal.
+    numeric_tolerance: float | None = None
+    #: Skip repeating headers, footers, and page numbers in top/bottom 7% bands.
+    ignore_headers_footers: bool = False
 
 
 def file_sha256(path: str | Path) -> str:
@@ -246,6 +252,11 @@ def compare(
     left_doc, left_ocr = _load_or_cached(left, left_hash, options)
     right_doc, right_ocr = _load_or_cached(right, right_hash, options)
 
+    from ..layout import paginate_document
+
+    left_doc = paginate_document(left_doc)
+    right_doc = paginate_document(right_doc)
+
     ocr: OcrStats | None = None
     for page_stats in (left_ocr, right_ocr):
         if page_stats is None:
@@ -257,12 +268,16 @@ def compare(
         case_sensitive=options.case_sensitive,
         collapse_whitespace=options.collapse_whitespace,
         compare_formatting=options.compare_formatting,
+        reflow=options.reflow,
+        ignore_headers_footers=options.ignore_headers_footers,
     )
     right_lines = document_lines(
         right_doc,
         case_sensitive=options.case_sensitive,
         collapse_whitespace=options.collapse_whitespace,
         compare_formatting=options.compare_formatting,
+        reflow=options.reflow,
+        ignore_headers_footers=options.ignore_headers_footers,
     )
 
     rows = _build_rows(left_lines, right_lines, options)
@@ -303,8 +318,8 @@ def compare(
         byte_identical=bool(left_hash and left_hash == right_hash),
         left_sha256=left_hash,
         right_sha256=right_hash,
-        left_pages=[(p.width, p.height) for p in left_doc.pages],
-        right_pages=[(p.width, p.height) for p in right_doc.pages],
+        left_pages=[(p.width or 595.0, p.height or 842.0) for p in left_doc.pages],
+        right_pages=[(p.width or 595.0, p.height or 842.0) for p in right_doc.pages],
     )
 
 
@@ -350,7 +365,12 @@ def _build_rows(
             rows.extend(_single_row(None, b, "insert") for b in right[j1:j2])
             continue
         rows.extend(
-            _refine_replacement(left[i1:i2], right[j1:j2], options.pair_threshold)
+            _refine_replacement(
+                left[i1:i2],
+                right[j1:j2],
+                options.pair_threshold,
+                tolerance=options.numeric_tolerance,
+            )
         )
     return rows
 
@@ -386,11 +406,27 @@ def _single_row(left: Line | None, right: Line | None, kind: str) -> Row:
     return Row(kind=kind, left=left, right=right)  # type: ignore[arg-type]
 
 
-def _replace_row(left: Line, right: Line) -> Row:
+def _replace_row(left: Line, right: Line, tolerance: float | None = None) -> Row:
     if left.cells is not None and right.cells is not None:
-        left_inline, right_inline = cell_diff(left.cells, right.cells)
+        left_inline, right_inline = cell_diff(left.cells, right.cells, tolerance=tolerance)
     else:
-        left_inline, right_inline = inline_diff(left.text, right.text)
+        left_inline, right_inline = inline_diff(left.text, right.text, tolerance=tolerance)
+
+    if (
+        tolerance is not None
+        and left_inline
+        and right_inline
+        and all(s.kind == "equal" for s in left_inline)
+        and all(s.kind == "equal" for s in right_inline)
+    ):
+        return Row(
+            kind="equal",
+            left=left,
+            right=right,
+            left_inline=left_inline,
+            right_inline=right_inline,
+        )
+
     return Row(
         kind="replace",
         left=left,
@@ -401,7 +437,10 @@ def _replace_row(left: Line, right: Line) -> Row:
 
 
 def _refine_replacement(
-    left: Sequence[Line], right: Sequence[Line], threshold: float
+    left: Sequence[Line],
+    right: Sequence[Line],
+    threshold: float,
+    tolerance: float | None = None,
 ) -> list[Row]:
     """Pair up changed lines so a rewrite does not look like delete+insert.
 
@@ -414,7 +453,7 @@ def _refine_replacement(
         a, b = left[i], right[j]
         sim = line_similarity(a, b)
         if sim >= threshold or (len(left) == len(right) and sim >= 0.2):
-            rows.append(_replace_row(a, b))
+            rows.append(_replace_row(a, b, tolerance=tolerance))
             i += 1
             j += 1
             continue
@@ -426,7 +465,7 @@ def _refine_replacement(
             line_similarity(a, right[j + 1]) if j + 1 < len(right) else -1.0
         )
         if ahead_left < threshold and ahead_right < threshold and sim >= 0.18:
-            rows.append(_replace_row(a, b))
+            rows.append(_replace_row(a, b, tolerance=tolerance))
             i += 1
             j += 1
             continue
@@ -454,6 +493,29 @@ def _stats(left: Sequence[Line], right: Sequence[Line], rows: Sequence[Row]) -> 
 
     left_chars = sum(len(line.text) for line in left)
     right_chars = sum(len(line.text) for line in right)
+    left_words = sum(len(line.text.split()) for line in left)
+    right_words = sum(len(line.text.split()) for line in right)
+
+    left_reading_time = left_words / 200.0
+    right_reading_time = right_words / 200.0
+
+    words_added = 0
+    words_removed = 0
+    for row in rows:
+        if row.kind == "insert" and row.right:
+            words_added += len(row.right.text.split())
+        elif row.kind == "delete" and row.left:
+            words_removed += len(row.left.text.split())
+        elif row.kind == "replace":
+            if row.right_inline:
+                words_added += sum(len(s.text.split()) for s in row.right_inline if s.kind == "insert")
+            if row.left_inline:
+                words_removed += sum(len(s.text.split()) for s in row.left_inline if s.kind == "delete")
+
+    words_changed = words_added + words_removed
+    tot_words = max(left_words + right_words, 1)
+    change_density = min(words_changed / tot_words, 1.0)
+
     total = left_chars + right_chars
 
     # Matched characters, counting equal rows twice and the unchanged parts of
@@ -479,40 +541,65 @@ def _stats(left: Sequence[Line], right: Sequence[Line], rows: Sequence[Row]) -> 
         removed=removed,
         changed=changed,
         similarity=similarity,
+        left_words=left_words,
+        right_words=right_words,
+        left_chars=left_chars,
+        right_chars=right_chars,
+        left_reading_time_min=left_reading_time,
+        right_reading_time_min=right_reading_time,
+        words_added=words_added,
+        words_removed=words_removed,
+        words_changed=words_changed,
+        change_density=change_density,
     )
 
 
-def _fold_equal_runs(rows: Sequence[Row], context: int) -> list[Row]:
-    """Replace long runs of identical rows with a gap marker."""
+def _is_change(row: Row) -> bool:
+    return row.kind != "equal" or bool(getattr(row, "format_changes", None))
+
+
+def fold_equal_runs(rows: Sequence[Row], context: int) -> list[Row]:
+    """Replace long runs of identical rows with a gap marker.
+
+    ``context`` rows are kept before and after every change. The first row
+    after a gap carries ``hidden_before``; a gap at the very end is a
+    placeholder row with no lines.
+    """
     keep = max(context, 0)
     out: list[Row] = []
     index = 0
-    while index < len(rows):
-        row = rows[index]
-        if row.kind != "equal":
-            out.append(row)
+    total = len(rows)
+    while index < total:
+        if _is_change(rows[index]):
+            out.append(rows[index])
             index += 1
             continue
-
         end = index
-        while end < len(rows) and rows[end].kind == "equal":
+        while end < total and not _is_change(rows[end]):
             end += 1
-        run = rows[index:end]
-        if len(run) <= 2 * keep + 1:
+        run = list(rows[index:end])
+        at_start = index == 0
+        at_end = end == total
+        head = 0 if at_start else keep
+        tail = 0 if at_end else keep
+        if len(run) <= head + tail + 1:
             out.extend(run)
         else:
-            out.extend(run[:keep])
-            hidden = run[keep:-keep] if keep else run
-            following = run[-keep] if keep else None
-            gap = len(hidden)
-            if following is not None:
-                following.hidden_before = gap
+            out.extend(run[:head])
+            hidden = len(run) - head - tail
+            if tail:
+                following = run[len(run) - tail]
+                following.hidden_before = hidden
                 out.append(following)
-            else:  # pragma: no cover - covered by the length check
-                anchor = Row(kind="equal", hidden_before=gap)
-                out.append(anchor)
+                out.extend(run[len(run) - tail + 1 :])
+            else:
+                out.append(Row(kind="equal", hidden_before=hidden))
         index = end
     return out
+
+
+# Backwards-compatible private name.
+_fold_equal_runs = fold_equal_runs
 
 
 def supported_formats() -> list[dict[str, str]]:

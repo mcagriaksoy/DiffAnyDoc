@@ -60,6 +60,7 @@ class DocxAdapter:
                         f"{path.name!r} is not a Word document (no word/document.xml)"
                     ) from exc
                 core_xml = read_optional(package, "docProps/core.xml")
+                rels_xml = read_optional(package, "word/_rels/document.xml.rels")
                 header_parts = sorted(
                     name
                     for name in package.namelist()
@@ -78,29 +79,30 @@ class DocxAdapter:
                 headers_xml = [package.read(name) for name in header_parts]
                 footers_xml = [package.read(name) for name in footer_parts]
                 notes_xml = [package.read(name) for name in note_parts]
+
+                try:
+                    root = ElementTree.fromstring(body_xml)
+                except ElementTree.ParseError as exc:
+                    raise AdapterError(
+                        f"cannot parse DOCX body in {path.name!r}: {exc}"
+                    ) from exc
+
+                body = root.find(_W + "body")
+                if body is None:
+                    raise AdapterError(f"{path.name!r} has no document body")
+
+                rels = _parse_rels(rels_xml)
+                builder = _PageBuilder(rels=rels, package=package)
+                for raw_part in headers_xml:
+                    _walk_part(builder, raw_part)
+                builder.walk(body)
+                for raw_part in notes_xml + footers_xml:
+                    _walk_part(builder, raw_part)
+                builder.finish()
         except zipfile.BadZipFile as exc:
             raise AdapterError(f"cannot read DOCX {path.name!r}: {exc}") from exc
         except OSError as exc:
             raise AdapterError(f"cannot read DOCX {path.name!r}: {exc}") from exc
-
-        try:
-            root = ElementTree.fromstring(body_xml)
-        except ElementTree.ParseError as exc:
-            raise AdapterError(
-                f"cannot parse DOCX body in {path.name!r}: {exc}"
-            ) from exc
-
-        body = root.find(_W + "body")
-        if body is None:
-            raise AdapterError(f"{path.name!r} has no document body")
-
-        builder = _PageBuilder()
-        for raw_part in headers_xml:
-            _walk_part(builder, raw_part)
-        builder.walk(body)
-        for raw_part in notes_xml + footers_xml:
-            _walk_part(builder, raw_part)
-        builder.finish()
 
         return Document(
             path=path,
@@ -126,12 +128,117 @@ def _walk_part(builder: "_PageBuilder", raw_xml: bytes) -> None:
             break
 
 
+def _parse_rels(raw_xml: bytes | None) -> dict[str, str]:
+    if not raw_xml:
+        return {}
+    try:
+        root = ElementTree.fromstring(raw_xml)
+    except ElementTree.ParseError:
+        return {}
+    rels: dict[str, str] = {}
+    for elem in root:
+        r_id = elem.attrib.get("Id")
+        target = elem.attrib.get("Target")
+        if r_id and target:
+            rels[r_id] = target
+    return rels
+
+
+def _extract_images_from_container(
+    container: ElementTree.Element,
+    rels: dict[str, str],
+    package: zipfile.ZipFile | None,
+) -> list[Block]:
+    if not rels:
+        return []
+    blocks: list[Block] = []
+    for elem in container.iter():
+        tag = elem.tag.lower()
+        if not (tag.endswith("drawing") or tag.endswith("pict")):
+            continue
+        r_id = None
+        for child in elem.iter():
+            for key, val in child.attrib.items():
+                if key.endswith("embed") or key.endswith("id"):
+                    if val in rels:
+                        r_id = val
+                        break
+            if r_id:
+                break
+        if not r_id or r_id not in rels:
+            continue
+        target = rels[r_id]
+        name = Path(target).name
+        w_pt = 0.0
+        h_pt = 0.0
+        for child in elem.iter():
+            if child.tag.lower().endswith("extent"):
+                cx = child.attrib.get("cx")
+                cy = child.attrib.get("cy")
+                if cx and cy:
+                    try:
+                        w_pt = round(float(cx) / 12700.0, 1)
+                        h_pt = round(float(cy) / 12700.0, 1)
+                    except (ValueError, TypeError):
+                        pass
+                break
+        img_bytes = None
+        if package is not None:
+            zip_target = target if target.startswith("word/") else f"word/{target}"
+            if zip_target.startswith("/"):
+                zip_target = zip_target.lstrip("/")
+            try:
+                img_bytes = package.read(zip_target)
+            except KeyError:
+                for name_in_zip in package.namelist():
+                    if name_in_zip.endswith(name):
+                        try:
+                            img_bytes = package.read(name_in_zip)
+                            break
+                        except Exception:
+                            pass
+        if img_bytes and (w_pt <= 0 or h_pt <= 0):
+            try:
+                import io
+                from PIL import Image
+
+                with Image.open(io.BytesIO(img_bytes)) as pil_img:
+                    w_pt = round(pil_img.width * 72.0 / 96.0, 1)
+                    h_pt = round(pil_img.height * 72.0 / 96.0, 1)
+            except Exception:
+                pass
+        if w_pt <= 0:
+            w_pt = 200.0
+        if h_pt <= 0:
+            h_pt = 150.0
+        blocks.append(
+            Block(
+                kind="image",
+                text=f"[Image: {name}]",
+                style={"name": name, "width_pt": w_pt, "height_pt": h_pt},
+                source_ref={
+                    "name": name,
+                    "data": img_bytes,
+                    "width_pt": w_pt,
+                    "height_pt": h_pt,
+                },
+            )
+        )
+    return blocks
+
+
 class _PageBuilder:
     """Accumulates blocks into pages, splitting on explicit page breaks."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        rels: dict[str, str] | None = None,
+        package: zipfile.ZipFile | None = None,
+    ) -> None:
         self.pages: list[Page] = [Page(index=0)]
         self.meta: dict[str, Any] = {"paragraphs": 0, "tables": 0}
+        self.rels: dict[str, str] = rels or {}
+        self.package: zipfile.ZipFile | None = package
         self._table_index = 0
 
     @property
@@ -170,6 +277,10 @@ class _PageBuilder:
                         source_ref={"line": len(self._page.blocks)},
                     )
                 )
+        img_blocks = _extract_images_from_container(paragraph, self.rels, self.package)
+        if img_blocks:
+            self.meta["images"] = self.meta.get("images", 0) + len(img_blocks)
+            self._page.blocks.extend(img_blocks)
 
     def _add_table(self, table: ElementTree.Element) -> None:
         index = self._table_index

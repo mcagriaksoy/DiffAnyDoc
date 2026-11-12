@@ -42,9 +42,17 @@ class ImageAdapter:
                 for index in range(n_frames):
                     if n_frames > 1:
                         img.seek(index)
+                    # For web/raster images (.png, .jpg, .webp, .bmp), normalize to 96 DPI
+                    # so that different container metadata (e.g. 72 DPI in JPEG EXIF vs 96 DPI
+                    # default in PNG) does not cause artificial Lanczos resizing and false diffs.
+                    # Multi-page scanner TIFFs with >= 140 DPI preserve their scanner resolution.
                     dpi_info = img.info.get("dpi")
-                    dpi_x = float(dpi_info[0]) if dpi_info and dpi_info[0] > 0 else 96.0
-                    dpi_y = float(dpi_info[1]) if dpi_info and dpi_info[1] > 0 else 96.0
+                    if dpi_info and dpi_info[0] >= 140.0 and path.suffix.lower() in (".tif", ".tiff"):
+                        dpi_x = float(dpi_info[0])
+                        dpi_y = float(dpi_info[1]) if dpi_info[1] > 0 else dpi_x
+                    else:
+                        dpi_x = 96.0
+                        dpi_y = 96.0
                     width_pt = round(img.width * 72.0 / dpi_x, 2)
                     height_pt = round(img.height * 72.0 / dpi_y, 2)
                     pages.append(

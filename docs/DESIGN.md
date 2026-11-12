@@ -8,8 +8,12 @@ here. It exists for two reasons:
 2. **Feel equally professional on Windows and Linux** — the shell matches the
    platform, the content is the same everywhere.
 
-Reference: GNOME HIG / libadwaita (structure, sizing, colour) + diff tools
-(Beyond Compare, GitHub diff) — for the content area.
+Reference: GNOME HIG / libadwaita and Cinnamon (structure, sizing, colour, header bars)
++ diff tools (Beyond Compare, GitHub diff) — for the content area.
+
+> **BINDING RULE**: Do not abandon or deviate from GNOME and Cinnamon design
+> conventions. Elements must feel native to Linux GTK desktops and clean modern
+> professional tools, never like a web app with bootstrap or tailwind styling.
 
 ---
 

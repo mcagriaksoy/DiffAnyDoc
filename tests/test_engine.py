@@ -314,4 +314,66 @@ def test_large_csv_comparison_is_fast_and_aligns_cells(tmp_path: Path) -> None:
     ]
 
 
+def test_detailed_reading_and_vocabulary_metrics(tmp_path: Path) -> None:
+    f1 = tmp_path / "doc1.txt"
+    f2 = tmp_path / "doc2.txt"
+
+    # doc1 has 10 words, doc2 has 12 words (2 added words, 1 changed word)
+    f1.write_text("The quick brown fox jumps over the lazy sleeping dog.\n\nSecond paragraph.\n", encoding="utf-8")
+    f2.write_text("The fast brown fox leaps over the lazy sleeping dog.\n\nSecond modified paragraph with extra words.\n", encoding="utf-8")
+
+    result = compare(f1, f2, DiffOptions())
+    stats = result.stats
+
+    assert stats.left_words > 0
+    assert stats.right_words > stats.left_words
+    assert stats.left_chars > 0
+    assert stats.right_chars > 0
+    assert stats.left_reading_time_min > 0
+    assert stats.words_added > 0
+    assert stats.words_removed > 0
+    assert 0 < stats.change_density <= 1.0
+
+    d = stats.as_dict()
+    assert "left_words" in d
+    assert "right_words" in d
+    assert "left_reading_time_min" in d
+    assert "change_density" in d
+
+
+def test_ignore_headers_footers_filters_repeating_bands() -> None:
+    from diffanydoc.core.diff.lines import document_lines
+    from diffanydoc.core.model import Block, Document, Page
+
+    doc = Document(
+        path=Path("sample.pdf"),
+        kind="pdf",
+        pages=[
+            Page(
+                index=0,
+                width=600.0,
+                height=800.0,
+                blocks=[
+                    Block(kind="text", text="ACME Confidential", bbox=(50.0, 20.0, 200.0, 35.0)),
+                    Block(kind="text", text="Body line 1", bbox=(50.0, 200.0, 200.0, 215.0)),
+                    Block(kind="text", text="Page 1", bbox=(270.0, 760.0, 330.0, 775.0)),
+                ],
+            ),
+            Page(
+                index=1,
+                width=600.0,
+                height=800.0,
+                blocks=[
+                    Block(kind="text", text="ACME Confidential", bbox=(50.0, 20.0, 200.0, 35.0)),
+                    Block(kind="text", text="Body line 2", bbox=(50.0, 200.0, 200.0, 215.0)),
+                    Block(kind="text", text="Page 2", bbox=(270.0, 760.0, 330.0, 775.0)),
+                ],
+            ),
+        ],
+    )
+    kept = document_lines(doc, ignore_headers_footers=True)
+    assert [line.text for line in kept] == ["Body line 1", "Body line 2"]
+
+
+
 

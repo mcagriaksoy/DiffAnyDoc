@@ -18,9 +18,11 @@ from pathlib import Path
 from . import __version__
 from .core.adapters import AdapterError, adapters, load, supported_extensions
 from .core.diff import DiffOptions, compare, supported_formats
+from .core.folder import compare_folders
 from .core.ocr import OcrError
 from .core.report.html import render_html, write_html_report
 from .core.report.json import result_to_dict
+from .core.report.pdf import render_pdf, write_pdf_report
 from .i18n import available_languages, resolve_language, t
 
 
@@ -44,7 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     diff.add_argument("-o", "--output", type=Path, help="write the report to this file")
     diff.add_argument(
         "--format",
-        choices=("html", "json", "text"),
+        choices=("html", "json", "text", "pdf"),
         help="output format (default: from the -o suffix, otherwise text)",
     )
     diff.add_argument(
@@ -78,6 +80,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="also report formatting/style differences (font, size, bold, italic)",
     )
     diff.add_argument(
+        "--tolerance",
+        type=float,
+        default=None,
+        metavar="FLOAT",
+        help="numeric difference tolerance (e.g. 0.01 for rounding)",
+    )
+    diff.add_argument(
         "--no-fast-check",
         action="store_true",
         help="always parse both files even when their SHA-256 checksums match",
@@ -90,6 +99,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     info = subparsers.add_parser("info", help="show the parsed outline of a file")
     info.add_argument("file", type=Path)
+
+    subparsers.add_parser("check-update", help="look for a newer release on GitHub")
 
     subparsers.add_parser("formats", help="list supported formats")
 
@@ -116,6 +127,11 @@ def build_parser() -> argparse.ArgumentParser:
         "integrate", help="install or remove file-manager context menu entries"
     )
     integrate.add_argument("action", choices=("install", "uninstall"))
+
+    ctx = subparsers.add_parser(
+        "context-action", help="handle single-entry file-manager context menu action"
+    )
+    ctx.add_argument("files", nargs="*", type=Path, help="file(s) selected from context menu")
     return parser
 
 
@@ -127,6 +143,8 @@ def main(argv: list[str] | None = None) -> int:
             return _diff(args, language)
         if args.command == "info":
             return _info(args)
+        if args.command == "check-update":
+            return _check_update(language)
         if args.command == "formats":
             return _formats(language)
         if args.command == "serve":
@@ -137,6 +155,8 @@ def main(argv: list[str] | None = None) -> int:
             return _select(args, language)
         if args.command == "integrate":
             return _integrate(args, language)
+        if args.command == "context-action":
+            return _context_action(args, language)
     except (AdapterError, FileNotFoundError, OcrError) as exc:
         print(t("cli.error", language, message=exc), file=sys.stderr)
         return 2
@@ -152,7 +172,39 @@ def _export_language(language: str) -> None:
     os.environ["DIFFANYDOC_LANG"] = language
 
 
+def _diff_folders(args: argparse.Namespace, language: str) -> int:
+    res = compare_folders(args.left, args.right)
+    fmt = args.format or _infer_format(args.output)
+    if fmt == "json":
+        payload = json.dumps(res.as_dict(), ensure_ascii=False, indent=2)
+        _emit(payload + "\n", args.output, language)
+    else:
+        out_lines = [
+            f"📁 {t('stats.docA', language)}: {res.left_path}",
+            f"📁 {t('stats.docB', language)}: {res.right_path}",
+            "═" * 65,
+            f"  [=] {t('folder.identical', language)}: {res.identical_count}",
+            f"  [~] {t('folder.modified', language)}:  {res.modified_count}",
+            f"  [+] {t('folder.added', language)}:     {res.added_count}",
+            f"  [-] {t('folder.removed', language)}:   {res.removed_count}",
+            "─" * 65,
+        ]
+        for item in res.items:
+            if item.status == "identical":
+                continue
+            mark = "~" if item.status == "modified" else ("+" if item.status == "added" else "-")
+            out_lines.append(f"  {mark} {item.rel_path} ({item.status})")
+        _emit("\n".join(out_lines) + "\n", args.output, language)
+
+    if args.fail_on_diff and not res.identical:
+        return 1
+    return 0
+
+
 def _diff(args: argparse.Namespace, language: str) -> int:
+    if args.left.is_dir() and args.right.is_dir():
+        return _diff_folders(args, language)
+
     options = DiffOptions(
         context=args.context,
         case_sensitive=not args.ignore_case,
@@ -162,6 +214,7 @@ def _diff(args: argparse.Namespace, language: str) -> int:
         visual=args.visual,
         ocr=args.ocr,
         ocr_language=args.ocr_lang,
+        numeric_tolerance=args.tolerance,
     )
     result = compare(args.left, args.right, options)
     fmt = args.format or _infer_format(args.output)
@@ -175,6 +228,12 @@ def _diff(args: argparse.Namespace, language: str) -> int:
             print(t("cli.report", language, path=args.output), file=sys.stderr)
         else:
             _emit(render_html(result, language=language), None, language)
+    elif fmt == "pdf":
+        if args.output:
+            write_pdf_report(result, args.output, language=language)
+            print(t("cli.report", language, path=args.output), file=sys.stderr)
+        else:
+            sys.stdout.buffer.write(render_pdf(result, language=language))
     else:
         _emit(_render_text(result, language), args.output, language)
 
@@ -191,6 +250,8 @@ def _infer_format(output: Path | None) -> str:
         return "html"
     if suffix == ".json":
         return "json"
+    if suffix == ".pdf":
+        return "pdf"
     return "html"
 
 
@@ -354,6 +415,61 @@ def _select(args: argparse.Namespace, language: str) -> int:
     return run_desktop([path], slots=[args.slot], language=language)
 
 
+def _context_action(args: argparse.Namespace, language: str) -> int:
+    """Smart single-line context menu action.
+
+    - If 2+ files are provided: immediately launch comparison.
+    - If 1 file is provided:
+        - If a different file was previously selected as the left file: launch comparison and reset.
+        - Otherwise: store this file as the pending left file, notify the user, and update menu label.
+    """
+    from . import integrate
+
+    raw_files = [Path(p).expanduser().resolve() for p in args.files]
+    files = [p for p in raw_files if p.exists()]
+    if not files:
+        return 0
+
+    if len(files) >= 2:
+        integrate.clear_pending_selection(language)
+        return _launch_comparison(files[0], files[1], language)
+
+    current = files[0]
+    pending = integrate.get_pending_selection()
+
+    if pending and pending.exists() and pending != current:
+        integrate.clear_pending_selection(language)
+        return _launch_comparison(pending, current, language)
+
+    integrate.set_pending_selection(current, language)
+    from .session import send_selection
+
+    send_selection("left", current)
+    integrate.notify_selection(current, language)
+    return 0
+
+
+def _launch_comparison(left: Path, right: Path, language: str) -> int:
+    """Send both files to running window or open a new desktop window."""
+    from .session import send_selection
+
+    if send_selection("left", left) and send_selection("right", right):
+        return 0
+
+    try:
+        from .desktop import run_desktop
+    except ImportError as exc:
+        print(
+            "the desktop shell needs extra dependencies:\n"
+            "  pip install 'diffanydoc[desktop]'",
+            file=sys.stderr,
+        )
+        print(f"({exc})", file=sys.stderr)
+        return 2
+    _export_language(language)
+    return run_desktop([left, right], language=language)
+
+
 def _integrate(args: argparse.Namespace, language: str) -> int:
     from . import integrate
 
@@ -386,6 +502,24 @@ def _integrate(args: argparse.Namespace, language: str) -> int:
     for item in items:
         print(f"  {item}")
     return 0
+
+
+def _check_update(language: str) -> int:
+    from .updates import check_for_updates
+
+    info = check_for_updates()
+    if info.status == "update":
+        print(t("updates.available", language, version=info.latest, current=info.current))
+        print(info.url)
+        return 0
+    if info.status == "latest":
+        print(t("updates.latest", language, version=info.current))
+        return 0
+    if info.status == "no_releases":
+        print(t("updates.noReleases", language))
+        return 0
+    print(t("updates.failed", language, message=info.message or ""), file=sys.stderr)
+    return 2
 
 
 if __name__ == "__main__":  # pragma: no cover

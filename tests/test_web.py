@@ -189,6 +189,11 @@ def test_xray_page_endpoint_returns_composite_png(tmp_path: Path) -> None:
     assert xray.headers["content-type"] == "image/png"
     assert xray.content.startswith(b"\x89PNG")
 
+    # Second request must hit the cache
+    xray_cached = client.get(f"/api/compare/{comp['id']}/xray/0/0.png?dpi=96")
+    assert xray_cached.status_code == 200
+    assert xray_cached.content == xray.content
+
 
 def test_preload_endpoints_warm_cache_and_detect_identical_second_file(tmp_path: Path) -> None:
     first = tmp_path / "p1.txt"
@@ -227,6 +232,50 @@ def test_preload_endpoints_warm_cache_and_detect_identical_second_file(tmp_path:
     assert r_up.status_code == 200
     assert r_up.json()["byte_identical"] is False
     assert r_up.json()["skipped_parse"] is False
+
+
+def test_app_js_syntax_and_integrity() -> None:
+    from diffanydoc.web import STATIC_DIR
+
+    js_file = STATIC_DIR / "app.js"
+    assert js_file.is_file()
+    content = js_file.read_text(encoding="utf-8")
+
+    assert content.count("{") == content.count("}")
+    assert content.count("(") == content.count(")")
+    assert content.count("[") == content.count("]")
+
+
+def test_search_and_filters_markup_and_scripts() -> None:
+    from diffanydoc.web import STATIC_DIR
+
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert 'id="search-bar"' in html
+    assert 'id="search-input"' in html
+    assert 'id="search-toggle"' in html
+    assert 'data-filter="all"' in html
+    assert 'data-filter="add"' in html
+    assert 'data-filter="del"' in html
+    assert 'data-filter="mod"' in html
+
+    assert "performSearch" in js
+    assert "applyKindFilter" in js
+    assert "search-match" in js
+
+
+def test_stats_detail_dialog_markup_and_scripts() -> None:
+    from diffanydoc.web import STATIC_DIR
+
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert 'id="stats-detail-dialog"' in html
+    assert 'id="stats-detail-tbody"' in html
+    assert 'id="stats-breakdown"' in html
+    assert "openStatsDetails" in js
+
 
 
 

@@ -163,3 +163,80 @@ def test_compare_pdf_pages_accepts_explicit_options(tmp_path: Path) -> None:
 
     assert visual.compared == 1
     assert visual.pages[0].total_pixels > 0
+
+
+def test_text_boxes_match_render_on_cropped_page(tmp_path: Path) -> None:
+    from diffanydoc.core.render import render_page
+
+    from .pdfgen import build_pdf
+
+    raw = build_pdf([["HELLO WORLD", "SECOND LINE"]]).replace(
+        b"/MediaBox [0 0 595 842]",
+        b"/MediaBox [0 0 595 842] /CropBox [40 120 555 802]",
+    )
+    pdf = tmp_path / "cropped.pdf"
+    pdf.write_bytes(raw)
+
+    page = load(pdf).pages[0]
+    assert (page.width, page.height) == (515.0, 682.0)
+
+    scale = 2.0
+    image = render_page(pdf, 0, 144).convert("L")
+    x0, top, x1, bottom = page.blocks[0].bbox
+    columns = range(int(x0 * scale), int(x1 * scale))
+    ink = [
+        y
+        for y in range(int((top - 4) * scale), int((bottom + 4) * scale))
+        if any(image.getpixel((x, y)) < 140 for x in columns)
+    ]
+    # Ink of the first line sits inside its box.
+    assert ink
+    assert top <= ink[0] / scale and ink[-1] / scale <= bottom
+
+
+def test_png_vs_jpeg_same_content_no_false_diff(tmp_path: Path) -> None:
+    """Comparing PNG and JPEG versions of the same image must ignore compression artifacts and DPI metadata."""
+    img = Image.new("RGB", (400, 300), "#ffffff")
+    draw = ImageDraw.Draw(img)
+    draw.text((20, 20), "Contract Header 2026", fill="#111111")
+    draw.rectangle([40, 60, 160, 140], fill="#336699")
+
+    png_path = tmp_path / "same.png"
+    jpg_path = tmp_path / "same.jpg"
+    img.save(png_path)
+    # JPEG saved with standard 72 DPI metadata from cameras/exporters and lossy compression
+    img.save(jpg_path, quality=85, dpi=(72, 72))
+
+    res = compare(png_path, jpg_path, DiffOptions(visual=True))
+    assert res.visual is not None
+    assert res.visual.compared == 1
+    assert res.visual.changed_pages == 0
+    assert res.visual.changed_pixels == 0
+    assert res.visual.region_count == 0
+    assert res.visual.similarity == 1.0
+
+
+def test_png_vs_jpeg_real_change_detected(tmp_path: Path) -> None:
+    """A real visual difference between PNG and JPEG is accurately reported."""
+    img_a = Image.new("RGB", (400, 300), "#ffffff")
+    draw_a = ImageDraw.Draw(img_a)
+    draw_a.text((20, 20), "Contract Header 2026", fill="#111111")
+
+    img_b = Image.new("RGB", (400, 300), "#ffffff")
+    draw_b = ImageDraw.Draw(img_b)
+    draw_b.text((20, 20), "Contract Header 2026", fill="#111111")
+    draw_b.text((20, 50), "Important Clause Added", fill="#000000")
+
+    png_path = tmp_path / "clause_a.png"
+    jpg_path = tmp_path / "clause_b.jpg"
+    img_a.save(png_path)
+    img_b.save(jpg_path, quality=85, dpi=(72, 72))
+
+    res = compare(png_path, jpg_path, DiffOptions(visual=True))
+    assert res.visual is not None
+    assert res.visual.compared == 1
+    assert res.visual.changed_pages == 1
+    assert res.visual.region_count > 0
+    assert res.visual.changed_pixels > 0
+    assert res.visual.similarity < 1.0
+

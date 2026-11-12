@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterable
 
+from ..layout import make_line, merge_hyphenation
 from ..model import Block, BBox, Document, Page
 from ..normalize import join_hyphenated_lines
 from .base import AdapterError
@@ -50,17 +51,21 @@ def _clean_meta(meta: dict[str, Any]) -> dict[str, Any]:
 
 
 def _build_page(index: int, page: Any) -> Page:
+    # pdfium renders the CropBox: use its origin and size.
+    crop: BBox = tuple(float(v) for v in page.cropbox)  # type: ignore[assignment]
+    if crop != tuple(float(v) for v in page.bbox):
+        page = page.crop(crop, strict=False)
     words = page.extract_words(
         use_text_flow=False,
         keep_blank_chars=False,
+        x_tolerance=2,
         extra_attrs=["size", "fontname"],
     )
     table_blocks, table_boxes = _extract_tables(page)
     if table_boxes:
         words = [w for w in words if not _word_in_any_box(w, table_boxes)]
 
-    text_blocks = _group_lines(words)
-    _merge_hyphenation(text_blocks)
+    text_blocks = merge_hyphenation(_group_lines(words, index))
     blocks = _interleave_by_vertical_order(text_blocks, table_blocks)
 
     for img in getattr(page, "images", None) or ():
@@ -80,12 +85,29 @@ def _build_page(index: int, page: Any) -> Page:
                     source_ref={"name": str(img.get("name") or "")},
                 )
             )
+    if crop[0] or crop[1]:
+        for block in blocks:
+            _shift(block, crop[0], crop[1])
     return Page(
         index=index,
-        width=float(page.width),
-        height=float(page.height),
+        width=crop[2] - crop[0],
+        height=crop[3] - crop[1],
         blocks=blocks,
     )
+
+
+def _shift(block: Block, dx: float, dy: float) -> None:
+    """Move a block tree to CropBox coordinates."""
+
+    def move(box: BBox) -> BBox:
+        return (box[0] - dx, box[1] - dy, box[2] - dx, box[3] - dy)
+
+    if block.bbox is not None:
+        block.bbox = move(block.bbox)
+    for span in block.spans:
+        span.bbox = move(span.bbox)
+    for child in block.children:
+        _shift(child, dx, dy)
 
 
 def _extract_tables(page: Any) -> tuple[list[Block], list[BBox]]:
@@ -181,8 +203,8 @@ def _interleave_by_vertical_order(
     return combined
 
 
-def _group_lines(words: Iterable[dict[str, Any]]) -> list[Block]:
-    """Group words into visual lines, keeping bounding boxes."""
+def _group_lines(words: Iterable[dict[str, Any]], page_index: int = 0) -> list[Block]:
+    """Group words into visual lines, keeping bounding boxes and word spans."""
     words = sorted(words, key=lambda w: (round(float(w["top"]), 1), float(w["x0"])))
     lines: list[list[dict[str, Any]]] = []
     for word in words:
@@ -197,15 +219,19 @@ def _group_lines(words: Iterable[dict[str, Any]]) -> list[Block]:
     blocks: list[Block] = []
     for line in lines:
         line.sort(key=lambda w: float(w["x0"]))
-        blocks.append(
-            Block(
-                kind="text",
-                text=" ".join(str(w["text"]) for w in line),
-                bbox=_bbox(line),
-                style=_style(line),
-                source_ref={"line": len(blocks)},
-            )
+        block = make_line(
+            [
+                (
+                    str(w["text"]),
+                    (float(w["x0"]), float(w["top"]), float(w["x1"]), float(w["bottom"])),
+                )
+                for w in line
+            ],
+            page_index,
+            style=_style(line),
+            source_ref={"line": len(blocks)},
         )
+        blocks.append(block)
     return blocks
 
 

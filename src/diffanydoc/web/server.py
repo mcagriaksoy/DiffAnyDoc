@@ -18,15 +18,18 @@ from typing import Any
 
 from .. import __version__
 from ..core.adapters import AdapterError, supported_extensions
-from ..core.diff import DiffOptions, compare, file_sha256, preload_document
+from ..core.diff import DiffOptions, change_rects, compare, file_sha256, preload_document
+from ..core.folder import compare_folders
 from ..core.model import DiffResult
 from ..core.ocr import OcrError, available as ocr_available, installed_languages
 from ..core.render import is_renderable_path, render_page_png
 from ..core.report.html import render_html
 from ..core.report.json import result_to_dict
+from ..core.report.pdf import render_pdf
 from ..core.visual import render_xray_page_png
 from ..i18n import available_languages, resolve_language, strings
 from ..system import accent_color
+from . import STATIC_DIR
 
 # FastAPI is an optional extra (``pip install 'diffanydoc[web]'``). Importing
 # this module without it raises ImportError, which the CLI turns into a hint.
@@ -34,7 +37,6 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-STATIC_DIR = Path(__file__).parent / "static"
 MAX_COMPARISONS = 16
 
 
@@ -50,6 +52,8 @@ class Comparison:
 
 
 _COMPARISONS: "OrderedDict[str, Comparison]" = OrderedDict()
+_XRAY_CACHE: "OrderedDict[tuple[str, int, int, int], bytes]" = OrderedDict()
+_XRAY_CACHE_LIMIT = 64
 
 
 # --------------------------------------------------------------------------- #
@@ -77,12 +81,56 @@ def create_app() -> FastAPI:
     def formats() -> dict[str, Any]:
         return {"extensions": supported_extensions()}
 
+    @app.get("/api/updates")
+    def updates() -> dict[str, Any]:
+        from ..updates import check_for_updates
+
+        return check_for_updates().as_dict()
+
     @app.get("/api/ocr/status")
     def ocr_status() -> dict[str, Any]:
         return {
             "available": ocr_available(),
             "languages": installed_languages(),
         }
+
+    @app.get("/api/integrate/status")
+    def integrate_status() -> dict[str, Any]:
+        from .. import integrate
+
+        pending = integrate.get_pending_selection()
+        return {
+            "supported": sys.platform in ("win32", "linux") or sys.platform.startswith("linux"),
+            "installed": integrate.is_installed(),
+            "pending": str(pending) if pending else None,
+            "pending_name": pending.name if pending else None,
+        }
+
+    @app.post("/api/integrate")
+    def integrate_action(body: dict[str, Any]) -> dict[str, Any]:
+        from .. import integrate
+
+        action = str(body.get("action", "install"))
+        language = str(body.get("language", "en"))
+        try:
+            if action == "install":
+                items = integrate.install(language)
+            elif action == "clear_pending":
+                integrate.clear_pending_selection(language)
+                items = []
+            else:
+                items = integrate.uninstall(language)
+            pending = integrate.get_pending_selection()
+            return {
+                "success": True,
+                "action": action,
+                "installed": integrate.is_installed(),
+                "items": items,
+                "pending": str(pending) if pending else None,
+                "pending_name": pending.name if pending else None,
+            }
+        except Exception as exc:
+            return {"success": False, "error": str(exc), "installed": integrate.is_installed()}
 
     @app.post("/api/checksum")
     async def checksum_paths(body: dict[str, Any]) -> JSONResponse:
@@ -134,6 +182,8 @@ def create_app() -> FastAPI:
         other_sha256: str = Form(""),
         ocr: bool = Form(True),
         ocr_language: str = Form("tur+eng"),
+        numeric_tolerance: float | None = Form(None),
+        ignore_headers_footers: bool = Form(False),
     ) -> JSONResponse:
         directory = Path(tempfile.mkdtemp(prefix="diffanydoc-pre-"))
         try:
@@ -178,8 +228,10 @@ def create_app() -> FastAPI:
 
     @app.post("/api/compare")
     async def compare_uploads(
-        left: UploadFile = File(...),
-        right: UploadFile = File(...),
+        left: UploadFile | None = File(None),
+        right: UploadFile | None = File(None),
+        left_path: str | None = Form(None),
+        right_path: str | None = Form(None),
         context: int = Form(3),
         case_sensitive: bool = Form(True),
         collapse_whitespace: bool = Form(True),
@@ -188,14 +240,28 @@ def create_app() -> FastAPI:
         visual: bool = Form(True),
         ocr: bool = Form(True),
         ocr_language: str = Form("tur+eng"),
+        numeric_tolerance: float | None = Form(None),
+        ignore_headers_footers: bool = Form(False),
     ) -> JSONResponse:
         directory = Path(tempfile.mkdtemp(prefix="diffanydoc-"))
         try:
-            left_path = _store_upload(left, directory, "left")
-            right_path = _store_upload(right, directory, "right")
+            if left_path and Path(left_path).is_file():
+                resolved_left = Path(left_path).resolve()
+            elif left is not None:
+                resolved_left = _store_upload(left, directory, "left")
+            else:
+                raise HTTPException(status_code=400, detail="left file or left_path required")
+
+            if right_path and Path(right_path).is_file():
+                resolved_right = Path(right_path).resolve()
+            elif right is not None:
+                resolved_right = _store_upload(right, directory, "right")
+            else:
+                raise HTTPException(status_code=400, detail="right file or right_path required")
+
             comparison = _run_compare(
-                left_path,
-                right_path,
+                resolved_left,
+                resolved_right,
                 directory,
                 context,
                 case_sensitive,
@@ -205,6 +271,8 @@ def create_app() -> FastAPI:
                 ocr,
                 ocr_language,
                 compare_formatting,
+                numeric_tolerance,
+                ignore_headers_footers,
             )
         except Exception:
             shutil.rmtree(directory, ignore_errors=True)
@@ -229,8 +297,26 @@ def create_app() -> FastAPI:
             bool(body.get("ocr", True)),
             str(body.get("ocr_language") or "tur+eng"),
             bool(body.get("compare_formatting", False)),
+            float(body["numeric_tolerance"]) if body.get("numeric_tolerance") is not None else None,
+            bool(body.get("ignore_headers_footers", False)),
         )
         return JSONResponse(_summary(comparison))
+
+    @app.post("/api/compare-directories")
+    async def compare_directories_endpoint(body: dict[str, Any]) -> JSONResponse:
+        left = str(body.get("left", "")).strip()
+        right = str(body.get("right", "")).strip()
+        if not left or not right:
+            raise HTTPException(status_code=400, detail="both left and right directory paths required")
+        l_path = Path(left).expanduser().resolve()
+        r_path = Path(right).expanduser().resolve()
+        if not l_path.is_dir() or not r_path.is_dir():
+            raise HTTPException(status_code=400, detail="both paths must be existing directories")
+        try:
+            diff_res = compare_folders(l_path, r_path)
+            return JSONResponse(diff_res.as_dict())
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc))
 
     @app.get("/api/compare/{comparison_id}")
     def get_comparison(comparison_id: str) -> JSONResponse:
@@ -239,6 +325,21 @@ def create_app() -> FastAPI:
     @app.get("/api/compare/{comparison_id}/report", response_class=HTMLResponse)
     def get_report(comparison_id: str, lang: str | None = None) -> HTMLResponse:
         return HTMLResponse(render_html(_get(comparison_id).result, language=lang))
+
+    @app.get("/api/compare/{comparison_id}/report.pdf")
+    def get_pdf_report(
+        comparison_id: str,
+        lang: str | None = None,
+        diff_only: bool = False,
+    ) -> Response:
+        comparison = _get(comparison_id)
+        pdf_bytes = render_pdf(comparison.result, language=lang, diff_only=diff_only)
+        filename = f"diffanydoc-report-{comparison_id[:8]}.pdf"
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'inline; filename="{filename}"'},
+        )
 
     @app.get("/api/compare/{comparison_id}/export/{side}")
     def export_merged(comparison_id: str, side: str) -> Response:
@@ -295,14 +396,26 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=404, detail="both files must be renderable for X-Ray view"
             )
+        target_dpi = max(60, min(dpi, 300))
+        cache_key = (comparison_id, left_index, right_index, target_dpi)
+        if cache_key in _XRAY_CACHE:
+            _XRAY_CACHE.move_to_end(cache_key)
+            return Response(
+                content=_XRAY_CACHE[cache_key],
+                media_type="image/png",
+                headers={"Cache-Control": "private, max-age=3600"},
+            )
         try:
             data = render_xray_page_png(
                 comparison.left,
                 left_index,
                 comparison.right,
                 right_index,
-                dpi=max(60, min(dpi, 300)),
+                dpi=target_dpi,
             )
+            _XRAY_CACHE[cache_key] = data
+            if len(_XRAY_CACHE) > _XRAY_CACHE_LIMIT:
+                _XRAY_CACHE.popitem(last=False)
         except Exception as exc:  # pragma: no cover - renderer specific
             raise HTTPException(status_code=500, detail=f"xray render failed: {exc}") from exc
         return Response(
@@ -345,6 +458,8 @@ def _run_compare(
     ocr: bool = False,
     ocr_language: str = "eng",
     compare_formatting: bool = False,
+    numeric_tolerance: float | None = None,
+    ignore_headers_footers: bool = False,
 ) -> Comparison:
     options = DiffOptions(
         context=context,
@@ -355,6 +470,8 @@ def _run_compare(
         visual=visual,
         ocr=ocr,
         ocr_language=ocr_language,
+        numeric_tolerance=numeric_tolerance,
+        ignore_headers_footers=ignore_headers_footers,
     )
     result = compare(left_path, right_path, options)
 
@@ -365,10 +482,10 @@ def _run_compare(
         "right": [{"width": w, "height": h} for w, h in result.right_pages],
     }
     payload["renderable"] = {
-        "left": result.left_kind in ("pdf", "image"),
-        "right": result.right_kind in ("pdf", "image"),
+        "left": is_renderable_path(left_path) if left_path else True,
+        "right": is_renderable_path(right_path) if right_path else True,
     }
-    payload["rects"] = _rects(result)
+    payload["rects"] = change_rects(result)
 
     comparison = Comparison(
         id=payload["id"] or uuid.uuid4().hex,

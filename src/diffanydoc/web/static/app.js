@@ -4,7 +4,8 @@ const state = {
   files: { left: null, right: null },
   comparison: null,
   mode: "text",
-  zoom: 1,
+  zoom: "width", // number, "width" or "page"
+  zoomValue: 1, // resolved scale
   version: "",
   isDesktop: false,
   changes: [],
@@ -16,6 +17,12 @@ const state = {
   annotations: [],
   nextAnnotationId: 1,
   preloadedHashes: { left: "", right: "" },
+  search: {
+    query: "",
+    matches: [],
+    index: -1,
+    filter: "all",
+  },
   tabs: [
     {
       id: "tab-1",
@@ -23,7 +30,7 @@ const state = {
       paths: { left: null, right: null },
       comparison: null,
       mode: "text",
-      zoom: 1,
+      zoom: "width",
       annotations: [],
     },
   ],
@@ -88,11 +95,30 @@ function reducedMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
+/* ---------- safe storage helpers ---------- */
+function safeStorageGet(key, fallback = null) {
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      const val = window.localStorage.getItem(key);
+      return val !== null ? val : fallback;
+    }
+  } catch (_) {}
+  return fallback;
+}
+
+function safeStorageSet(key, value) {
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      window.localStorage.setItem(key, String(value));
+    }
+  } catch (_) {}
+}
+
 /* ---------- language ---------- */
 function preferredLanguage() {
   const fromUrl = new URLSearchParams(location.search).get("lang");
   if (fromUrl) return fromUrl;
-  const saved = localStorage.getItem(LANG_KEY);
+  const saved = safeStorageGet(LANG_KEY);
   if (saved) return saved;
   return "en";
 }
@@ -171,7 +197,7 @@ function renderLanguageMenu() {
     );
     item.addEventListener("click", async () => {
       closeMenus();
-      localStorage.setItem(LANG_KEY, code);
+      safeStorageSet(LANG_KEY, code);
       await loadLanguage(code);
     });
     menu.append(item);
@@ -234,51 +260,214 @@ function fillUpdates() {
   }
 }
 
-let licenseLoaded = false;
+/* Inline Markdown: **bold** and `code` only. */
+function markdownInline(text) {
+  const out = [];
+  const pattern = /\*\*(.+?)\*\*|`([^`]+)`/g;
+  let last = 0;
+  for (const match of text.matchAll(pattern)) {
+    if (match.index > last) out.push(text.slice(last, match.index));
+    out.push(
+      match[1] !== undefined
+        ? el("strong", { text: match[1] })
+        : el("code", { text: match[2] })
+    );
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
 
-async function openLicense() {
-  closeMenus();
-  const dialog = $("#license-dialog");
-  if (!dialog.open) dialog.showModal();
-  if (licenseLoaded) return;
+/* Release notes are remote text: build DOM nodes, never innerHTML. */
+function renderMarkdown(source) {
+  const blocks = [];
+  let list = null;
+  let para = [];
+  const flush = () => {
+    if (para.length) blocks.push(el("p", {}, markdownInline(para.join(" "))));
+    para = [];
+  };
+  for (const raw of String(source || "").split(/\r?\n/)) {
+    const line = raw.trim();
+    const heading = /^#{1,6}\s+(.*)$/.exec(line);
+    const item = /^[-*+]\s+(.*)$/.exec(line);
+    if (!item) list = null;
+    if (!line) {
+      flush();
+    } else if (heading) {
+      flush();
+      blocks.push(el("h3", {}, markdownInline(heading[1])));
+    } else if (item) {
+      flush();
+      if (!list) {
+        list = el("ul");
+        blocks.push(list);
+      }
+      list.append(el("li", {}, markdownInline(item[1])));
+    } else {
+      para.push(line);
+    }
+  }
+  flush();
+  return blocks;
+}
 
-  const body = $("#license-text");
-  body.textContent = i18n.t("license.loading");
+function openExternal(event, href) {
+  if (!desktop.available || !href) return;
+  event.preventDefault();
+  window.pywebview.api.open_external(new URL(href, location.origin).href);
+}
+
+let updatesBusy = false;
+
+async function checkUpdates() {
+  if (updatesBusy) return;
+  updatesBusy = true;
+  const status = $("#updates-status");
+  const notes = $("#updates-notes");
+  const open = $("#updates-open");
+  const button = $("#updates-check");
+  status.className = "updates-status";
+  status.textContent = i18n.t("updates.checking");
+  notes.hidden = true;
+  open.hidden = true;
+  button.disabled = true;
   try {
-    const response = await fetch("/static/gpl-3.0.txt");
-    if (!response.ok) throw new Error("license");
-    body.textContent = await response.text();
-    licenseLoaded = true;
-  } catch (_) {
-    body.textContent = i18n.t("license.unavailable");
+    const response = await fetch("/api/updates");
+    if (!response.ok) throw new Error(await readError(response));
+    const info = await response.json();
+    if (info.status === "update") {
+      status.textContent = i18n.t("updates.available", {
+        version: `v${info.latest}`,
+        current: `v${info.current}`,
+      });
+      const blocks = renderMarkdown(info.notes);
+      notes.replaceChildren(...blocks);
+      notes.hidden = !blocks.length;
+      open.href = info.url;
+      open.hidden = false;
+    } else if (info.status === "latest") {
+      status.classList.add("ok");
+      status.replaceChildren(
+        el("span", { class: "updates-check-icon", "aria-hidden": "true", text: "✓" }),
+        i18n.t("updates.latest", { version: `v${info.current}` })
+      );
+    } else if (info.status === "no_releases") {
+      status.textContent = i18n.t("updates.noReleases");
+    } else {
+      throw new Error(info.message || i18n.t("error.generic"));
+    }
+  } catch (error) {
+    status.classList.add("failed");
+    status.textContent = i18n.t("updates.failed", {
+      message: error.message || i18n.t("error.generic"),
+    });
+  } finally {
+    button.disabled = false;
+    updatesBusy = false;
   }
 }
 
-function setupDialogs() {
-  for (const dialog of $$("dialog")) {
-    dialog.addEventListener("click", (event) => {
-      if (event.target === dialog) dialog.close();
-    });
-    for (const button of dialog.querySelectorAll("[data-close]")) {
-      button.addEventListener("click", () => dialog.close());
-    }
+function showLicensePanel(name) {
+  for (const tab of $$(".license-tab")) {
+    const active = tab.dataset.license === name;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", String(active));
   }
+  for (const panel of $$(".license-panel")) {
+    panel.hidden = panel.dataset.licensePanel !== name;
+  }
+}
 
-  $("#about").addEventListener("click", () => {
-    closeMenus();
-    fillAbout();
-    $("#about-dialog").showModal();
-  });
-  $("#about-license").addEventListener("click", () => {
-    $("#about-dialog").close();
-    openLicense();
-  });
-  $("#license").addEventListener("click", openLicense);
-  $("#updates").addEventListener("click", () => {
-    closeMenus();
-    fillUpdates();
-    $("#updates-dialog").showModal();
-  });
+function openLicense() {
+  closeMenus();
+  showLicensePanel("terms");
+  const dialog = $("#license-dialog");
+  if (!dialog.open) dialog.showModal();
+}
+
+function showHelpPanel(name) {
+  for (const tab of $$(".help-tab")) {
+    const active = tab.dataset.help === name;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", String(active));
+  }
+  for (const panel of $$(".help-panel")) {
+    panel.hidden = panel.dataset.helpPanel !== name;
+  }
+}
+
+function openHelp() {
+  closeMenus();
+  const dialog = $("#help-dialog");
+  if (!dialog.open) dialog.showModal();
+}
+
+function setupDialogs() {
+  try {
+    for (const dialog of $$("dialog")) {
+      dialog.addEventListener("click", (event) => {
+        if (event.target === dialog) dialog.close();
+      });
+      for (const button of dialog.querySelectorAll("[data-close]")) {
+        button.addEventListener("click", () => dialog.close());
+      }
+    }
+
+    if ($("#about")) {
+      $("#about").addEventListener("click", () => {
+        closeMenus();
+        fillAbout();
+        if ($("#about-dialog")) $("#about-dialog").showModal();
+      });
+    }
+    if ($("#about-license")) {
+      $("#about-license").addEventListener("click", () => {
+        if ($("#about-dialog")) $("#about-dialog").close();
+        openLicense();
+      });
+    }
+    if ($("#license")) $("#license").addEventListener("click", openLicense);
+    for (const tab of $$(".license-tab")) {
+      tab.addEventListener("click", () => showLicensePanel(tab.dataset.license));
+    }
+    if ($("#help")) $("#help").addEventListener("click", openHelp);
+    for (const tab of $$(".help-tab")) {
+      tab.addEventListener("click", () => showHelpPanel(tab.dataset.help));
+    }
+    if ($("#updates")) {
+      $("#updates").addEventListener("click", () => {
+        closeMenus();
+        fillUpdates();
+        if ($("#updates-dialog")) $("#updates-dialog").showModal();
+        checkUpdates();
+      });
+    }
+    if ($("#updates-check")) $("#updates-check").addEventListener("click", checkUpdates);
+    if ($("#updates-open")) {
+      $("#updates-open").addEventListener("click", (event) =>
+        openExternal(event, $("#updates-open").getAttribute("href"))
+      );
+    }
+    if ($("#settings-menu-btn")) {
+      $("#settings-menu-btn").addEventListener("click", openSettings);
+    }
+    if ($("#settings-integrate-toggle")) {
+      $("#settings-integrate-toggle").addEventListener("click", toggleIntegration);
+    }
+    if ($("#settings-pending-clear")) {
+      $("#settings-pending-clear").addEventListener("click", clearPendingSelection);
+    }
+    if ($("#integrate-menu")) {
+      $("#integrate-menu").addEventListener("click", toggleIntegration);
+    }
+  } catch (_) {}
+}
+
+function openSettings() {
+  closeMenus();
+  loadIntegrationStatus();
+  if ($("#settings-dialog")) $("#settings-dialog").showModal();
 }
 
 /* ---------- system accent ---------- */
@@ -335,17 +524,7 @@ function setupDropZones() {
       e.preventDefault();
       e.stopPropagation();
       document.body.classList.remove("dragging");
-      const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
-      if (files.length) {
-        try {
-          input.files = e.dataTransfer.files;
-        } catch (_) {
-          /* some browsers refuse programmatic assignment; state is what matters */
-        }
-        assignDroppedFiles(files, side);
-        return;
-      }
-      await handleUriDrop(e.dataTransfer, side);
+      await processDroppedData(e.dataTransfer, side);
     });
 
     // Keyboard access: the drop zone behaves like a button.
@@ -394,12 +573,7 @@ function setupDropZones() {
     dragDepth = 0;
     if (e.defaultPrevented) return; // a drop zone already handled it
     e.preventDefault();
-    const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
-    if (files.length) {
-      assignDroppedFiles(files, null);
-      return;
-    }
-    await handleUriDrop(e.dataTransfer, null);
+    await processDroppedData(e.dataTransfer, null);
   });
 }
 
@@ -418,39 +592,66 @@ function hasFiles(event) {
   );
 }
 
-async function handleUriDrop(dataTransfer, preferredSide) {
-  if (!dataTransfer || !desktop.available || !window.pywebview || !window.pywebview.api) {
-    return;
-  }
-  const raw =
-    dataTransfer.getData("text/uri-list") ||
-    dataTransfer.getData("text/plain") ||
-    "";
-  if (!raw.trim()) return;
-  try {
-    const resolved = await window.pywebview.api.resolve_dropped_uris(raw);
-    if (!Array.isArray(resolved) || !resolved.length) return;
-    if (resolved.length >= 2) {
-      desktop.paths.left = resolved[0];
-      desktop.paths.right = resolved[1];
-      showPath("left", resolved[0]);
-      showPath("right", resolved[1]);
-    } else {
-      const side =
-        preferredSide ||
-        (!desktop.paths.left && !state.files.left
-          ? "left"
-          : !desktop.paths.right && !state.files.right
-            ? "right"
-            : "left");
-      desktop.paths[side] = resolved[0];
-      showPath(side, resolved[0]);
+async function processDroppedData(dataTransfer, preferredSide) {
+  if (!dataTransfer) return false;
+
+  // 1. In desktop mode, first check if text/uri-list or text/plain or files contain local OS paths
+  if (desktop.available && window.pywebview && window.pywebview.api) {
+    const raw =
+      dataTransfer.getData("text/uri-list") ||
+      dataTransfer.getData("text/plain") ||
+      "";
+    if (raw.trim()) {
+      try {
+        const resolved = await window.pywebview.api.resolve_dropped_uris(raw);
+        if (Array.isArray(resolved) && resolved.length > 0) {
+          applyResolvedDesktopPaths(resolved, preferredSide);
+          return true;
+        }
+      } catch (_) {}
     }
-    if (!$("#result-view").hidden) showUploadView();
-    updateCompareButton();
-  } catch (_) {
-    /* ignore invalid drop payloads */
+
+    // Check if DataTransfer files object has OS path properties (WebKit2GTK / Electron)
+    const dtFiles = Array.from(dataTransfer.files || []);
+    const filePaths = dtFiles
+      .map((f) => f.pywebviewFullPath || f.path)
+      .filter((p) => Boolean(p && typeof p === "string"));
+    if (filePaths.length > 0) {
+      applyResolvedDesktopPaths(filePaths, preferredSide);
+      return true;
+    }
   }
+
+  // 2. Standard browser File objects fallback
+  const files = Array.from(dataTransfer.files || []);
+  if (files.length > 0) {
+    assignDroppedFiles(files, preferredSide);
+    return true;
+  }
+
+  return false;
+}
+
+function applyResolvedDesktopPaths(resolved, preferredSide) {
+  if (!Array.isArray(resolved) || !resolved.length) return;
+  if (resolved.length >= 2) {
+    desktop.paths.left = resolved[0];
+    desktop.paths.right = resolved[1];
+    showPath("left", resolved[0]);
+    showPath("right", resolved[1]);
+  } else {
+    const side =
+      preferredSide ||
+      (!hasFile("left") ? "left" : !hasFile("right") ? "right" : "left");
+    desktop.paths[side] = resolved[0];
+    showPath(side, resolved[0]);
+  }
+  if (!$("#result-view").hidden) showUploadView();
+  updateCompareButton();
+}
+
+async function handleUriDrop(dataTransfer, preferredSide) {
+  return processDroppedData(dataTransfer, preferredSide);
 }
 
 function assignDroppedFiles(files, preferredSide) {
@@ -461,7 +662,7 @@ function assignDroppedFiles(files, preferredSide) {
   } else {
     const side =
       preferredSide ||
-      (!state.files.left ? "left" : !state.files.right ? "right" : "left");
+      (!hasFile("left") ? "left" : !hasFile("right") ? "right" : "left");
     setFile(side, files[0]);
   }
   if (!$("#result-view").hidden) showUploadView();
@@ -553,9 +754,16 @@ async function preloadSide(side) {
   }
 }
 
+function hasFile(side) {
+  return Boolean((desktop.available && desktop.paths[side]) || state.files[side]);
+}
+
 function isReady() {
-  if (desktop.available && desktop.paths.left && desktop.paths.right) return true;
-  return Boolean(state.files.left && state.files.right);
+  return hasFile("left") && hasFile("right");
+}
+
+function canReload() {
+  return isReady();
 }
 
 function updateCompareButton() {
@@ -574,18 +782,29 @@ function hideError() {
 
 /* ---------- comparison ---------- */
 async function comparisonRequest() {
-  const caseSensitive = !$("#opt-case").checked;
-  const collapseWhitespace = $("#opt-space").checked;
+  const caseSensitive = $("#opt-case") ? !$("#opt-case").checked : true;
+  const collapseWhitespace = $("#opt-space") ? $("#opt-space").checked : true;
   const formatCheckbox = $("#opt-format");
   const compareFormatting = Boolean(formatCheckbox && formatCheckbox.checked);
+  const headersCheckbox = $("#opt-headers");
+  const ignoreHeadersFooters = Boolean(headersCheckbox && headersCheckbox.checked);
   const ocrCheckbox = $("#opt-ocr");
   const ocr = ocrCheckbox ? Boolean(ocrCheckbox.checked) : true;
   const ocrLangSelect = $("#opt-ocr-lang");
   const ocrLanguage = (ocrLangSelect && ocrLangSelect.value) || (i18n.lang === "tr" ? "tur+eng" : "eng");
+  const tolInput = $("#opt-tolerance");
+  let numericTolerance = null;
+  if (tolInput && tolInput.value && tolInput.value.trim() !== "") {
+    const parsed = parseFloat(tolInput.value);
+    if (Number.isFinite(parsed) && parsed >= 0) numericTolerance = parsed;
+  }
 
   if (desktop.available && desktop.paths.left && desktop.paths.right) {
+    const controller = new AbortController();
+    state.activeCompareAbort = () => controller.abort();
     return fetch("/api/compare-paths", {
       method: "POST",
+      signal: controller.signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         left: desktop.paths.left,
@@ -598,13 +817,25 @@ async function comparisonRequest() {
         visual: true,
         ocr,
         ocr_language: ocrLanguage,
+        numeric_tolerance: numericTolerance,
+        ignore_headers_footers: ignoreHeadersFooters,
       }),
     });
   }
 
   const form = new FormData();
-  form.append("left", state.files.left);
-  form.append("right", state.files.right);
+  if (desktop.available && desktop.paths.left) {
+    form.append("left_path", desktop.paths.left);
+  } else if (state.files.left) {
+    form.append("left", state.files.left);
+  }
+
+  if (desktop.available && desktop.paths.right) {
+    form.append("right_path", desktop.paths.right);
+  } else if (state.files.right) {
+    form.append("right", state.files.right);
+  }
+
   form.append("case_sensitive", String(caseSensitive));
   form.append("collapse_whitespace", String(collapseWhitespace));
   form.append("compare_formatting", String(compareFormatting));
@@ -613,37 +844,152 @@ async function comparisonRequest() {
   form.append("visual", "true");
   form.append("ocr", String(ocr));
   form.append("ocr_language", ocrLanguage);
-  return fetch("/api/compare", { method: "POST", body: form });
+  if (numericTolerance !== null) {
+    form.append("numeric_tolerance", String(numericTolerance));
+  }
+  form.append("ignore_headers_footers", String(ignoreHeadersFooters));
+  return postFormWithProgress("/api/compare", form, (fraction) => {
+    const pct = Math.round(fraction * 35);
+    setCompareProgress(pct, "progress.uploading");
+  });
 }
 
-function canReload() {
-  if (desktop.available && desktop.paths.left && desktop.paths.right) return true;
-  return Boolean(state.files.left && state.files.right);
+function postFormWithProgress(url, form, onUploadProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    state.activeCompareAbort = () => xhr.abort();
+    xhr.open("POST", url);
+    if (xhr.upload && onUploadProgress) {
+      xhr.upload.addEventListener("progress", (e) => {
+        if (e.lengthComputable && e.total > 0) {
+          onUploadProgress(e.loaded / e.total);
+        }
+      });
+      xhr.upload.addEventListener("load", () => onUploadProgress(1));
+    }
+    xhr.addEventListener("load", () => {
+      const body = xhr.responseText || "";
+      resolve({
+        ok: xhr.status >= 200 && xhr.status < 300,
+        status: xhr.status,
+        json: async () => JSON.parse(body),
+        text: async () => body,
+      });
+    });
+    xhr.addEventListener("error", () => reject(new Error(i18n.t("error.generic"))));
+    xhr.addEventListener("abort", () => {
+      const err = new Error(i18n.t("progress.cancelled"));
+      err.name = "AbortError";
+      reject(err);
+    });
+    xhr.send(form);
+  });
+}
+
+let _progressTimer = null;
+let _progressValue = 0;
+
+function setCompareProgress(percent, labelKey) {
+  const wrap = $("#compare-progress");
+  const fill = $("#compare-progress-fill");
+  const pct = $("#compare-progress-pct");
+  const label = $("#compare-progress-label");
+  const track = wrap ? wrap.querySelector(".compare-progress-track") : null;
+  const clamped = Math.max(0, Math.min(100, Math.round(percent)));
+  _progressValue = Math.max(_progressValue, clamped);
+  if (fill) fill.style.width = `${_progressValue}%`;
+  if (pct) pct.textContent = `${_progressValue}%`;
+  if (track) track.setAttribute("aria-valuenow", String(_progressValue));
+  if (label && labelKey) label.textContent = i18n.t(labelKey);
+}
+
+function startProgressTicker(initialPercent = 10) {
+  stopProgressTicker();
+  _progressValue = 0;
+  setCompareProgress(initialPercent, "progress.comparing");
+  _progressTimer = setInterval(() => {
+    if (_progressValue < 92) {
+      const step = Math.max(1, Math.round((92 - _progressValue) * 0.14));
+      setCompareProgress(_progressValue + step, "progress.comparing");
+    }
+  }, 220);
+}
+
+function stopProgressTicker() {
+  if (_progressTimer !== null) {
+    clearInterval(_progressTimer);
+    _progressTimer = null;
+  }
 }
 
 function setComparing(active) {
   state.comparing = active;
   const button = $("#compare");
-  const spinner = button.querySelector(".spinner");
-  button.disabled = active || !isReady();
-  spinner.hidden = !active;
+  if (button) {
+    const spinner = button.querySelector(".spinner");
+    button.disabled = active || !isReady();
+    if (spinner) spinner.hidden = !active;
+  }
+  const wrap = $("#compare-progress");
+  if (active) {
+    if (wrap) wrap.hidden = false;
+    startProgressTicker(desktop.available && desktop.paths.left && desktop.paths.right ? 12 : 5);
+  } else {
+    stopProgressTicker();
+    _progressValue = 0;
+    if (wrap) wrap.hidden = true;
+  }
   const reload = $("#reload");
   if (reload) reload.disabled = active;
 }
 
 async function runComparison() {
-  if (!isReady() || state.comparing) return;
+  if (state.comparing) return;
+  if (!isReady()) {
+    showError(i18n.t("error.generic"));
+    return;
+  }
   hideError();
   setComparing(true);
+
+  if (desktop.available && desktop.paths.left && desktop.paths.right) {
+    const isDoc = /\.(pdf|docx?|odt|rtf|xlsx?|xlsm|csv|tsv|png|jpe?g|tiff?|bmp|webp|txt|md|json|py|js|html?|css|xml|c|cpp|h|rs|go|java)$/i;
+    const bothAreDocs = isDoc.test(desktop.paths.left) && isDoc.test(desktop.paths.right);
+    if (!bothAreDocs) {
+      try {
+        const dirResp = await fetch("/api/compare-directories", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ left: desktop.paths.left, right: desktop.paths.right }),
+        });
+        if (dirResp.ok) {
+          const folderData = await dirResp.json();
+          renderFolderDiff(folderData);
+          setComparing(false);
+          updateCompareButton();
+          return;
+        }
+      } catch (_) {
+        /* not directories, proceed to regular document compare */
+      }
+    }
+  }
 
   try {
     const response = await comparisonRequest();
     if (!response.ok) throw new Error(await readError(response));
+    setCompareProgress(96, "progress.rendering");
     state.comparison = await response.json();
+    setCompareProgress(100, "progress.rendering");
     renderResult();
   } catch (error) {
-    showError(error.message || i18n.t("error.generic"));
+    if (error && error.name === "AbortError") {
+      showToast(i18n.t("progress.cancelled"));
+    } else {
+      showError(error.message || i18n.t("error.generic"));
+    }
   } finally {
+    state.activeCompareAbort = null;
     setComparing(false);
     updateCompareButton();
   }
@@ -941,6 +1287,16 @@ function tabTitle(tab) {
   return i18n.t("app.newComparison");
 }
 
+function tabHasContent(tab) {
+  return Boolean(
+    tab.comparison ||
+      tab.files.left ||
+      tab.files.right ||
+      tab.paths.left ||
+      tab.paths.right
+  );
+}
+
 function renderSessionTabs() {
   const container = $("#session-tabs");
   if (!container) return;
@@ -951,7 +1307,13 @@ function renderSessionTabs() {
     const children = [
       el("span", { class: "session-tab-label", text: labelText }),
     ];
-    if (state.tabs.length > 1) {
+    // The last tab can close too once it holds files.
+    if (state.tabs.length > 1 || tabHasContent(tab)) {
+      const close = (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        closeSessionTab(tab.id);
+      };
       children.push(
         el("span", {
           class: "session-tab-close",
@@ -960,9 +1322,9 @@ function renderSessionTabs() {
           title: i18n.t("tab.close"),
           "aria-label": i18n.t("tab.close"),
           text: "\u00d7",
-          onclick: (e) => {
-            e.stopPropagation();
-            closeSessionTab(tab.id);
+          onclick: close,
+          onkeydown: (e) => {
+            if (e.key === "Enter" || e.key === " ") close(e);
           },
         })
       );
@@ -1017,7 +1379,7 @@ function switchSessionTab(tabId) {
   desktop.paths = { left: target.paths.left, right: target.paths.right };
   state.comparison = target.comparison;
   state.mode = target.mode || "text";
-  state.zoom = target.zoom || 1;
+  state.zoom = target.zoom || "width";
   state.annotations = Array.isArray(target.annotations) ? [...target.annotations] : [];
   restoreDropChipsFromState();
   renderSessionTabs();
@@ -1038,7 +1400,7 @@ function createNewSessionTab() {
     paths: { left: null, right: null },
     comparison: null,
     mode: "text",
-    zoom: 1,
+    zoom: "width",
     annotations: [],
   });
   switchSessionTab(newId);
@@ -1046,6 +1408,9 @@ function createNewSessionTab() {
 
 function closeSessionTab(tabId) {
   if (state.tabs.length <= 1) {
+    // Last tab: back to a clean home screen.
+    state.mode = "text";
+    state.zoom = "width";
     reset();
     return;
   }
@@ -1060,7 +1425,7 @@ function closeSessionTab(tabId) {
     desktop.paths = { left: nextTab.paths.left, right: nextTab.paths.right };
     state.comparison = nextTab.comparison;
     state.mode = nextTab.mode || "text";
-    state.zoom = nextTab.zoom || 1;
+    state.zoom = nextTab.zoom || "width";
     state.annotations = Array.isArray(nextTab.annotations) ? [...nextTab.annotations] : [];
     restoreDropChipsFromState();
     if (state.comparison) renderResult();
@@ -1098,6 +1463,8 @@ function renderResult() {
   const data = state.comparison;
   $("#upload-view").hidden = true;
   $("#result-view").hidden = false;
+  const stickyHeader = $(".result-sticky-header");
+  if (stickyHeader) stickyHeader.hidden = false;
   $("#view-tabs").hidden = false;
 
   for (const node of $$("[data-result-only]")) node.hidden = false;
@@ -1125,10 +1492,21 @@ function renderResult() {
   if (!canXray && state.mode === "xray") state.mode = canRender ? "pages" : "text";
 
   $("#visual-wrap").hidden = !state.visual;
+  if (state.visual) {
+    const needsVisualDefault =
+      data.left.kind === "image" ||
+      data.right.kind === "image" ||
+      (state.ocr && state.ocr.stats && state.ocr.stats.ocr_pages > 0) ||
+      !data.rows.length;
+    document.body.classList.toggle("visual-off", !needsVisualDefault);
+  }
   $("#opt-visual").checked = !document.body.classList.contains("visual-off");
   $("#reload").hidden = !canReload();
 
   $("#export").href = `/api/compare/${data.id}/report?lang=${i18n.lang}`;
+  if ($("#export-pdf")) {
+    $("#export-pdf").href = `/api/compare/${data.id}/report.pdf?lang=${i18n.lang}`;
+  }
 
   syncActiveTab();
   renderText();
@@ -1179,7 +1557,106 @@ function renderStats(stats) {
       ])
     );
   }
-  $("#stats").replaceChildren(...nodes);
+  const statsContainer = $("#stats");
+  statsContainer.replaceChildren(...nodes);
+  statsContainer.setAttribute("role", "button");
+  statsContainer.setAttribute("tabindex", "0");
+  statsContainer.setAttribute("title", i18n.t("stats.openDetails"));
+}
+
+function openStatsDetails() {
+  const dialog = $("#stats-detail-dialog");
+  if (!dialog || !state.comparison) return;
+
+  const data = state.comparison;
+  const stats = data.stats || {};
+  const docAName = data.left ? data.left.name : "Document A";
+  const docBName = data.right ? data.right.name : "Document B";
+
+  const thA = $("#stats-th-doc-a");
+  const thB = $("#stats-th-doc-b");
+  if (thA) thA.textContent = docAName;
+  if (thB) thB.textContent = docBName;
+
+  const tbody = $("#stats-detail-tbody");
+  if (tbody) {
+    tbody.replaceChildren();
+
+    const diffFmt = (diff) => {
+      if (diff > 0) return `+${diff}`;
+      if (diff < 0) return `${diff}`;
+      return "0";
+    };
+
+    const wordsDiff = (stats.right_words || 0) - (stats.left_words || 0);
+    const charsDiff = (stats.right_chars || 0) - (stats.left_chars || 0);
+    const linesDiff = (stats.right_lines || 0) - (stats.left_lines || 0);
+    const readDiff = (stats.right_reading_time_min || 0) - (stats.left_reading_time_min || 0);
+
+    const rows = [
+      {
+        name: i18n.t("stats.words"),
+        a: (stats.left_words || 0).toLocaleString(),
+        b: (stats.right_words || 0).toLocaleString(),
+        diff: diffFmt(wordsDiff),
+      },
+      {
+        name: i18n.t("stats.chars"),
+        a: (stats.left_chars || 0).toLocaleString(),
+        b: (stats.right_chars || 0).toLocaleString(),
+        diff: diffFmt(charsDiff),
+      },
+      {
+        name: i18n.t("stats.readingTime"),
+        a: i18n.t("stats.readingTimeVal", { min: (stats.left_reading_time_min || 0).toFixed(1) }),
+        b: i18n.t("stats.readingTimeVal", { min: (stats.right_reading_time_min || 0).toFixed(1) }),
+        diff: `${readDiff >= 0 ? "+" : ""}${readDiff.toFixed(1)} min`,
+      },
+      {
+        name: i18n.t("stats.lines"),
+        a: (stats.left_lines || 0).toLocaleString(),
+        b: (stats.right_lines || 0).toLocaleString(),
+        diff: diffFmt(linesDiff),
+      },
+    ];
+
+    for (const r of rows) {
+      const tr = el("tr", {}, [
+        el("td", { text: r.name, style: "font-weight: 500;" }),
+        el("td", { text: r.a }),
+        el("td", { text: r.b }),
+        el("td", {
+          text: r.diff,
+          style: r.diff.startsWith("+")
+            ? "color: var(--diff-ins-strong); font-weight: 600;"
+            : r.diff.startsWith("-")
+              ? "color: var(--diff-del-strong); font-weight: 600;"
+              : "color: var(--dim-label-color);",
+        }),
+      ]);
+      tbody.appendChild(tr);
+    }
+  }
+
+  const breakdown = $("#stats-breakdown");
+  if (breakdown) {
+    breakdown.replaceChildren(
+      el("div", { class: "breakdown-card" }, [
+        el("div", { class: "b-label", text: i18n.t("stats.wordsAdded") }),
+        el("div", { class: "b-val", text: `+${stats.words_added || 0}`, style: "color: var(--diff-ins-strong);" }),
+      ]),
+      el("div", { class: "breakdown-card" }, [
+        el("div", { class: "b-label", text: i18n.t("stats.wordsRemoved") }),
+        el("div", { class: "b-val", text: `−${stats.words_removed || 0}`, style: "color: var(--diff-del-strong);" }),
+      ]),
+      el("div", { class: "breakdown-card" }, [
+        el("div", { class: "b-label", text: i18n.t("stats.changeDensity") }),
+        el("div", { class: "b-val", text: `${((stats.change_density || 0) * 100).toFixed(1)}%`, style: "color: var(--accent-color);" }),
+      ])
+    );
+  }
+
+  dialog.showModal();
 }
 
 /* ---------- text view ---------- */
@@ -1317,14 +1794,136 @@ function buildCell(
   gutter.append(
     el("span", { class: "gutter-number", text: String(line.number) })
   );
-  return el("div", { class: "cell" }, [
-    gutter,
-    el("span", {
-      class: "page-tag",
-      text: line.page === previousPage ? "" : i18n.t("page.label", { n: line.page + 1 }),
-    }),
-    text,
-  ]);
+  const cell = el(
+    "div",
+    {
+      class: "cell",
+      "data-side": side,
+      "data-row": String(rowIndex),
+      "data-page": String(line.page),
+      "data-line-text": line.text.trim(),
+    },
+    [
+      gutter,
+      el("span", {
+        class: "page-tag",
+        text: line.page === previousPage ? "" : i18n.t("page.label", { n: line.page + 1 }),
+      }),
+      text,
+    ]
+  );
+  cell.addEventListener("click", (event) => onCellClick(event, cell, side));
+  return cell;
+}
+
+function clearCellSelection() {
+  for (const node of $$(".cell.is-selected, .cell.is-matched")) {
+    node.classList.remove("is-selected", "is-matched");
+  }
+  for (const btn of $$(".match-select-btn")) btn.remove();
+}
+
+function jumpToPageRow(rowIndex, side, pageIndex) {
+  if (!state.comparison) return;
+  const canRender = state.comparison.renderable.left || state.comparison.renderable.right;
+  if (!canRender) return;
+  setMode("pages");
+  requestAnimationFrame(() => {
+    const targetCard =
+      $(`.page-card[data-side="${side}"][data-page="${pageIndex}"]`) ||
+      $(`.page-card[data-page="${pageIndex}"]`);
+    const targetRect =
+      $(`.page-card[data-side="${side}"] .rect[data-row="${rowIndex}"]`) ||
+      $(`.rect[data-row="${rowIndex}"]`);
+    if (targetRect) {
+      targetRect.scrollIntoView({ block: "center", behavior: "smooth" });
+      targetRect.classList.add("is-flash");
+      setTimeout(() => targetRect.classList.remove("is-flash"), 1400);
+    } else if (targetCard) {
+      targetCard.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  });
+}
+
+function jumpToTextRow(rowIndex, side) {
+  setMode("text");
+  requestAnimationFrame(() => {
+    const cell =
+      $(`.cell[data-side="${side}"][data-row="${rowIndex}"]`) ||
+      $(`.cell[data-row="${rowIndex}"]`);
+    if (!cell) return;
+    clearCellSelection();
+    cell.classList.add("is-selected");
+    cell.scrollIntoView({ block: "center", behavior: "smooth" });
+  });
+}
+
+function onCellClick(event, cell, side) {
+  if (event.target.closest("button")) return;
+  const sel = window.getSelection();
+  if (sel && sel.toString().length > 0) return;
+
+  const wasSelectedOnly =
+    cell.classList.contains("is-selected") && $$(".cell.is-selected").length === 1;
+  clearCellSelection();
+  if (wasSelectedOnly) return;
+
+  cell.classList.add("is-selected");
+  const textEl = cell.querySelector(".text");
+  const lineText = cell.dataset.lineText || "";
+  const rowIndex = Number(cell.dataset.row);
+  const pageIndex = Number(cell.dataset.page);
+
+  if (lineText) {
+    const oppositeSide = side === "left" ? "right" : "left";
+    const matches = $$(`.cell[data-side="${oppositeSide}"]`).filter(
+      (other) => other.dataset.lineText === lineText
+    );
+    if (matches.length && textEl) {
+      for (const m of matches) m.classList.add("is-matched");
+
+      let matchCursor = 0;
+      const label = i18n.t(side === "left" ? "match.selectRight" : "match.selectLeft");
+      const suffix = matches.length > 1 ? ` (${matches.length})` : "";
+      textEl.append(
+        el("button", {
+          class: "match-select-btn",
+          type: "button",
+          text: `\u2194 ${label}${suffix}`,
+          onclick: (e) => {
+            e.stopPropagation();
+            for (const m of matches) m.classList.remove("is-selected");
+            const target = matches[matchCursor % matches.length];
+            matchCursor += 1;
+            target.classList.add("is-selected");
+            target.scrollIntoView({ block: "nearest", behavior: "smooth" });
+          },
+        })
+      );
+    }
+  }
+
+  if (
+    textEl &&
+    state.comparison &&
+    (state.comparison.renderable.left || state.comparison.renderable.right) &&
+    Number.isFinite(pageIndex) &&
+    pageIndex >= 0 &&
+    Number.isFinite(rowIndex) &&
+    rowIndex >= 0
+  ) {
+    textEl.append(
+      el("button", {
+        class: "match-select-btn",
+        type: "button",
+        text: `\u2197 ${i18n.t("match.showOnPage")}`,
+        onclick: (e) => {
+          e.stopPropagation();
+          jumpToPageRow(rowIndex, side, pageIndex);
+        },
+      })
+    );
+  }
 }
 
 /* ---------- page view ---------- */
@@ -1392,9 +1991,7 @@ function buildXrayCard(pair, pairIdx, visualPage) {
     !data.renderable.left ||
     !data.renderable.right
   ) {
-    card.append(
-      el("div", { class: "page-canvas missing", text: i18n.t("page.missing") })
-    );
+    card.append(missingCanvas());
     return card;
   }
 
@@ -1405,19 +2002,31 @@ function buildXrayCard(pair, pairIdx, visualPage) {
     height: Math.max(sizeL.height, sizeR.height),
   };
 
-  const canvas = el("div", { class: "page-canvas" });
+  const canvas = el("div", { class: "page-canvas is-loading", style: canvasStyle(size) }, [
+    el("div", { class: "canvas-spinner", "aria-label": i18n.t("state.loading") }, [
+      el("span", { class: "canvas-spinner-icon", "aria-hidden": "true" }),
+      el("span", { class: "canvas-spinner-label", text: i18n.t("state.loading") }),
+    ]),
+  ]);
   canvas.append(
-    el("img", {
-      src: `/api/compare/${data.id}/xray/${pair.left}/${pair.right}.png?dpi=120`,
-      alt: `${label} ${pageText}`,
-      loading: "lazy",
-    })
+    pageImage(
+      `/api/compare/${data.id}/xray/${pair.left}/${pair.right}.png`,
+      `${label} ${pageText}`,
+      pairIdx === 0
+    )
   );
 
   // Also show OCR/text diff boxes and visual boxes so hovering shows the text
   const rectsL = (data.rects.left && data.rects.left[String(pair.left)]) || [];
   const rectsR = (data.rects.right && data.rects.right[String(pair.right)]) || [];
-  for (const rect of [...rectsL, ...rectsR]) {
+  const combinedRects = [...rectsL, ...rectsR];
+  const xrayRowsWithWords = new Set(
+    combinedRects.filter((r) => r.level === "word").map((r) => r.row)
+  );
+  const activeXrayRects = combinedRects.filter(
+    (r) => !(r.level === "line" && xrayRowsWithWords.has(r.row))
+  );
+  for (const rect of activeXrayRects) {
     addRect(
       canvas,
       [rect.x0, rect.top, rect.x1, rect.bottom],
@@ -1454,21 +2063,46 @@ function buildVisualBar(visual) {
   ]);
 }
 
-function addRect(canvas, box, kind, title, pageWidth, pageHeight) {
+function _boxCoveredByRects(box, rects) {
+  if (!rects || !rects.length) return false;
+  const [bx0, btop, bx1, bbottom] = box;
+  const bArea = Math.max(bx1 - bx0, 0) * Math.max(bbottom - btop, 0);
+  if (bArea <= 0) return false;
+  for (const r of rects) {
+    const ix0 = Math.max(bx0, r.x0);
+    const itop = Math.max(btop, r.top);
+    const ix1 = Math.min(bx1, r.x1);
+    const ibottom = Math.min(bbottom, r.bottom);
+    if (ix1 > ix0 && ibottom > itop) {
+      const inter = (ix1 - ix0) * (ibottom - itop);
+      if (inter / bArea >= 0.5) return true;
+    }
+  }
+  return false;
+}
+
+function addRect(canvas, box, kind, title, pageWidth, pageHeight, row = -1, side = "") {
   const [x0, top, x1, bottom] = box;
   const width = Math.max(x1 - x0, 0.5);
   const height = Math.max(bottom - top, 0.5);
-  canvas.append(
-    el("div", {
-      class: `rect ${kind}`,
-      title,
-      style:
-        `left:${(x0 / pageWidth) * 100}%;` +
-        `top:${(top / pageHeight) * 100}%;` +
-        `width:${(width / pageWidth) * 100}%;` +
-        `height:${(height / pageHeight) * 100}%`,
-    })
-  );
+  const attrs = {
+    class: `rect ${kind}`,
+    title,
+    style:
+      `left:${(x0 / pageWidth) * 100}%;` +
+      `top:${(top / pageHeight) * 100}%;` +
+      `width:${(width / pageWidth) * 100}%;` +
+      `height:${(height / pageHeight) * 100}%`,
+  };
+  if (row >= 0) {
+    attrs["data-row"] = String(row);
+    attrs.onclick = (e) => {
+      if (state.annotating) return;
+      e.stopPropagation();
+      jumpToTextRow(row, side);
+    };
+  }
+  canvas.append(el("div", attrs));
 }
 
 function buildPageCard(side, index, visualPage, pairIdx = 0) {
@@ -1476,37 +2110,58 @@ function buildPageCard(side, index, visualPage, pairIdx = 0) {
   const name = side === "left" ? data.left.name : data.right.name;
   const renderable = side === "left" ? data.renderable.left : data.renderable.right;
 
-  const card = el("div", { class: "page-card" }, [
-    el("div", { class: "page-label" }, [
-      el("span", { text: `${side === "left" ? "A" : "B"} — ${name}` }),
-      el("span", { text: index === null ? i18n.t("page.none") : i18n.t("page.label", { n: index + 1 }) }),
-    ]),
-  ]);
+  const card = el(
+    "div",
+    {
+      class: "page-card",
+      "data-side": side,
+      ...(index !== null ? { "data-page": String(index) } : {}),
+    },
+    [
+      el("div", { class: "page-label" }, [
+        el("span", { text: `${side === "left" ? "A" : "B"} — ${name}` }),
+        el("span", { text: index === null ? i18n.t("page.none") : i18n.t("page.label", { n: index + 1 }) }),
+      ]),
+    ]
+  );
 
   if (index === null || !renderable) {
-    card.append(el("div", { class: "page-canvas missing", text: i18n.t("page.missing") }));
+    card.append(missingCanvas());
     return card;
   }
 
   const size = data.pages[side][index] || { width: 595, height: 842 };
-  const canvas = el("div", { class: "page-canvas" });
+  const canvas = el("div", { class: "page-canvas is-loading", style: canvasStyle(size) }, [
+    el("div", { class: "canvas-spinner", "aria-label": i18n.t("state.loading") }, [
+      el("span", { class: "canvas-spinner-icon", "aria-hidden": "true" }),
+      el("span", { class: "canvas-spinner-label", text: i18n.t("state.loading") }),
+    ]),
+  ]);
   canvas.append(
-    el("img", {
-      src: `/api/compare/${data.id}/page/${side}/${index}.png?dpi=120`,
-      alt: `${name} ${i18n.t("page.label", { n: index + 1 })}`,
-      loading: "lazy",
-    })
+    pageImage(
+      `/api/compare/${data.id}/page/${side}/${index}.png`,
+      `${name} ${i18n.t("page.label", { n: index + 1 })}`,
+      pairIdx === 0
+    )
   );
 
   const rects = (data.rects[side] && data.rects[side][String(index)]) || [];
-  for (const rect of rects) {
+  const rowsWithWords = new Set(
+    rects.filter((r) => r.level === "word").map((r) => r.row)
+  );
+  const activeRects = rects.filter(
+    (r) => !(r.level === "line" && rowsWithWords.has(r.row))
+  );
+  for (const rect of activeRects) {
     addRect(
       canvas,
       [rect.x0, rect.top, rect.x1, rect.bottom],
       rect.kind === "insert" ? "insert" : rect.kind === "delete" ? "delete" : "replace",
       `${rect.kind}: ${rect.text}`,
       size.width,
-      size.height
+      size.height,
+      rect.row,
+      side
     );
   }
 
@@ -1517,6 +2172,7 @@ function buildPageCard(side, index, visualPage, pairIdx = 0) {
         ? visualPage.right_regions
         : [];
   for (const box of visualBoxes || []) {
+    if (_boxCoveredByRects(box, activeRects)) continue;
     addRect(canvas, box, "visual", i18n.t("visual.region"), size.width, size.height);
   }
 
@@ -1685,17 +2341,35 @@ function collectChanges() {
   }
   state.changeIndex = -1;
   updateChangeNav();
+  renderMinimap();
 }
 
 function updateChangeNav() {
+  const count = state.changes.length;
+  const current = count === 0 ? 0 : Math.max(state.changeIndex + 1, 0);
+  const text = i18n.t("nav.position", { current, total: count });
+
   const nav = $("#change-nav");
-  if (!nav) return;
-  nav.hidden = state.changes.length === 0;
-  const current = Math.max(state.changeIndex + 1, 0);
-  $("#change-count").textContent = i18n.t("nav.position", {
-    current,
-    total: state.changes.length,
-  });
+  if (nav) {
+    nav.hidden = count === 0;
+    const cnt = $("#change-count");
+    if (cnt) cnt.textContent = text;
+    const prev = $("#prev-change");
+    const next = $("#next-change");
+    if (prev) prev.disabled = count === 0;
+    if (next) next.disabled = count === 0;
+  }
+
+  const topNav = $("#top-diff-nav");
+  if (topNav) {
+    topNav.hidden = count === 0;
+    const topCnt = $("#top-change-count");
+    if (topCnt) topCnt.textContent = text;
+    const topPrev = $("#top-prev-change");
+    const topNext = $("#top-next-change");
+    if (topPrev) topPrev.disabled = count === 0;
+    if (topNext) topNext.disabled = count === 0;
+  }
 }
 
 function setCurrentChange(index) {
@@ -1720,16 +2394,326 @@ function gotoChange(delta) {
   setCurrentChange(index);
 }
 
+/* ---------- diff overview minimap (TASK-14) ---------- */
+function renderMinimap() {
+  const minimap = $("#diff-minimap");
+  const track = $("#minimap-track");
+  if (!minimap || !track) return;
+
+  if ($("#result-view").hidden || !state.comparison || !state.changes.length) {
+    minimap.hidden = true;
+    return;
+  }
+
+  minimap.hidden = false;
+  const viewport = $("#minimap-viewport");
+  track.replaceChildren(viewport);
+
+  const docHeight = Math.max(
+    document.documentElement.scrollHeight,
+    document.body.scrollHeight,
+    window.innerHeight
+  );
+  const trackHeight = track.clientHeight || (window.innerHeight - 48);
+
+  const fragment = document.createDocumentFragment();
+  for (const node of state.changes) {
+    const rect = node.getBoundingClientRect();
+    const elemTop = rect.top + window.scrollY;
+    const ratio = Math.min(Math.max(elemTop / docHeight, 0), 1);
+    const topPx = Math.round(ratio * trackHeight);
+
+    let kind = "mod";
+    if (node.classList.contains("add")) kind = "add";
+    else if (node.classList.contains("del")) kind = "del";
+    else if (node.classList.contains("mod")) kind = "mod";
+
+    const mark = el("div", {
+      class: `minimap-mark ${kind}`,
+      style: `top: ${topPx}px`,
+    });
+    fragment.appendChild(mark);
+  }
+  track.appendChild(fragment);
+  updateMinimapViewport();
+}
+
+function updateMinimapViewport() {
+  const minimap = $("#diff-minimap");
+  const track = $("#minimap-track");
+  const viewport = $("#minimap-viewport");
+  if (!minimap || minimap.hidden || !track || !viewport) return;
+
+  const docHeight = Math.max(
+    document.documentElement.scrollHeight,
+    document.body.scrollHeight,
+    window.innerHeight
+  );
+  const trackHeight = track.clientHeight || (window.innerHeight - 48);
+  const scrollY = window.scrollY;
+  const viewHeight = window.innerHeight;
+
+  const topRatio = Math.min(Math.max(scrollY / docHeight, 0), 1);
+  const heightRatio = Math.min(Math.max(viewHeight / docHeight, 0.04), 1);
+
+  viewport.style.top = `${Math.round(topRatio * trackHeight)}px`;
+  viewport.style.height = `${Math.round(heightRatio * trackHeight)}px`;
+}
+
+function setupMinimap() {
+  const minimap = $("#diff-minimap");
+  const track = $("#minimap-track");
+  if (!minimap || !track) return;
+
+  let isDragging = false;
+
+  function scrollToMinimapPos(clientY) {
+    const rect = track.getBoundingClientRect();
+    const offsetY = clientY - rect.top;
+    const ratio = Math.min(Math.max(offsetY / rect.height, 0), 1);
+    const docHeight = Math.max(
+      document.documentElement.scrollHeight,
+      document.body.scrollHeight,
+      window.innerHeight
+    );
+    window.scrollTo({
+      top: ratio * docHeight - window.innerHeight / 2,
+      behavior: isDragging ? "auto" : "smooth",
+    });
+  }
+
+  minimap.addEventListener("mousedown", (e) => {
+    isDragging = true;
+    scrollToMinimapPos(e.clientY);
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!isDragging) return;
+    scrollToMinimapPos(e.clientY);
+  });
+
+  window.addEventListener("mouseup", () => {
+    isDragging = false;
+  });
+
+  window.addEventListener("scroll", updateMinimapViewport, { passive: true });
+  window.addEventListener("resize", () => {
+    if (!minimap.hidden) renderMinimap();
+  });
+}
+
+/* ---------- in-document search & filtering (TASK-15) ---------- */
+function clearSearchHighlights() {
+  const marks = Array.from(document.querySelectorAll("#text-view mark.search-match"));
+  for (const mark of marks) {
+    const parent = mark.parentNode;
+    if (parent) {
+      mark.replaceWith(document.createTextNode(mark.textContent));
+      parent.normalize();
+    }
+  }
+}
+
+function highlightTextInContainer(container, lowerQ, matchLen) {
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+  const textNodes = [];
+  let node;
+  while ((node = walker.nextNode())) {
+    textNodes.push(node);
+  }
+
+  for (const textNode of textNodes) {
+    const str = textNode.nodeValue;
+    const lowerStr = str.toLowerCase();
+    let idx = lowerStr.indexOf(lowerQ);
+    if (idx === -1) continue;
+
+    const parent = textNode.parentNode;
+    const fragment = document.createDocumentFragment();
+    let lastIdx = 0;
+
+    while (idx !== -1) {
+      if (idx > lastIdx) {
+        fragment.appendChild(document.createTextNode(str.slice(lastIdx, idx)));
+      }
+      const mark = document.createElement("mark");
+      mark.className = "search-match";
+      mark.textContent = str.slice(idx, idx + matchLen);
+      fragment.appendChild(mark);
+      lastIdx = idx + matchLen;
+      idx = lowerStr.indexOf(lowerQ, lastIdx);
+    }
+    if (lastIdx < str.length) {
+      fragment.appendChild(document.createTextNode(str.slice(lastIdx)));
+    }
+    parent.replaceChild(fragment, textNode);
+  }
+}
+
+function updateSearchCount() {
+  const countEl = $("#search-count");
+  if (!countEl) return;
+  const total = state.search.matches.length;
+  const current = total === 0 ? 0 : state.search.index + 1;
+  countEl.textContent = `${current} / ${total}`;
+}
+
+function performSearch(query) {
+  clearSearchHighlights();
+  state.search.matches = [];
+  state.search.index = -1;
+  const q = (query || "").trim();
+  state.search.query = q;
+  if (!q) {
+    updateSearchCount();
+    return;
+  }
+
+  const rows = Array.from(document.querySelectorAll("#text-view .row"));
+  const lowerQ = q.toLowerCase();
+
+  for (const row of rows) {
+    if (row.offsetParent === null) continue; // Skip hidden rows
+    const textContainers = row.querySelectorAll(".cell .text");
+    for (const container of textContainers) {
+      highlightTextInContainer(container, lowerQ, q.length);
+    }
+  }
+
+  state.search.matches = Array.from(document.querySelectorAll("#text-view mark.search-match"));
+  if (state.search.matches.length > 0) {
+    state.search.index = 0;
+    state.search.matches[0].classList.add("active");
+    state.search.matches[0].scrollIntoView({
+      block: "center",
+      behavior: reducedMotion() ? "auto" : "smooth",
+    });
+  }
+  updateSearchCount();
+}
+
+function navigateSearch(delta) {
+  if (!state.search.matches.length) return;
+  if (state.search.matches[state.search.index]) {
+    state.search.matches[state.search.index].classList.remove("active");
+  }
+  state.search.index =
+    (state.search.index + delta + state.search.matches.length) % state.search.matches.length;
+  const current = state.search.matches[state.search.index];
+  if (current) {
+    current.classList.add("active");
+    current.scrollIntoView({
+      block: "center",
+      behavior: reducedMotion() ? "auto" : "smooth",
+    });
+  }
+  updateSearchCount();
+}
+
+function openSearch() {
+  const bar = $("#search-bar");
+  if (!bar) return;
+  bar.hidden = false;
+  const input = $("#search-input");
+  if (input) {
+    input.focus();
+    input.select();
+    if (input.value) performSearch(input.value);
+  }
+}
+
+function closeSearch() {
+  const bar = $("#search-bar");
+  if (!bar) return;
+  bar.hidden = true;
+  clearSearchHighlights();
+  state.search.matches = [];
+  state.search.index = -1;
+  updateSearchCount();
+}
+
+function toggleSearch() {
+  const bar = $("#search-bar");
+  if (!bar) return;
+  if (bar.hidden) openSearch();
+  else closeSearch();
+}
+
+function applyKindFilter(filterKind) {
+  state.search.filter = filterKind;
+  for (const chip of $$("#search-bar .filter-chip")) {
+    chip.classList.toggle("active", chip.dataset.filter === filterKind);
+  }
+  const rows = $$("#text-view .row");
+  for (const row of rows) {
+    if (filterKind === "all") {
+      row.style.display = "";
+    } else if (filterKind === "add") {
+      row.style.display = row.classList.contains("add") ? "" : "none";
+    } else if (filterKind === "del") {
+      row.style.display = row.classList.contains("del") ? "" : "none";
+    } else if (filterKind === "mod") {
+      row.style.display = row.classList.contains("mod") ? "" : "none";
+    }
+  }
+  collectChanges();
+  if (state.search.query) {
+    performSearch(state.search.query);
+  }
+}
+
+function setupSearch() {
+  const toggleBtn = $("#search-toggle");
+  if (toggleBtn) toggleBtn.addEventListener("click", toggleSearch);
+
+  const closeBtn = $("#search-close");
+  if (closeBtn) closeBtn.addEventListener("click", closeSearch);
+
+  const prevBtn = $("#search-prev");
+  if (prevBtn) prevBtn.addEventListener("click", () => navigateSearch(-1));
+
+  const nextBtn = $("#search-next");
+  if (nextBtn) nextBtn.addEventListener("click", () => navigateSearch(1));
+
+  const input = $("#search-input");
+  if (input) {
+    input.addEventListener("input", (e) => {
+      performSearch(e.target.value);
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        navigateSearch(e.shiftKey ? -1 : 1);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        closeSearch();
+      }
+    });
+  }
+
+  for (const chip of $$("#search-bar .filter-chip")) {
+    chip.addEventListener("click", () => {
+      applyKindFilter(chip.dataset.filter);
+    });
+  }
+}
+
 /* ---------- view switches ---------- */
 function setMode(mode) {
   const prevMode = state.mode;
   state.mode = mode;
   $$(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.mode === mode));
   const isPageMode = mode === "pages" || mode === "xray";
+  const isFolderMode = mode === "folder";
   $("#text-view").hidden = mode !== "text";
   $("#page-view").hidden = !isPageMode;
+  if ($("#folder-view")) $("#folder-view").hidden = !isFolderMode;
+  const stickyHeader = $(".result-sticky-header");
+  if (stickyHeader) stickyHeader.hidden = isFolderMode;
   $("#only-diff-wrap").hidden = mode !== "text";
   $("#zoom-wrap").hidden = !isPageMode;
+  if ($("#boxes-wrap")) $("#boxes-wrap").hidden = !isPageMode;
+  $("#box-color-wrap").hidden = !isPageMode;
   if ($("#annotate-wrap")) $("#annotate-wrap").hidden = !isPageMode;
   if ($("#annotate-clear")) {
     $("#annotate-clear").hidden = !isPageMode || !(state.annotations && state.annotations.length);
@@ -1751,12 +2735,400 @@ function setMode(mode) {
   }
 }
 
+function openFilePairInNewTab(leftPath, rightPath) {
+  createNewSessionTab();
+  desktop.paths.left = leftPath;
+  desktop.paths.right = rightPath;
+  showPath("left", leftPath);
+  showPath("right", rightPath);
+  updateCompareButton();
+  runComparison();
+}
+
+function renderFolderDiff(folderData) {
+  state.folderData = folderData;
+  $("#upload-view").hidden = true;
+  $("#result-view").hidden = false;
+  $("#view-tabs").hidden = false;
+  if ($("#tab-folder")) $("#tab-folder").hidden = false;
+  $("#text-view").hidden = true;
+  $("#page-view").hidden = true;
+  if ($("#folder-view")) $("#folder-view").hidden = false;
+  $("#tab-pages").disabled = true;
+  if ($("#tab-xray")) $("#tab-xray").disabled = true;
+  $("#only-diff-wrap").hidden = true;
+  $("#zoom-wrap").hidden = true;
+  if ($("#boxes-wrap")) $("#boxes-wrap").hidden = true;
+  $("#box-color-wrap").hidden = true;
+  if ($("#top-diff-nav")) $("#top-diff-nav").hidden = true;
+  if ($("#diff-minimap")) $("#diff-minimap").hidden = true;
+  if ($("#folder-view")) $("#folder-view").hidden = false;
+  if ($("#tab-folder")) $("#tab-folder").hidden = false;
+  setMode("folder");
+
+  const container = $("#folder-view");
+  if (!container) return;
+  container.replaceChildren();
+
+  const head = el("div", { class: "folder-head" }, [
+    el("div", { class: "folder-paths" }, [
+      el("div", { class: "f-path" }, [el("strong", { text: "A: " }), el("span", { text: folderData.left_path })]),
+      el("div", { class: "f-path" }, [el("strong", { text: "B: " }), el("span", { text: folderData.right_path })]),
+    ]),
+    el("div", { class: "folder-filters" }, [
+      el("button", { class: "filter-chip active", "data-f-filter": "all", text: `${i18n.t("folder.filterAll")} (${folderData.total_count})` }),
+      el("button", { class: "filter-chip chip-mod", "data-f-filter": "modified", text: `${i18n.t("folder.modified")} (${folderData.modified_count})` }),
+      el("button", { class: "filter-chip chip-add", "data-f-filter": "added", text: `${i18n.t("folder.added")} (${folderData.added_count})` }),
+      el("button", { class: "filter-chip chip-del", "data-f-filter": "removed", text: `${i18n.t("folder.removed")} (${folderData.removed_count})` }),
+      el("button", { class: "filter-chip", "data-f-filter": "identical", text: `${i18n.t("folder.identical")} (${folderData.identical_count})` }),
+    ]),
+  ]);
+  container.appendChild(head);
+
+  const table = el("table", { class: "folder-table" });
+  const thead = el("thead", {}, [
+    el("tr", {}, [
+      el("th", { style: "width: 110px;", text: i18n.t("folder.status") }),
+      el("th", { text: i18n.t("folder.path") }),
+      el("th", { style: "width: 120px;", text: `A ${i18n.t("folder.size")}` }),
+      el("th", { style: "width: 120px;", text: `B ${i18n.t("folder.size")}` }),
+      el("th", { style: "width: 140px; text-align: right;", text: "" }),
+    ]),
+  ]);
+  table.appendChild(thead);
+
+  const tbody = el("tbody");
+  const fmtBytes = (bytes) => {
+    if (bytes === null || bytes === undefined) return "—";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  for (const item of folderData.items) {
+    let badgeClass = "badge-same";
+    let badgeText = i18n.t("folder.identical");
+    if (item.status === "modified") {
+      badgeClass = "badge-mod";
+      badgeText = i18n.t("folder.modified");
+    } else if (item.status === "added") {
+      badgeClass = "badge-add";
+      badgeText = i18n.t("folder.added");
+    } else if (item.status === "removed") {
+      badgeClass = "badge-del";
+      badgeText = i18n.t("folder.removed");
+    }
+
+    const tr = el("tr", { class: `f-row f-row-${item.status}`, "data-status": item.status });
+    tr.appendChild(el("td", {}, [el("span", { class: `folder-badge ${badgeClass}`, text: badgeText })]));
+    tr.appendChild(el("td", { class: "f-rel-path", text: item.rel_path }));
+    tr.appendChild(el("td", { text: fmtBytes(item.left_size) }));
+    tr.appendChild(el("td", { text: fmtBytes(item.right_size) }));
+
+    const actionTd = el("td", { style: "text-align: right;" });
+    if (item.status === "modified" && item.left_path && item.right_path) {
+      const btn = el("button", {
+        class: "flat folder-diff-btn",
+        type: "button",
+        text: i18n.t("folder.compare"),
+        onclick: () => openFilePairInNewTab(item.left_path, item.right_path),
+      });
+      actionTd.appendChild(btn);
+      tr.addEventListener("dblclick", () => openFilePairInNewTab(item.left_path, item.right_path));
+    }
+    tr.appendChild(actionTd);
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  container.appendChild(table);
+
+  for (const chip of head.querySelectorAll(".filter-chip")) {
+    chip.addEventListener("click", () => {
+      head.querySelectorAll(".filter-chip").forEach((c) => c.classList.remove("active"));
+      chip.classList.add("active");
+      const filter = chip.dataset.fFilter;
+      for (const row of tbody.querySelectorAll(".f-row")) {
+        if (filter === "all" || row.dataset.status === filter) {
+          row.style.display = "";
+        } else {
+          row.style.display = "none";
+        }
+      }
+    });
+  }
+}
+
+/* ---------- box outline color ---------- */
+const BOX_COLOR_KEY = "diffanydoc:box-color";
+const BOX_COLORS = ["amber", "ruby", "blue", "contrast"];
+
+function applyBoxColor(name) {
+  const color = BOX_COLORS.includes(name) ? name : "amber";
+  document.body.dataset.boxColor = color;
+  for (const item of $$("#box-color-menu [data-color]")) {
+    const active = item.dataset.color === color;
+    item.classList.toggle("active", active);
+    item.setAttribute("aria-checked", String(active));
+  }
+}
+
+function setupBoxColor() {
+  const saved = safeStorageGet(BOX_COLOR_KEY);
+  applyBoxColor(saved);
+  for (const item of $$("#box-color-menu [data-color]")) {
+    item.addEventListener("click", () => {
+      closeMenus();
+      applyBoxColor(item.dataset.color);
+      safeStorageSet(BOX_COLOR_KEY, item.dataset.color);
+    });
+  }
+}
+
+const BOXES_ENABLED_KEY = "diffanydoc:boxes-enabled";
+
+function applyBoxesEnabled(enabled) {
+  document.body.classList.toggle("boxes-off", !enabled);
+  const toggle = $("#opt-boxes");
+  if (toggle) toggle.checked = enabled;
+}
+
+function setupBoxesToggle() {
+  const saved = safeStorageGet(BOXES_ENABLED_KEY);
+  const enabled = saved !== "false";
+  applyBoxesEnabled(enabled);
+  const toggle = $("#opt-boxes");
+  if (toggle) {
+    toggle.addEventListener("change", (event) => {
+      const checked = Boolean(event.target.checked);
+      applyBoxesEnabled(checked);
+      safeStorageSet(BOXES_ENABLED_KEY, String(checked));
+    });
+  }
+}
+
+/* ---------- page zoom / pan ---------- */
+const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4];
+const PT_TO_PX = 96 / 72;
+
+function isPageMode() {
+  return state.mode === "pages" || state.mode === "xray";
+}
+
+function clampZoom(value) {
+  return Math.min(4, Math.max(0.25, value));
+}
+
+/* Largest page in PDF points. */
+function pageExtent() {
+  const pages = (state.comparison && state.comparison.pages) || {};
+  let width = 0;
+  let height = 0;
+  for (const side of ["left", "right"]) {
+    for (const page of Object.values(pages[side] || {})) {
+      if (!page) continue;
+      width = Math.max(width, page.width);
+      height = Math.max(height, page.height);
+    }
+  }
+  return { width: width || 595, height: height || 842 };
+}
+
+function canvasStyle(size) {
+  return (
+    `width:calc(${(size.width * PT_TO_PX).toFixed(2)}px * var(--zoom, 1));` +
+    `aspect-ratio:${size.width} / ${size.height}`
+  );
+}
+
+function missingCanvas() {
+  return el("div", {
+    class: "page-canvas missing",
+    style: canvasStyle(pageExtent()),
+    text: i18n.t("page.missing"),
+  });
+}
+
+/* Render DPI follows zoom so small print stays sharp. */
+function pageDpi() {
+  const need = 96 * state.zoomValue * (window.devicePixelRatio || 1);
+  return Math.max(120, Math.min(300, Math.ceil(need / 30) * 30));
+}
+
+function pageImage(base, alt, eager = false) {
+  const img = el("img", {
+    "data-base": base,
+    alt,
+    loading: eager ? "eager" : "lazy",
+  });
+  img.addEventListener("load", () => {
+    img.closest(".page-canvas")?.classList.remove("is-loading");
+    img.classList.add("loaded");
+  });
+  img.addEventListener("error", () => {
+    img.closest(".page-canvas")?.classList.remove("is-loading");
+  });
+  img.src = `${base}?dpi=${pageDpi()}`;
+  return img;
+}
+
+let dpiTimer = 0;
+function scheduleDpiUpdate() {
+  clearTimeout(dpiTimer);
+  dpiTimer = setTimeout(() => {
+    const dpi = pageDpi();
+    for (const img of $$("#page-view img[data-base]")) {
+      const next = `${img.dataset.base}?dpi=${dpi}`;
+      if (img.getAttribute("src") !== next) {
+        img.closest(".page-canvas")?.classList.add("is-loading");
+        img.src = next;
+      }
+    }
+  }, 250);
+}
+
+function resolveZoom() {
+  if (typeof state.zoom === "number") return state.zoom;
+  const view = $("#page-view");
+  if (!view.clientWidth) return state.zoomValue;
+  const extent = pageExtent();
+  // In xray mode, using cols = 1 with full window width stretches a single page across the whole wide screen.
+  // Instead, size it comfortably (matching side-by-side page size or max 1.05 actual scale).
+  const cols = 2;
+  const style = getComputedStyle(view);
+  const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+  const row = view.querySelector(".page-row");
+  const gap = row ? parseFloat(getComputedStyle(row).columnGap) || 0 : 0;
+  const card = view.querySelector(".page-card");
+  const cardStyle = card ? getComputedStyle(card) : null;
+  const chrome = cardStyle
+    ? parseFloat(cardStyle.paddingLeft) +
+      parseFloat(cardStyle.paddingRight) +
+      parseFloat(cardStyle.borderLeftWidth) +
+      parseFloat(cardStyle.borderRightWidth)
+    : 0;
+  const avail = view.clientWidth - padding - cols * chrome - (cols - 1) * gap - 1;
+  let zoom = avail / (cols * extent.width * PT_TO_PX);
+  if (state.mode === "xray" && state.zoom === "width") {
+    zoom = Math.min(zoom, 1.05);
+  }
+  if (state.zoom === "page") {
+    const stickyHeader = $(".result-sticky-header");
+    const top = $(".topbar").offsetHeight + (stickyHeader ? stickyHeader.offsetHeight : ($(".result-head") ? $(".result-head").offsetHeight : 0));
+    const label = 40;
+    zoom = Math.min(
+      zoom,
+      (window.innerHeight - top - label) / (extent.height * PT_TO_PX)
+    );
+  }
+  return clampZoom(zoom);
+}
+
 function applyZoom() {
-  $("#page-view").style.maxWidth = `${1500 * state.zoom}px`;
-  $("#zoom-label").textContent = `%${Math.round(state.zoom * 100)}`;
+  state.zoomValue = resolveZoom();
+  $("#page-view").style.setProperty("--zoom", String(state.zoomValue));
+  $("#zoom-label").textContent = `%${Math.round(state.zoomValue * 100)}`;
+  $("#zoom-fit-width").setAttribute("aria-pressed", String(state.zoom === "width"));
+  $("#zoom-fit-page").setAttribute("aria-pressed", String(state.zoom === "page"));
+  scheduleDpiUpdate();
+}
+
+/* Keep the point under the anchor fixed. */
+function setZoom(value, anchor) {
+  const view = $("#page-view");
+  const before = state.zoomValue;
+  const rect = view.getBoundingClientRect();
+  const x = (anchor ? anchor.x : rect.left + view.clientWidth / 2) - rect.left;
+  const y = (anchor ? anchor.y : window.innerHeight / 2) - rect.top;
+  const scrollLeft = view.scrollLeft;
+  state.zoom = typeof value === "number" ? clampZoom(value) : value;
+  applyZoom();
+  syncActiveTab();
+  const ratio = state.zoomValue / before;
+  view.scrollLeft = (scrollLeft + x) * ratio - x;
+  window.scrollBy(0, y * (ratio - 1));
+}
+
+function stepZoom(direction) {
+  const current = state.zoomValue;
+  const next =
+    direction > 0
+      ? ZOOM_STEPS.find((step) => step > current + 0.001)
+      : [...ZOOM_STEPS].reverse().find((step) => step < current - 0.001);
+  setZoom(next === undefined ? current : next);
+}
+
+const pan = { ready: false };
+
+function setPanReady(ready) {
+  pan.ready = ready;
+  document.body.classList.toggle("pan-ready", ready);
+}
+
+function setupPageZoom() {
+  const view = $("#page-view");
+
+  view.addEventListener(
+    "wheel",
+    (event) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      const factor = event.deltaY < 0 ? 1.1 : 1 / 1.1;
+      setZoom(state.zoomValue * factor, { x: event.clientX, y: event.clientY });
+    },
+    { passive: false }
+  );
+
+  // Capture phase: panning wins over annotation drawing.
+  view.addEventListener(
+    "mousedown",
+    (event) => {
+      if (!(event.button === 1 || (event.button === 0 && pan.ready))) return;
+      event.preventDefault();
+      event.stopPropagation();
+      let lastX = event.clientX;
+      let lastY = event.clientY;
+      document.body.classList.add("panning");
+      const onMove = (move) => {
+        view.scrollLeft -= move.clientX - lastX;
+        window.scrollBy(0, -(move.clientY - lastY));
+        lastX = move.clientX;
+        lastY = move.clientY;
+      };
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        document.body.classList.remove("panning");
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    true
+  );
+  // No middle-click autoscroll or paste.
+  view.addEventListener("auxclick", (event) => {
+    if (event.button === 1) event.preventDefault();
+  });
+
+  document.addEventListener("keyup", (event) => {
+    if (event.key === " ") setPanReady(false);
+  });
+  window.addEventListener("blur", () => setPanReady(false));
+  window.addEventListener("resize", () => {
+    if (state.comparison && isPageMode() && typeof state.zoom !== "number") {
+      applyZoom();
+    }
+  });
+
+  $("#zoom-in").addEventListener("click", () => stepZoom(1));
+  $("#zoom-out").addEventListener("click", () => stepZoom(-1));
+  $("#zoom-reset").addEventListener("click", () => setZoom(1));
+  $("#zoom-fit-width").addEventListener("click", () => setZoom("width"));
+  $("#zoom-fit-page").addEventListener("click", () => setZoom("page"));
 }
 
 function showUploadView() {
+  closeSearch();
+  applyKindFilter("all");
   state.comparison = null;
   state.changes = [];
   state.changeIndex = -1;
@@ -1767,9 +3139,15 @@ function showUploadView() {
   $("#only-diff-wrap").hidden = true;
   $("#visual-wrap").hidden = true;
   $("#zoom-wrap").hidden = true;
+  if ($("#boxes-wrap")) $("#boxes-wrap").hidden = true;
+  $("#box-color-wrap").hidden = true;
   if ($("#annotate-wrap")) $("#annotate-wrap").hidden = true;
   if ($("#annotate-clear")) $("#annotate-clear").hidden = true;
-  $("#change-nav").hidden = true;
+  if ($("#change-nav")) $("#change-nav").hidden = true;
+  if ($("#top-diff-nav")) $("#top-diff-nav").hidden = true;
+  if ($("#diff-minimap")) $("#diff-minimap").hidden = true;
+  if ($("#folder-view")) $("#folder-view").hidden = true;
+  if ($("#tab-folder")) $("#tab-folder").hidden = true;
   $("#stats").replaceChildren();
   state.visual = null;
   state.ocr = null;
@@ -1797,6 +3175,7 @@ function reset() {
   document.body.classList.remove("visual-off");
   if ($("#opt-ocr")) $("#opt-ocr").checked = false;
   if ($("#opt-format")) $("#opt-format").checked = false;
+  if ($("#opt-headers")) $("#opt-headers").checked = false;
   if ($("#opt-ocr-lang")) $("#opt-ocr-lang").hidden = true;
   state.annotations = [];
   state.annotating = false;
@@ -1865,32 +3244,219 @@ window.addEventListener("pywebviewready", initDesktop);
 /* In the desktop shell, reports open in the real browser, not the webview. */
 $("#export").addEventListener("click", (event) => {
   closeMenus();
-  if (!desktop.available) return;
-  event.preventDefault();
-  const href = $("#export").getAttribute("href");
-  if (href) window.pywebview.api.open_external(new URL(href, location.origin).href);
+  openExternal(event, $("#export").getAttribute("href"));
 });
+if ($("#export-pdf")) {
+  $("#export-pdf").addEventListener("click", (event) => {
+    closeMenus();
+    openExternal(event, $("#export-pdf").getAttribute("href"));
+  });
+}
 
 /* ---------- wiring ---------- */
 setupDropZones();
+setupMinimap();
 setupMenus();
-setupDialogs();
-loadTheme();
-$("#compare").addEventListener("click", runComparison);
-$("#restart").addEventListener("click", reset);
+function updateIntegrationUI(data) {
+  const pill = $("#settings-integrate-pill");
+  const toggleBtn = $("#settings-integrate-toggle");
+  const pendingRow = $("#settings-pending-row");
+  const pendingPath = $("#settings-pending-path");
+  const legacyBtn = $("#integrate-menu");
+
+  const installed = Boolean(data && data.installed);
+  if (pill) {
+    pill.dataset.installed = String(installed);
+    pill.className = `pref-status-pill ${installed ? "installed" : "not-installed"}`;
+    pill.textContent = i18n.t(installed ? "settings.integrate.statusInstalled" : "settings.integrate.statusNotInstalled");
+  }
+  if (toggleBtn) {
+    toggleBtn.dataset.installed = String(installed);
+    toggleBtn.className = installed ? "flat" : "suggested";
+    toggleBtn.textContent = i18n.t(installed ? "menu.integrateRemove" : "menu.integrate");
+  }
+  if (pendingRow && pendingPath) {
+    if (data && data.pending_name) {
+      pendingRow.hidden = false;
+      pendingPath.textContent = data.pending_name;
+    } else {
+      pendingRow.hidden = true;
+      pendingPath.textContent = i18n.t("settings.integrate.noPending");
+    }
+  }
+  if (legacyBtn) {
+    legacyBtn.dataset.installed = String(installed);
+    legacyBtn.textContent = i18n.t(installed ? "menu.integrateRemove" : "menu.integrate");
+  }
+}
+
+async function toggleIntegration() {
+  const pill = $("#settings-integrate-pill");
+  const legacyBtn = $("#integrate-menu");
+  const isInstalled = pill
+    ? pill.dataset.installed === "true"
+    : legacyBtn
+      ? legacyBtn.dataset.installed === "true"
+      : false;
+  const action = isInstalled ? "uninstall" : "install";
+
+  try {
+    let result;
+    if (desktop.available && window.pywebview && window.pywebview.api && window.pywebview.api.integrate) {
+      result = await window.pywebview.api.integrate(action, i18n.lang);
+    } else {
+      const response = await fetch("/api/integrate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, language: i18n.lang }),
+      });
+      result = await response.json();
+    }
+
+    if (result && result.success) {
+      updateIntegrationUI(result);
+      showToast(i18n.t(result.installed ? "integrate.installed" : "integrate.removed"));
+    } else {
+      showToast((result && result.error) || i18n.t("error.generic"), true);
+    }
+  } catch (err) {
+    showToast(err.message || i18n.t("error.generic"), true);
+  }
+}
+
+async function clearPendingSelection() {
+  try {
+    let result;
+    if (desktop.available && window.pywebview && window.pywebview.api && window.pywebview.api.integrate) {
+      result = await window.pywebview.api.integrate("clear_pending", i18n.lang);
+    } else {
+      const response = await fetch("/api/integrate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clear_pending", language: i18n.lang }),
+      });
+      result = await response.json();
+    }
+    if (result && result.success) {
+      updateIntegrationUI(result);
+      showToast(i18n.t("settings.integrate.clearPending"));
+    }
+  } catch (err) {
+    showToast(err.message || i18n.t("error.generic"), true);
+  }
+}
+
+function updateIntegrationState(installed) {
+  updateIntegrationUI({ installed });
+}
+
+async function loadIntegrationStatus() {
+  try {
+    let data;
+    if (desktop.available && window.pywebview && window.pywebview.api && window.pywebview.api.get_integrate_status) {
+      data = await window.pywebview.api.get_integrate_status();
+    } else {
+      const response = await fetch("/api/integrate/status");
+      if (!response.ok) return;
+      data = await response.json();
+    }
+    updateIntegrationUI(data);
+  } catch (_) {}
+}
+
+function loadStoredPreferences() {
+  const prefSpace = safeStorageGet("diffanydoc.pref.space");
+  const prefCase = safeStorageGet("diffanydoc.pref.case");
+  const prefFormat = safeStorageGet("diffanydoc.pref.format");
+
+  if (prefSpace !== null) {
+    const val = prefSpace === "true";
+    if ($("#opt-space")) $("#opt-space").checked = val;
+    if ($("#settings-default-space")) $("#settings-default-space").checked = val;
+  }
+  if (prefCase !== null) {
+    const val = prefCase === "true";
+    if ($("#opt-case")) $("#opt-case").checked = val;
+    if ($("#settings-default-case")) $("#settings-default-case").checked = val;
+  }
+  if (prefFormat !== null) {
+    const val = prefFormat === "true";
+    if ($("#opt-format")) $("#opt-format").checked = val;
+    if ($("#settings-default-format")) $("#settings-default-format").checked = val;
+  }
+}
+
+function setupPreferences() {
+  try {
+    loadStoredPreferences();
+
+    const bindPref = (settingId, optId, key) => {
+      const settingEl = $(`#${settingId}`);
+      const optEl = $(`#${optId}`);
+      if (settingEl) {
+        settingEl.addEventListener("change", (e) => {
+          const val = e.target.checked;
+          safeStorageSet(key, String(val));
+          if (optEl) optEl.checked = val;
+        });
+      }
+      if (optEl) {
+        optEl.addEventListener("change", (e) => {
+          const val = e.target.checked;
+          safeStorageSet(key, String(val));
+          if (settingEl) settingEl.checked = val;
+        });
+      }
+    };
+
+    bindPref("settings-default-space", "opt-space", "diffanydoc.pref.space");
+    bindPref("settings-default-case", "opt-case", "diffanydoc.pref.case");
+    bindPref("settings-default-format", "opt-format", "diffanydoc.pref.format");
+  } catch (_) {}
+}
+
+function setupAdvancedExpander() {
+  try {
+    const btn = $("#advanced-toggle-btn");
+    const panel = $("#advanced-panel");
+    if (!btn || !panel) return;
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      const isExpanded = btn.getAttribute("aria-expanded") === "true";
+      btn.setAttribute("aria-expanded", String(!isExpanded));
+      panel.hidden = isExpanded;
+    });
+  } catch (_) {}
+}
+
+/* Action buttons */
+const compareBtn = $("#compare");
+if (compareBtn) {
+  compareBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    runComparison();
+  });
+}
+const restartBtn = $("#restart");
+if (restartBtn) restartBtn.addEventListener("click", reset);
 if ($("#new-compare-btn")) $("#new-compare-btn").addEventListener("click", reset);
 if ($("#add-tab")) $("#add-tab").addEventListener("click", createNewSessionTab);
 if ($("#new-tab-btn")) $("#new-tab-btn").addEventListener("click", createNewSessionTab);
 if ($("#new-tab-menu")) $("#new-tab-menu").addEventListener("click", createNewSessionTab);
-$("#reload").addEventListener("click", reloadComparison);
+if ($("#reload")) $("#reload").addEventListener("click", reloadComparison);
 if ($("#copy-all-to-right")) $("#copy-all-to-right").addEventListener("click", () => mergeAllToSide("left"));
 if ($("#copy-all-to-left")) $("#copy-all-to-left").addEventListener("click", () => mergeAllToSide("right"));
-$("#copy-changes").addEventListener("click", () => copyView("changes"));
-$("#copy-left").addEventListener("click", () => copyView("left"));
-$("#copy-right").addEventListener("click", () => copyView("right"));
-$("#copy-both").addEventListener("click", () => copyView("both"));
+if ($("#copy-changes")) $("#copy-changes").addEventListener("click", () => copyView("changes"));
+if ($("#copy-left")) $("#copy-left").addEventListener("click", () => copyView("left"));
+if ($("#copy-right")) $("#copy-right").addEventListener("click", () => copyView("right"));
+if ($("#copy-both")) $("#copy-both").addEventListener("click", () => copyView("both"));
 if ($("#download-left")) $("#download-left").addEventListener("click", () => downloadSideDocument("left"));
 if ($("#download-right")) $("#download-right").addEventListener("click", () => downloadSideDocument("right"));
+
+setupDialogs();
+setupAdvancedExpander();
+setupPreferences();
+loadTheme();
 
 $$(".tab").forEach((tab) =>
   tab.addEventListener("click", () => {
@@ -1948,17 +3514,50 @@ async function loadOcrStatus() {
   }
 }
 
-$("#zoom-in").addEventListener("click", () => {
-  state.zoom = Math.min(2, Math.round((state.zoom + 0.1) * 10) / 10);
-  applyZoom();
-});
-$("#zoom-out").addEventListener("click", () => {
-  state.zoom = Math.max(0.5, Math.round((state.zoom - 0.1) * 10) / 10);
-  applyZoom();
+setupPageZoom();
+setupBoxColor();
+setupBoxesToggle();
+setupSearch();
+
+const compareCancelBtn = $("#compare-cancel");
+if (compareCancelBtn) {
+  compareCancelBtn.addEventListener("click", () => {
+    if (typeof state.activeCompareAbort === "function") {
+      state.activeCompareAbort();
+    }
+  });
+}
+
+document.addEventListener("keydown", (event) => {
+  if (state.mode !== "text") return;
+  const tag = event.target && event.target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+  if (event.key === "Escape") {
+    clearCellSelection();
+  } else if (event.key === "Enter" && (!tag || tag !== "BUTTON")) {
+    const matchBtn = $(".cell.is-selected .match-select-btn");
+    if (matchBtn) {
+      event.preventDefault();
+      matchBtn.click();
+    }
+  }
 });
 
-$("#prev-change").addEventListener("click", () => gotoChange(-1));
-$("#next-change").addEventListener("click", () => gotoChange(1));
+const statsBtn = $("#stats");
+if (statsBtn) {
+  statsBtn.addEventListener("click", openStatsDetails);
+  statsBtn.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      openStatsDetails();
+    }
+  });
+}
+
+if ($("#prev-change")) $("#prev-change").addEventListener("click", () => gotoChange(-1));
+if ($("#next-change")) $("#next-change").addEventListener("click", () => gotoChange(1));
+if ($("#top-prev-change")) $("#top-prev-change").addEventListener("click", () => gotoChange(-1));
+if ($("#top-next-change")) $("#top-next-change").addEventListener("click", () => gotoChange(1));
 
 document.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
@@ -1967,12 +3566,106 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
+  if (event.key === "F1") {
+    event.preventDefault();
+    openHelp();
+    return;
+  }
+
+  if ((event.ctrlKey || event.metaKey) && event.key === ",") {
+    event.preventDefault();
+    openSettings();
+    return;
+  }
+
+  if (
+    (event.ctrlKey || event.metaKey) &&
+    event.key.toLowerCase() === "o" &&
+    !$("#upload-view").hidden
+  ) {
+    event.preventDefault();
+    const empty = !hasFile("left") ? "left" : !hasFile("right") ? "right" : "left";
+    chooseFile(empty);
+    return;
+  }
+
+  if (
+    (event.ctrlKey || event.metaKey) &&
+    event.key.toLowerCase() === "f" &&
+    !$("#result-view").hidden
+  ) {
+    event.preventDefault();
+    openSearch();
+    return;
+  }
+
+  if (event.key === "Escape") {
+    const searchBar = $("#search-bar");
+    if (searchBar && !searchBar.hidden) {
+      closeSearch();
+      return;
+    }
+  }
+
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "w") {
+    event.preventDefault();
+    closeSessionTab(state.activeTabId);
+    return;
+  }
+
+  const pageZoomKeys = state.comparison && isPageMode() && !$("#result-view").hidden;
+  if ((event.ctrlKey || event.metaKey) && pageZoomKeys) {
+    if (event.key === "+" || event.key === "=") {
+      event.preventDefault();
+      stepZoom(1);
+      return;
+    }
+    if (event.key === "-") {
+      event.preventDefault();
+      stepZoom(-1);
+      return;
+    }
+    if (event.key === "0") {
+      event.preventDefault();
+      setZoom(1);
+      return;
+    }
+  }
+
+  // Navigation shortcuts with Alt (Alt+Down, Alt+Up) or F7 (F7, Shift+F7)
+  if (state.comparison && !$("#result-view").hidden) {
+    if (event.key === "F7") {
+      event.preventDefault();
+      gotoChange(event.shiftKey ? -1 : 1);
+      return;
+    }
+    if (event.altKey && !event.ctrlKey && !event.metaKey) {
+      if (event.key === "ArrowDown" || event.key === "Down") {
+        event.preventDefault();
+        gotoChange(1);
+        return;
+      }
+      if (event.key === "ArrowUp" || event.key === "Up") {
+        event.preventDefault();
+        gotoChange(-1);
+        return;
+      }
+    }
+  }
+
   if (event.ctrlKey || event.metaKey || event.altKey) return;
   const tag = (event.target.tagName || "").toLowerCase();
   if (tag === "input" || tag === "textarea" || tag === "select" || event.target.isContentEditable) {
     return;
   }
   if ($("#result-view").hidden) return;
+
+  // Space + drag pans; buttons keep Space.
+  if (event.key === " " && pageZoomKeys && tag !== "button") {
+    event.preventDefault();
+    if (!event.repeat) setPanReady(true);
+    return;
+  }
 
   if (event.key === "n" || (event.key === "F3" && !event.shiftKey)) {
     event.preventDefault();
@@ -1986,6 +3679,7 @@ document.addEventListener("keydown", (event) => {
 async function init() {
   await loadLanguage(preferredLanguage());
   await loadOcrStatus();
+  await loadIntegrationStatus();
   await restoreFromUrl();
   if (window.pywebview && window.pywebview.api) initDesktop();
   try {

@@ -105,12 +105,14 @@ def test_open_external_rejects_unknown_schemes() -> None:
 def test_resolve_dropped_uris_handles_file_urls_and_paths(tmp_path: Path) -> None:
     first = tmp_path / "bosluklu dosya.docx"
     second = tmp_path / "ikinci.csv"
+    third = tmp_path / "üçüncü dosya.txt"
     first.write_text("a", encoding="utf-8")
     second.write_text("b", encoding="utf-8")
+    third.write_text("c", encoding="utf-8")
 
-    raw = f"{first.as_uri()}\r\n{second}\r\nfile:///olmayan/dosya.txt\r\n"
+    raw = f"copy\r\n{first.as_uri()}\r\n{second}\r\n\"{third}\"\r\nfile:///olmayan/dosya.txt\r\n"
     resolved = DesktopApi().resolve_dropped_uris(raw)
-    assert resolved == [str(first.resolve()), str(second.resolve())]
+    assert resolved == [str(first.resolve()), str(second.resolve()), str(third.resolve())]
 
 
 
@@ -126,7 +128,32 @@ def test_run_desktop_without_display_reports_hint(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     pytest.importorskip("webview")
+    monkeypatch.setattr("diffanydoc.desktop.app.sys.platform", "linux")
     monkeypatch.delenv("DISPLAY", raising=False)
     monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
     assert run_desktop([]) == 2
     assert "graphical session" in capsys.readouterr().out
+
+
+def test_display_check_only_applies_to_x11_wayland(monkeypatch: pytest.MonkeyPatch) -> None:
+    from diffanydoc.desktop.app import has_display
+
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    monkeypatch.setattr("diffanydoc.desktop.app.sys.platform", "win32")
+    assert has_display()
+    monkeypatch.setattr("diffanydoc.desktop.app.sys.platform", "linux")
+    assert not has_display()
+
+
+def test_splash_is_localised_and_light() -> None:
+    import subprocess
+    import sys
+
+    from diffanydoc.desktop.app import splash_html
+
+    assert "başlatılıyor" in splash_html("tr")
+    # The GUI path must not import FastAPI before the window opens.
+    code = "import sys, diffanydoc.desktop; print('fastapi' in sys.modules)"
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "False"
