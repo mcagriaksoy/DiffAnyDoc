@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "diffanydoc"
-version = "0.4.0"
+version = "0.5.0"
 description = "Compare any document side by side: PDF, DOCX, XLSX and plain text."
 readme = "README.md"
 requires-python = ">=3.10,<3.13"  # rapidocr-onnxruntime limit
@@ -37,6 +37,7 @@ desktop = [
 ]
 dev = [
     "pytest>=8",
+    "httpx>=0.27",
 ]
 
 [project.scripts]

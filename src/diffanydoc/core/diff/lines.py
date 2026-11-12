@@ -108,6 +108,65 @@ def style_summary(style: dict[str, object] | None) -> str:
     return ", ".join(tokens)
 
 
+_PAGE_NUMBER_RE = re.compile(
+    r"^(?:page|sayfa|p\.?|s\.?)?\s*\d+(?:\s*(?:/|of)\s*\d+)?$",
+    re.IGNORECASE,
+)
+
+
+def _header_footer_norms(
+    document: Document, *, case_sensitive: bool, collapse_whitespace: bool
+) -> set[str]:
+    """Find normalized texts that repeat in the top/bottom 7% band across >=2 pages."""
+    if len(document.pages) < 2:
+        return set()
+    counts: dict[str, set[int]] = {}
+    for page in document.pages:
+        if page.height <= 0:
+            continue
+        top_limit = page.height * 0.07
+        bottom_limit = page.height * 0.93
+        for block in page.blocks:
+            if block.kind != "text" or block.bbox is None:
+                continue
+            if block.bbox[3] <= top_limit or block.bbox[1] >= bottom_limit:
+                norm = normalize_line(
+                    block.text,
+                    case_sensitive=case_sensitive,
+                    collapse_whitespace=collapse_whitespace,
+                )
+                if norm:
+                    counts.setdefault(norm, set()).add(page.index)
+    return {norm for norm, pages in counts.items() if len(pages) >= 2}
+
+
+def _is_header_footer_block(
+    block: Any,
+    page: Any,
+    repeated_norms: set[str],
+    *,
+    case_sensitive: bool,
+    collapse_whitespace: bool,
+) -> bool:
+    if block.kind != "text" or block.bbox is None or page.height <= 0:
+        return False
+    in_band = (
+        block.bbox[3] <= page.height * 0.07
+        or block.bbox[1] >= page.height * 0.93
+    )
+    if not in_band:
+        return False
+    stripped = block.text.strip()
+    if _PAGE_NUMBER_RE.match(stripped):
+        return True
+    norm = normalize_line(
+        block.text,
+        case_sensitive=case_sensitive,
+        collapse_whitespace=collapse_whitespace,
+    )
+    return norm in repeated_norms
+
+
 def document_lines(
     document: Document,
     *,
@@ -115,6 +174,7 @@ def document_lines(
     collapse_whitespace: bool = True,
     compare_formatting: bool = False,
     reflow: bool = True,
+    ignore_headers_footers: bool = False,
 ) -> list[Line]:
     """Flatten all text and table rows into a single sequence of lines.
 
@@ -123,9 +183,30 @@ def document_lines(
     Table rows become one line each and keep their cells, so the diff can
     align columns individually.
     """
+    repeated_hf = (
+        _header_footer_norms(
+            document,
+            case_sensitive=case_sensitive,
+            collapse_whitespace=collapse_whitespace,
+        )
+        if ignore_headers_footers
+        else set()
+    )
     lines: list[Line] = []
     for page in document.pages:
         blocks = page.blocks
+        if ignore_headers_footers:
+            blocks = [
+                b
+                for b in blocks
+                if not _is_header_footer_block(
+                    b,
+                    page,
+                    repeated_hf,
+                    case_sensitive=case_sensitive,
+                    collapse_whitespace=collapse_whitespace,
+                )
+            ]
         if reflow and any(b.bbox is not None for b in blocks):
             blocks = reflow_blocks(blocks, page.width)
         for block in blocks:

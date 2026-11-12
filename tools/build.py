@@ -234,8 +234,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--skip-build", action="store_true", help="only test and archive dist/")
     parser.add_argument("--no-smoke-test", action="store_true")
+    parser.add_argument(
+        "--targets",
+        nargs="+",
+        choices=tuple(BUILDERS.keys()),
+        help="specific bundle targets to build (default: all for current OS)",
+    )
     args = parser.parse_args()
-    kinds = targets(_platform())
+    kinds = tuple(args.targets) if args.targets else targets(_platform())
     for kind in kinds:  # fail before the long build
         if kind in TOOLS:
             find_tool(kind)

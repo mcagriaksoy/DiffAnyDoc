@@ -735,6 +735,56 @@ a {
   font-size: var(--font-size-caption);
 }
 
+.compare-progress {
+  width: min(360px, 100%);
+  margin: var(--space-2) auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.compare-progress[hidden] {
+  display: none;
+}
+
+.compare-progress-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-caption);
+  color: var(--dim-label-color);
+}
+
+.compare-progress-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.compare-cancel-btn {
+  height: auto;
+  min-height: 22px;
+  padding: 1px 8px;
+  font-size: var(--font-size-caption);
+  color: var(--error-color);
+}
+
+.compare-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--border-color);
+  overflow: hidden;
+}
+
+.compare-progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: var(--accent-bg-color);
+  transition: width 150ms ease;
+}
+
 .error {
   margin: var(--space-2) auto 0;
   max-width: 640px;
@@ -1084,6 +1134,38 @@ body.only-diff .gap {
   display: none;
 }
 
+.cell.is-selected {
+  background: color-mix(in srgb, var(--accent-color) 10%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent-color);
+}
+
+.cell.is-matched {
+  background: color-mix(in srgb, var(--accent-color) 5%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent-color) 45%, transparent);
+}
+
+.match-select-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: var(--space-1);
+  padding: 1px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-color) 35%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+  color: var(--accent-color);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-caption);
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.match-select-btn:hover {
+  background: color-mix(in srgb, var(--accent-color) 20%, transparent);
+}
+
 .empty-state {
   padding: 64px var(--space-3);
   color: var(--dim-label-color);
@@ -1214,6 +1296,17 @@ body.panning .page-canvas {
   border-radius: 2px;
 }
 
+.rect[data-row] {
+  cursor: pointer;
+}
+
+.rect.is-flash {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 28%, transparent);
+  z-index: 3;
+}
+
 /* Box outline color: user preset (Amber default). */
 body {
   --box-color: var(--warning-color);
@@ -1298,6 +1391,14 @@ body[data-box-color="contrast"] {
 
 body.visual-off .rect.visual {
   display: none;
+}
+
+body.boxes-off .rect:not(.manual) {
+  display: none;
+}
+
+body.boxes-off #box-color-button {
+  opacity: 0.55;
 }
 
 .rect.manual {

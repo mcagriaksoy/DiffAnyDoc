@@ -64,6 +64,11 @@
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6 4.5V3h4v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
 
+    <label class="switch" id="boxes-wrap" hidden>
+      <input type="checkbox" id="opt-boxes" checked>
+      <span data-i18n="boxColor.enable">Show boxes</span>
+    </label>
+
     <div class="menu-wrap" id="box-color-wrap" hidden>
       <button class="flat box-color-button" id="box-color-button" data-menu="box-color-menu" aria-haspopup="menu" aria-expanded="false" data-i18n-title="boxColor.label" data-i18n-aria-label="boxColor.label">
         <span class="box-swatch current" aria-hidden="true"></span>
@@ -186,6 +191,7 @@
           <label class="check"><input type="checkbox" id="opt-case"> <span data-i18n="opt.ignoreCase">Ignore letter case</span></label>
           <label class="check"><input type="checkbox" id="opt-space" checked> <span data-i18n="opt.ignoreWhitespace">Ignore extra whitespace</span></label>
           <label class="check"><input type="checkbox" id="opt-format"> <span data-i18n="opt.formatDiff">Compare formatting (font, size, bold/italic)</span></label>
+          <label class="check"><input type="checkbox" id="opt-headers"> <span data-i18n="opt.ignoreHeadersFooters">Ignore headers, footers &amp; page numbers</span></label>
           <label class="check" data-i18n-title="opt.toleranceTitle">
             <span data-i18n="opt.tolerance">Numeric tolerance</span>
             <input type="number" id="opt-tolerance" step="any" min="0" placeholder="0.01" data-i18n-placeholder="opt.tolerancePlaceholder" class="tolerance-input">
@@ -200,6 +206,18 @@
         <span data-i18n="action.compare">Compare</span>
       </button>
       <span class="supported" data-i18n="upload.supported">Supported: PDF, TXT, MD, CSV, JSON, source code</span>
+    </div>
+    <div class="compare-progress" id="compare-progress" hidden>
+      <div class="compare-progress-head">
+        <span id="compare-progress-label" data-i18n="progress.comparing">Comparing documents…</span>
+        <span class="compare-progress-actions">
+          <span id="compare-progress-pct">0%</span>
+          <button class="flat compare-cancel-btn" id="compare-cancel" type="button" data-i18n="action.cancel">Cancel</button>
+        </span>
+      </div>
+      <div class="compare-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div class="compare-progress-fill" id="compare-progress-fill"></div>
+      </div>
     </div>
     <p class="error" id="error" hidden></p>
   </section>

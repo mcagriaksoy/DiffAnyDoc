@@ -341,5 +341,39 @@ def test_detailed_reading_and_vocabulary_metrics(tmp_path: Path) -> None:
     assert "change_density" in d
 
 
+def test_ignore_headers_footers_filters_repeating_bands() -> None:
+    from diffanydoc.core.diff.lines import document_lines
+    from diffanydoc.core.model import Block, Document, Page
+
+    doc = Document(
+        path=Path("sample.pdf"),
+        kind="pdf",
+        pages=[
+            Page(
+                index=0,
+                width=600.0,
+                height=800.0,
+                blocks=[
+                    Block(kind="text", text="ACME Confidential", bbox=(50.0, 20.0, 200.0, 35.0)),
+                    Block(kind="text", text="Body line 1", bbox=(50.0, 200.0, 200.0, 215.0)),
+                    Block(kind="text", text="Page 1", bbox=(270.0, 760.0, 330.0, 775.0)),
+                ],
+            ),
+            Page(
+                index=1,
+                width=600.0,
+                height=800.0,
+                blocks=[
+                    Block(kind="text", text="ACME Confidential", bbox=(50.0, 20.0, 200.0, 35.0)),
+                    Block(kind="text", text="Body line 2", bbox=(50.0, 200.0, 200.0, 215.0)),
+                    Block(kind="text", text="Page 2", bbox=(270.0, 760.0, 330.0, 775.0)),
+                ],
+            ),
+        ],
+    )
+    kept = document_lines(doc, ignore_headers_footers=True)
+    assert [line.text for line in kept] == ["Body line 1", "Body line 2"]
+
+
 
 

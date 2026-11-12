@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.5.0] - 2026-11-12
+
+### Added
+- **Show Boxes Toggle (`#opt-boxes`)**: Added a GNOME/Adwaita switch next to the Box color selector in Pages and X-Ray views to hide all diff/visual highlight rectangles on demand.
+- **Side-by-Side Row Matching & Selection (`↔ Select in A/B`)**: Clicking a line in Text view highlights matching lines on the opposite side and offers a one-click button (or `Enter` shortcut; `Esc` clears) to select and scroll to the match.
+- **Bidirectional `Text` ↔ `Pages` Sync**: Added `↗ Show on page` on selected text rows to jump to the corresponding page box, and clicking a page box jumps back to and selects the corresponding text row.
+- **Compare Progress Bar & Cancel**: Added a progress bar below the Compare button with real-time upload tracking, staged status labels, and a `Cancel` button (`xhr.abort()` / `AbortController`).
+- **Ignore Headers, Footers & Page Numbers (`ignore_headers_footers`)**: Added an advanced option to filter repeating top/bottom 7% bands and page numbers in multi-page documents.
+
+### Fixed
+- **Pages Tab Over-Highlighting & Merged Heading Boxes**: Stopped emitting full-line boxes on unchanged sides of single-side `replace` insertions, clipped merged heading/OCR `Span` boxes proportionally to only the changed word range (`_clip_span_bbox`), improved `pdfplumber` word splitting (`x_tolerance=2`), defaulted pixel-level visual boxes to off for text-layer PDFs, and deduplicated overlapping visual boxes.
+- **CI Test Dependencies**: Added `httpx>=0.27` to `dev` dependencies in `pyproject.toml` so `FastAPI` `TestClient` tests run cleanly in CI.
+
 ## [0.4.0] - 2026-11-10
 
 ### Added

@@ -52,6 +52,8 @@ class DiffOptions:
     ocr_cache_dir: str | None = None
     #: Numeric difference tolerance: numbers differing by <= this amount are treated as equal.
     numeric_tolerance: float | None = None
+    #: Skip repeating headers, footers, and page numbers in top/bottom 7% bands.
+    ignore_headers_footers: bool = False
 
 
 def file_sha256(path: str | Path) -> str:
@@ -267,6 +269,7 @@ def compare(
         collapse_whitespace=options.collapse_whitespace,
         compare_formatting=options.compare_formatting,
         reflow=options.reflow,
+        ignore_headers_footers=options.ignore_headers_footers,
     )
     right_lines = document_lines(
         right_doc,
@@ -274,6 +277,7 @@ def compare(
         collapse_whitespace=options.collapse_whitespace,
         compare_formatting=options.compare_formatting,
         reflow=options.reflow,
+        ignore_headers_footers=options.ignore_headers_footers,
     )
 
     rows = _build_rows(left_lines, right_lines, options)

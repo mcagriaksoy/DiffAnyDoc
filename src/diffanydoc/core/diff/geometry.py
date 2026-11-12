@@ -70,13 +70,37 @@ def _rect(page: int, box: Any, kind: str, level: str, row: int, text: str) -> di
     }
 
 
+def _clip_span_bbox(span: Span, start: int, end: int) -> tuple[float, float, float, float]:
+    """Clip a span's bounding box proportionally when only a sub-range changed."""
+    span_len = span.end - span.start
+    if span_len <= 0 or (start <= span.start and end >= span.end):
+        return span.bbox
+    ov_start = max(span.start, start)
+    ov_end = min(span.end, end)
+    x0, top, x1, bottom = span.bbox
+    width = x1 - x0
+    new_x0 = x0 + width * ((ov_start - span.start) / span_len)
+    new_x1 = x0 + width * ((ov_end - span.start) / span_len)
+    return (new_x0, top, max(new_x1, new_x0 + 1.0), bottom)
+
+
 def line_rects(line: Line, kind: str, row: int, inline: list[Segment] | None, side: str) -> list[dict[str, Any]]:
     rects: list[dict[str, Any]] = []
+    if inline is not None:
+        ranges = _changed_ranges(inline, side)
+        if not ranges:
+            return rects
+    else:
+        ranges = []
     if line.spans:
         for page, box in _visual_lines(line.spans):
             rects.append(_rect(page, box, kind, "line", row, line.text))
-        for start, end in _changed_ranges(inline, side):
-            words = [s for s in line.spans if s.start < end and s.end > start]
+        for start, end in ranges:
+            words = [
+                Span(s.start, s.end, s.page, _clip_span_bbox(s, start, end))
+                for s in line.spans
+                if s.start < end and s.end > start
+            ]
             for page, box in _visual_lines(words):
                 rects.append(_rect(page, box, kind, "word", row, line.text[start:end]))
     elif line.bbox is not None:

@@ -786,6 +786,8 @@ async function comparisonRequest() {
   const collapseWhitespace = $("#opt-space") ? $("#opt-space").checked : true;
   const formatCheckbox = $("#opt-format");
   const compareFormatting = Boolean(formatCheckbox && formatCheckbox.checked);
+  const headersCheckbox = $("#opt-headers");
+  const ignoreHeadersFooters = Boolean(headersCheckbox && headersCheckbox.checked);
   const ocrCheckbox = $("#opt-ocr");
   const ocr = ocrCheckbox ? Boolean(ocrCheckbox.checked) : true;
   const ocrLangSelect = $("#opt-ocr-lang");
@@ -798,8 +800,11 @@ async function comparisonRequest() {
   }
 
   if (desktop.available && desktop.paths.left && desktop.paths.right) {
+    const controller = new AbortController();
+    state.activeCompareAbort = () => controller.abort();
     return fetch("/api/compare-paths", {
       method: "POST",
+      signal: controller.signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         left: desktop.paths.left,
@@ -813,6 +818,7 @@ async function comparisonRequest() {
         ocr,
         ocr_language: ocrLanguage,
         numeric_tolerance: numericTolerance,
+        ignore_headers_footers: ignoreHeadersFooters,
       }),
     });
   }
@@ -841,7 +847,79 @@ async function comparisonRequest() {
   if (numericTolerance !== null) {
     form.append("numeric_tolerance", String(numericTolerance));
   }
-  return fetch("/api/compare", { method: "POST", body: form });
+  form.append("ignore_headers_footers", String(ignoreHeadersFooters));
+  return postFormWithProgress("/api/compare", form, (fraction) => {
+    const pct = Math.round(fraction * 35);
+    setCompareProgress(pct, "progress.uploading");
+  });
+}
+
+function postFormWithProgress(url, form, onUploadProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    state.activeCompareAbort = () => xhr.abort();
+    xhr.open("POST", url);
+    if (xhr.upload && onUploadProgress) {
+      xhr.upload.addEventListener("progress", (e) => {
+        if (e.lengthComputable && e.total > 0) {
+          onUploadProgress(e.loaded / e.total);
+        }
+      });
+      xhr.upload.addEventListener("load", () => onUploadProgress(1));
+    }
+    xhr.addEventListener("load", () => {
+      const body = xhr.responseText || "";
+      resolve({
+        ok: xhr.status >= 200 && xhr.status < 300,
+        status: xhr.status,
+        json: async () => JSON.parse(body),
+        text: async () => body,
+      });
+    });
+    xhr.addEventListener("error", () => reject(new Error(i18n.t("error.generic"))));
+    xhr.addEventListener("abort", () => {
+      const err = new Error(i18n.t("progress.cancelled"));
+      err.name = "AbortError";
+      reject(err);
+    });
+    xhr.send(form);
+  });
+}
+
+let _progressTimer = null;
+let _progressValue = 0;
+
+function setCompareProgress(percent, labelKey) {
+  const wrap = $("#compare-progress");
+  const fill = $("#compare-progress-fill");
+  const pct = $("#compare-progress-pct");
+  const label = $("#compare-progress-label");
+  const track = wrap ? wrap.querySelector(".compare-progress-track") : null;
+  const clamped = Math.max(0, Math.min(100, Math.round(percent)));
+  _progressValue = Math.max(_progressValue, clamped);
+  if (fill) fill.style.width = `${_progressValue}%`;
+  if (pct) pct.textContent = `${_progressValue}%`;
+  if (track) track.setAttribute("aria-valuenow", String(_progressValue));
+  if (label && labelKey) label.textContent = i18n.t(labelKey);
+}
+
+function startProgressTicker(initialPercent = 10) {
+  stopProgressTicker();
+  _progressValue = 0;
+  setCompareProgress(initialPercent, "progress.comparing");
+  _progressTimer = setInterval(() => {
+    if (_progressValue < 92) {
+      const step = Math.max(1, Math.round((92 - _progressValue) * 0.14));
+      setCompareProgress(_progressValue + step, "progress.comparing");
+    }
+  }, 220);
+}
+
+function stopProgressTicker() {
+  if (_progressTimer !== null) {
+    clearInterval(_progressTimer);
+    _progressTimer = null;
+  }
 }
 
 function setComparing(active) {
@@ -851,6 +929,15 @@ function setComparing(active) {
     const spinner = button.querySelector(".spinner");
     button.disabled = active || !isReady();
     if (spinner) spinner.hidden = !active;
+  }
+  const wrap = $("#compare-progress");
+  if (active) {
+    if (wrap) wrap.hidden = false;
+    startProgressTicker(desktop.available && desktop.paths.left && desktop.paths.right ? 12 : 5);
+  } else {
+    stopProgressTicker();
+    _progressValue = 0;
+    if (wrap) wrap.hidden = true;
   }
   const reload = $("#reload");
   if (reload) reload.disabled = active;
@@ -891,11 +978,18 @@ async function runComparison() {
   try {
     const response = await comparisonRequest();
     if (!response.ok) throw new Error(await readError(response));
+    setCompareProgress(96, "progress.rendering");
     state.comparison = await response.json();
+    setCompareProgress(100, "progress.rendering");
     renderResult();
   } catch (error) {
-    showError(error.message || i18n.t("error.generic"));
+    if (error && error.name === "AbortError") {
+      showToast(i18n.t("progress.cancelled"));
+    } else {
+      showError(error.message || i18n.t("error.generic"));
+    }
   } finally {
+    state.activeCompareAbort = null;
     setComparing(false);
     updateCompareButton();
   }
@@ -1398,6 +1492,14 @@ function renderResult() {
   if (!canXray && state.mode === "xray") state.mode = canRender ? "pages" : "text";
 
   $("#visual-wrap").hidden = !state.visual;
+  if (state.visual) {
+    const needsVisualDefault =
+      data.left.kind === "image" ||
+      data.right.kind === "image" ||
+      (state.ocr && state.ocr.stats && state.ocr.stats.ocr_pages > 0) ||
+      !data.rows.length;
+    document.body.classList.toggle("visual-off", !needsVisualDefault);
+  }
   $("#opt-visual").checked = !document.body.classList.contains("visual-off");
   $("#reload").hidden = !canReload();
 
@@ -1692,14 +1794,136 @@ function buildCell(
   gutter.append(
     el("span", { class: "gutter-number", text: String(line.number) })
   );
-  return el("div", { class: "cell" }, [
-    gutter,
-    el("span", {
-      class: "page-tag",
-      text: line.page === previousPage ? "" : i18n.t("page.label", { n: line.page + 1 }),
-    }),
-    text,
-  ]);
+  const cell = el(
+    "div",
+    {
+      class: "cell",
+      "data-side": side,
+      "data-row": String(rowIndex),
+      "data-page": String(line.page),
+      "data-line-text": line.text.trim(),
+    },
+    [
+      gutter,
+      el("span", {
+        class: "page-tag",
+        text: line.page === previousPage ? "" : i18n.t("page.label", { n: line.page + 1 }),
+      }),
+      text,
+    ]
+  );
+  cell.addEventListener("click", (event) => onCellClick(event, cell, side));
+  return cell;
+}
+
+function clearCellSelection() {
+  for (const node of $$(".cell.is-selected, .cell.is-matched")) {
+    node.classList.remove("is-selected", "is-matched");
+  }
+  for (const btn of $$(".match-select-btn")) btn.remove();
+}
+
+function jumpToPageRow(rowIndex, side, pageIndex) {
+  if (!state.comparison) return;
+  const canRender = state.comparison.renderable.left || state.comparison.renderable.right;
+  if (!canRender) return;
+  setMode("pages");
+  requestAnimationFrame(() => {
+    const targetCard =
+      $(`.page-card[data-side="${side}"][data-page="${pageIndex}"]`) ||
+      $(`.page-card[data-page="${pageIndex}"]`);
+    const targetRect =
+      $(`.page-card[data-side="${side}"] .rect[data-row="${rowIndex}"]`) ||
+      $(`.rect[data-row="${rowIndex}"]`);
+    if (targetRect) {
+      targetRect.scrollIntoView({ block: "center", behavior: "smooth" });
+      targetRect.classList.add("is-flash");
+      setTimeout(() => targetRect.classList.remove("is-flash"), 1400);
+    } else if (targetCard) {
+      targetCard.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  });
+}
+
+function jumpToTextRow(rowIndex, side) {
+  setMode("text");
+  requestAnimationFrame(() => {
+    const cell =
+      $(`.cell[data-side="${side}"][data-row="${rowIndex}"]`) ||
+      $(`.cell[data-row="${rowIndex}"]`);
+    if (!cell) return;
+    clearCellSelection();
+    cell.classList.add("is-selected");
+    cell.scrollIntoView({ block: "center", behavior: "smooth" });
+  });
+}
+
+function onCellClick(event, cell, side) {
+  if (event.target.closest("button")) return;
+  const sel = window.getSelection();
+  if (sel && sel.toString().length > 0) return;
+
+  const wasSelectedOnly =
+    cell.classList.contains("is-selected") && $$(".cell.is-selected").length === 1;
+  clearCellSelection();
+  if (wasSelectedOnly) return;
+
+  cell.classList.add("is-selected");
+  const textEl = cell.querySelector(".text");
+  const lineText = cell.dataset.lineText || "";
+  const rowIndex = Number(cell.dataset.row);
+  const pageIndex = Number(cell.dataset.page);
+
+  if (lineText) {
+    const oppositeSide = side === "left" ? "right" : "left";
+    const matches = $$(`.cell[data-side="${oppositeSide}"]`).filter(
+      (other) => other.dataset.lineText === lineText
+    );
+    if (matches.length && textEl) {
+      for (const m of matches) m.classList.add("is-matched");
+
+      let matchCursor = 0;
+      const label = i18n.t(side === "left" ? "match.selectRight" : "match.selectLeft");
+      const suffix = matches.length > 1 ? ` (${matches.length})` : "";
+      textEl.append(
+        el("button", {
+          class: "match-select-btn",
+          type: "button",
+          text: `\u2194 ${label}${suffix}`,
+          onclick: (e) => {
+            e.stopPropagation();
+            for (const m of matches) m.classList.remove("is-selected");
+            const target = matches[matchCursor % matches.length];
+            matchCursor += 1;
+            target.classList.add("is-selected");
+            target.scrollIntoView({ block: "nearest", behavior: "smooth" });
+          },
+        })
+      );
+    }
+  }
+
+  if (
+    textEl &&
+    state.comparison &&
+    (state.comparison.renderable.left || state.comparison.renderable.right) &&
+    Number.isFinite(pageIndex) &&
+    pageIndex >= 0 &&
+    Number.isFinite(rowIndex) &&
+    rowIndex >= 0
+  ) {
+    textEl.append(
+      el("button", {
+        class: "match-select-btn",
+        type: "button",
+        text: `\u2197 ${i18n.t("match.showOnPage")}`,
+        onclick: (e) => {
+          e.stopPropagation();
+          jumpToPageRow(rowIndex, side, pageIndex);
+        },
+      })
+    );
+  }
 }
 
 /* ---------- page view ---------- */
@@ -1839,21 +2063,46 @@ function buildVisualBar(visual) {
   ]);
 }
 
-function addRect(canvas, box, kind, title, pageWidth, pageHeight) {
+function _boxCoveredByRects(box, rects) {
+  if (!rects || !rects.length) return false;
+  const [bx0, btop, bx1, bbottom] = box;
+  const bArea = Math.max(bx1 - bx0, 0) * Math.max(bbottom - btop, 0);
+  if (bArea <= 0) return false;
+  for (const r of rects) {
+    const ix0 = Math.max(bx0, r.x0);
+    const itop = Math.max(btop, r.top);
+    const ix1 = Math.min(bx1, r.x1);
+    const ibottom = Math.min(bbottom, r.bottom);
+    if (ix1 > ix0 && ibottom > itop) {
+      const inter = (ix1 - ix0) * (ibottom - itop);
+      if (inter / bArea >= 0.5) return true;
+    }
+  }
+  return false;
+}
+
+function addRect(canvas, box, kind, title, pageWidth, pageHeight, row = -1, side = "") {
   const [x0, top, x1, bottom] = box;
   const width = Math.max(x1 - x0, 0.5);
   const height = Math.max(bottom - top, 0.5);
-  canvas.append(
-    el("div", {
-      class: `rect ${kind}`,
-      title,
-      style:
-        `left:${(x0 / pageWidth) * 100}%;` +
-        `top:${(top / pageHeight) * 100}%;` +
-        `width:${(width / pageWidth) * 100}%;` +
-        `height:${(height / pageHeight) * 100}%`,
-    })
-  );
+  const attrs = {
+    class: `rect ${kind}`,
+    title,
+    style:
+      `left:${(x0 / pageWidth) * 100}%;` +
+      `top:${(top / pageHeight) * 100}%;` +
+      `width:${(width / pageWidth) * 100}%;` +
+      `height:${(height / pageHeight) * 100}%`,
+  };
+  if (row >= 0) {
+    attrs["data-row"] = String(row);
+    attrs.onclick = (e) => {
+      if (state.annotating) return;
+      e.stopPropagation();
+      jumpToTextRow(row, side);
+    };
+  }
+  canvas.append(el("div", attrs));
 }
 
 function buildPageCard(side, index, visualPage, pairIdx = 0) {
@@ -1861,12 +2110,20 @@ function buildPageCard(side, index, visualPage, pairIdx = 0) {
   const name = side === "left" ? data.left.name : data.right.name;
   const renderable = side === "left" ? data.renderable.left : data.renderable.right;
 
-  const card = el("div", { class: "page-card" }, [
-    el("div", { class: "page-label" }, [
-      el("span", { text: `${side === "left" ? "A" : "B"} — ${name}` }),
-      el("span", { text: index === null ? i18n.t("page.none") : i18n.t("page.label", { n: index + 1 }) }),
-    ]),
-  ]);
+  const card = el(
+    "div",
+    {
+      class: "page-card",
+      "data-side": side,
+      ...(index !== null ? { "data-page": String(index) } : {}),
+    },
+    [
+      el("div", { class: "page-label" }, [
+        el("span", { text: `${side === "left" ? "A" : "B"} — ${name}` }),
+        el("span", { text: index === null ? i18n.t("page.none") : i18n.t("page.label", { n: index + 1 }) }),
+      ]),
+    ]
+  );
 
   if (index === null || !renderable) {
     card.append(missingCanvas());
@@ -1902,7 +2159,9 @@ function buildPageCard(side, index, visualPage, pairIdx = 0) {
       rect.kind === "insert" ? "insert" : rect.kind === "delete" ? "delete" : "replace",
       `${rect.kind}: ${rect.text}`,
       size.width,
-      size.height
+      size.height,
+      rect.row,
+      side
     );
   }
 
@@ -1913,6 +2172,7 @@ function buildPageCard(side, index, visualPage, pairIdx = 0) {
         ? visualPage.right_regions
         : [];
   for (const box of visualBoxes || []) {
+    if (_boxCoveredByRects(box, activeRects)) continue;
     addRect(canvas, box, "visual", i18n.t("visual.region"), size.width, size.height);
   }
 
@@ -2452,6 +2712,7 @@ function setMode(mode) {
   if (stickyHeader) stickyHeader.hidden = isFolderMode;
   $("#only-diff-wrap").hidden = mode !== "text";
   $("#zoom-wrap").hidden = !isPageMode;
+  if ($("#boxes-wrap")) $("#boxes-wrap").hidden = !isPageMode;
   $("#box-color-wrap").hidden = !isPageMode;
   if ($("#annotate-wrap")) $("#annotate-wrap").hidden = !isPageMode;
   if ($("#annotate-clear")) {
@@ -2497,6 +2758,7 @@ function renderFolderDiff(folderData) {
   if ($("#tab-xray")) $("#tab-xray").disabled = true;
   $("#only-diff-wrap").hidden = true;
   $("#zoom-wrap").hidden = true;
+  if ($("#boxes-wrap")) $("#boxes-wrap").hidden = true;
   $("#box-color-wrap").hidden = true;
   if ($("#top-diff-nav")) $("#top-diff-nav").hidden = true;
   if ($("#diff-minimap")) $("#diff-minimap").hidden = true;
@@ -2618,6 +2880,28 @@ function setupBoxColor() {
       closeMenus();
       applyBoxColor(item.dataset.color);
       safeStorageSet(BOX_COLOR_KEY, item.dataset.color);
+    });
+  }
+}
+
+const BOXES_ENABLED_KEY = "diffanydoc:boxes-enabled";
+
+function applyBoxesEnabled(enabled) {
+  document.body.classList.toggle("boxes-off", !enabled);
+  const toggle = $("#opt-boxes");
+  if (toggle) toggle.checked = enabled;
+}
+
+function setupBoxesToggle() {
+  const saved = safeStorageGet(BOXES_ENABLED_KEY);
+  const enabled = saved !== "false";
+  applyBoxesEnabled(enabled);
+  const toggle = $("#opt-boxes");
+  if (toggle) {
+    toggle.addEventListener("change", (event) => {
+      const checked = Boolean(event.target.checked);
+      applyBoxesEnabled(checked);
+      safeStorageSet(BOXES_ENABLED_KEY, String(checked));
     });
   }
 }
@@ -2855,6 +3139,7 @@ function showUploadView() {
   $("#only-diff-wrap").hidden = true;
   $("#visual-wrap").hidden = true;
   $("#zoom-wrap").hidden = true;
+  if ($("#boxes-wrap")) $("#boxes-wrap").hidden = true;
   $("#box-color-wrap").hidden = true;
   if ($("#annotate-wrap")) $("#annotate-wrap").hidden = true;
   if ($("#annotate-clear")) $("#annotate-clear").hidden = true;
@@ -2890,6 +3175,7 @@ function reset() {
   document.body.classList.remove("visual-off");
   if ($("#opt-ocr")) $("#opt-ocr").checked = false;
   if ($("#opt-format")) $("#opt-format").checked = false;
+  if ($("#opt-headers")) $("#opt-headers").checked = false;
   if ($("#opt-ocr-lang")) $("#opt-ocr-lang").hidden = true;
   state.annotations = [];
   state.annotating = false;
@@ -3230,7 +3516,32 @@ async function loadOcrStatus() {
 
 setupPageZoom();
 setupBoxColor();
+setupBoxesToggle();
 setupSearch();
+
+const compareCancelBtn = $("#compare-cancel");
+if (compareCancelBtn) {
+  compareCancelBtn.addEventListener("click", () => {
+    if (typeof state.activeCompareAbort === "function") {
+      state.activeCompareAbort();
+    }
+  });
+}
+
+document.addEventListener("keydown", (event) => {
+  if (state.mode !== "text") return;
+  const tag = event.target && event.target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+  if (event.key === "Escape") {
+    clearCellSelection();
+  } else if (event.key === "Enter" && (!tag || tag !== "BUTTON")) {
+    const matchBtn = $(".cell.is-selected .match-select-btn");
+    if (matchBtn) {
+      event.preventDefault();
+      matchBtn.click();
+    }
+  }
+});
 
 const statsBtn = $("#stats");
 if (statsBtn) {

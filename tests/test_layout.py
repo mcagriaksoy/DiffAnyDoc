@@ -157,3 +157,36 @@ def test_page_alignment_survives_edits_and_insertions(tmp_path: Path) -> None:
     ]
     pairs = [(p.left, p.right) for p in align_pages(doc(base), doc(edited))]
     assert pairs == [(0, 0), (None, 1), (1, 2), (2, 3)]
+
+
+def test_change_rects_skip_unchanged_side_of_insertion_replace(tmp_path: Path) -> None:
+    left = write_pdf(tmp_path / "l.pdf", [["Keep all words here."]])
+    right = write_pdf(tmp_path / "r.pdf", [["Keep all extra words here."]])
+    result = compare(left, right, DiffOptions(fold_equal=False))
+    rects = change_rects(result)
+    assert rects["left"] == {}
+    words = [r for r in rects["right"]["0"] if r["level"] == "word"]
+    assert [w["text"].strip() for w in words] == ["extra"]
+
+
+def test_change_rects_clips_merged_heading_span_to_changed_word() -> None:
+    from diffanydoc.core.diff.geometry import line_rects
+    from diffanydoc.core.model import Line, Segment, Span
+
+    line = Line(
+        text="Section 1: Overview",
+        norm="Section 1: Overview",
+        page=0,
+        number=1,
+        bbox=(70.0, 50.0, 260.0, 70.0),
+        spans=[Span(start=0, end=19, page=0, bbox=(70.0, 50.0, 260.0, 70.0))],
+    )
+    inline = [
+        Segment(kind="equal", text="Section 1: "),
+        Segment(kind="delete", text="Overview"),
+    ]
+    rects = line_rects(line, "replace", 0, inline, "left")
+    word_rects = [r for r in rects if r["level"] == "word"]
+    assert len(word_rects) == 1
+    assert word_rects[0]["x0"] > 150.0
+    assert word_rects[0]["x1"] == 260.0

@@ -58,6 +58,7 @@ def _build_page(index: int, page: Any) -> Page:
     words = page.extract_words(
         use_text_flow=False,
         keep_blank_chars=False,
+        x_tolerance=2,
         extra_attrs=["size", "fontname"],
     )
     table_blocks, table_boxes = _extract_tables(page)
