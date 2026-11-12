@@ -9,7 +9,7 @@ WIN = sys.platform == "win32"
 STATIC = ROOT / "src" / "diffanydoc" / "web" / "static"
 
 datas, binaries, hiddenimports = [], [], []
-for package in ("rapidocr_onnxruntime", "onnxruntime", "pypdfium2", "pypdfium2_raw", "pdfminer"):
+for package in ("rapidocr_onnxruntime", "onnxruntime", "pypdfium2", "pypdfium2_raw", "pdfminer", "pdfplumber"):
     d, b, h = collect_all(package)
     datas += d
     binaries += b

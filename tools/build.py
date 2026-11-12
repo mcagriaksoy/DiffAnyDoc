@@ -148,9 +148,14 @@ def smoke_test() -> None:
         [str(cli), "diff", str(sample / "sozlesme-v1.pdf"), str(sample / "sozlesme-v2.pdf")],
         capture_output=True,
         text=True,
-        check=True,
         encoding="utf-8",
+        errors="replace",
     )
+    if result.returncode != 0:
+        raise SystemExit(
+            f"smoke test failed with exit code {result.returncode}\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
     if "sozlesme" not in result.stdout:
         raise SystemExit("smoke test: unexpected diff output\n" + result.stdout)
     print("smoke test passed")
