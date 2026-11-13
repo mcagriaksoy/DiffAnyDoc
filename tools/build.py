@@ -165,7 +165,7 @@ def portable_exe() -> Path:
     target = artifact("portable")
     source = DIST / ("DiffAnyDoc-portable.exe" if WINDOWS else "DiffAnyDoc-portable")
     if source.exists() and source != target:
-        shutil.copy2(source, target)
+        shutil.move(str(source), str(target))
     return target
 
 
