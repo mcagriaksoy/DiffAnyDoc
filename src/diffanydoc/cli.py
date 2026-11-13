@@ -257,7 +257,18 @@ def _infer_format(output: Path | None) -> str:
 
 def _emit(text: str, output: Path | None, language: str) -> None:
     if output is None:
-        sys.stdout.write(text)
+        try:
+            sys.stdout.write(text)
+        except UnicodeEncodeError:
+            reconfigure = getattr(sys.stdout, "reconfigure", None)
+            if callable(reconfigure):
+                reconfigure(encoding="utf-8", errors="replace")
+                sys.stdout.write(text)
+            else:
+                encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+                sys.stdout.write(
+                    text.encode(encoding, errors="replace").decode(encoding, errors="replace")
+                )
         return
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(text, encoding="utf-8")
