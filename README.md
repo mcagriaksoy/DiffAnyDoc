@@ -29,6 +29,30 @@ This repository contains **M0 + M1 + M2 + M3 + M4** in working order:
 - Web UI and a **native desktop window** (pywebview / GTK)
 - 114 tests (`pytest`)
 
+## Screenshots
+
+### Text & Inline Diff View
+Side-by-side text and cell-aware comparison with word-level inline highlights, per-line merge arrows (`→` / `←`), and a diff minimap scrollbar.
+
+![Text and inline diff view](img/Screenshot_Textview.png)
+
+### Pages View (PDF & Tables)
+Side-by-side rendered pages with customizable bounding boxes (`Show boxes`), visual match percentage, and changed region navigation.
+
+![PDF pages view with change boxes](img/Screenshot_Pageview.png)
+
+![Table and CSV pages view with cell boxes](img/Screenshot_Pageview2.png)
+
+### X-Ray Vision Overlay
+Pixel-registered composite overlay highlighting removed content in red and added content in green.
+
+![X-Ray Vision composite overlay](img/Screenshot_xrayView.png)
+
+### Offline Comparison Report
+Self-contained HTML/PDF verification report with SHA-256 checksums, similarity summary cards, and side-by-side differences.
+
+![Offline comparison report](img/Screenshot_PDFReport.png)
+
 > **For AI Coding Agents (Claude Code, OpenCode, Cursor, etc.):** Read [`AGENTS.md`](AGENTS.md) and [`docs/DESIGN.md`](docs/DESIGN.md) before making changes.
 
 English is the default for the app, CLI messages and reports. Turkish ships as a
