@@ -415,6 +415,8 @@ a {
   color: var(--dim-label-color);
   cursor: pointer;
   user-select: none;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .switch input {
@@ -1326,17 +1328,61 @@ body[data-box-color="contrast"] {
 
 .rect.insert {
   background: var(--diff-add-strong);
-  outline: 1px solid var(--box-color);
+  outline: var(--box-outline, 1.5px) solid var(--box-color);
+  padding: var(--box-pad, 1px);
+  margin: calc(var(--box-pad, 1px) * -1);
 }
 
 .rect.delete {
   background: var(--diff-del-strong);
-  outline: 1px solid var(--box-color);
+  outline: var(--box-outline, 1.5px) solid var(--box-color);
+  padding: var(--box-pad, 1px);
+  margin: calc(var(--box-pad, 1px) * -1);
 }
 
 .rect.replace {
   background: var(--diff-mod-bg);
-  outline: 1px solid var(--box-color);
+  outline: var(--box-outline, 1.5px) solid var(--box-color);
+  padding: var(--box-pad, 1px);
+  margin: calc(var(--box-pad, 1px) * -1);
+}
+
+body[data-box-size="compact"] {
+  --box-outline: 1px;
+  --box-pad: 0px;
+}
+
+body[data-box-size="normal"] {
+  --box-outline: 1.5px;
+  --box-pad: 1px;
+}
+
+body[data-box-size="large"] {
+  --box-outline: 2.5px;
+  --box-pad: 3px;
+}
+
+.box-settings-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: auto;
+  padding: 0 8px;
+}
+
+.box-settings-button .box-swatch {
+  width: 9px;
+  height: 9px;
+}
+
+.menu-section-label {
+  padding: 4px 12px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dim-label-color);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  user-select: none;
 }
 
 .box-color-button {
@@ -1348,11 +1394,14 @@ body[data-box-color="contrast"] {
   border-radius: var(--radius-sm);
   color: var(--text-color);
   font-size: var(--font-size-caption);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .box-color-label {
   font-weight: 500;
   user-select: none;
+  white-space: nowrap;
 }
 
 .box-swatch {
@@ -1393,12 +1442,25 @@ body.visual-off .rect.visual {
   display: none;
 }
 
-body.boxes-off .rect:not(.manual) {
+body.boxes-off .rect:not(.manual):not(.visual) {
   display: none;
 }
 
 body.boxes-off #box-color-button {
   opacity: 0.55;
+}
+
+.rect.search-hit {
+  background: color-mix(in srgb, var(--warning-color) 28%, transparent);
+  outline: 2px solid var(--warning-color);
+  z-index: 3;
+}
+
+.rect.search-hit.active {
+  background: color-mix(in srgb, var(--accent-color) 32%, transparent);
+  outline: 2.5px solid var(--accent-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 28%, transparent);
+  z-index: 4;
 }
 
 .rect.manual {

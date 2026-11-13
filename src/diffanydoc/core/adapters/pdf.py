@@ -168,6 +168,15 @@ def _extract_tables(page: Any) -> tuple[list[Block], list[BBox]]:
                 )
             )
         if len(row_blocks) >= 1 and any(len(r.children) >= 2 for r in row_blocks):
+            page_h = float(getattr(page, "height", 0.0) or 0.0)
+            max_row_h = max(
+                (r.bbox[3] - r.bbox[1]) for r in row_blocks if r.bbox is not None
+            )
+            # A schematic/CAD frame or page border creates a single giant row
+            # spanning most of the page height; treat it as normal page text
+            # instead of a table so word-level coordinates stay intact.
+            if page_h > 0 and max_row_h > page_h * 0.35:
+                continue
             blocks.append(
                 Block(
                     kind="table",

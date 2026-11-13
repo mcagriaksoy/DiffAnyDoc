@@ -1491,14 +1491,20 @@ function renderResult() {
   if (!canRender && (state.mode === "pages" || state.mode === "xray")) state.mode = "text";
   if (!canXray && state.mode === "xray") state.mode = canRender ? "pages" : "text";
 
+  const isNonTextDoc =
+    data.left.kind === "image" ||
+    data.right.kind === "image" ||
+    (state.ocr && state.ocr.stats && state.ocr.stats.ocr_pages > 0) ||
+    !data.rows.length;
+  const preferPagesTab =
+    isNonTextDoc || data.left.kind === "pdf" || data.right.kind === "pdf";
+
   $("#visual-wrap").hidden = !state.visual;
   if (state.visual) {
-    const needsVisualDefault =
-      data.left.kind === "image" ||
-      data.right.kind === "image" ||
-      (state.ocr && state.ocr.stats && state.ocr.stats.ocr_pages > 0) ||
-      !data.rows.length;
-    document.body.classList.toggle("visual-off", !needsVisualDefault);
+    document.body.classList.toggle("visual-off", !isNonTextDoc);
+  }
+  if (canRender && preferPagesTab && state.mode === "text") {
+    state.mode = "pages";
   }
   $("#opt-visual").checked = !document.body.classList.contains("visual-off");
   $("#reload").hidden = !canReload();
@@ -1978,12 +1984,20 @@ function buildXrayCard(pair, pairIdx, visualPage) {
       ? `${i18n.t("page.label", { n: pair.left + 1 })} ↔ ${i18n.t("page.label", { n: pair.right + 1 })}`
       : i18n.t("page.none");
 
-  const card = el("div", { class: "page-card" }, [
-    el("div", { class: "page-label" }, [
-      el("span", { text: label }),
-      el("span", { text: pageText }),
-    ]),
-  ]);
+  const card = el(
+    "div",
+    {
+      class: "page-card",
+      ...(pair.left !== null ? { "data-xray-left": String(pair.left) } : {}),
+      ...(pair.right !== null ? { "data-xray-right": String(pair.right) } : {}),
+    },
+    [
+      el("div", { class: "page-label" }, [
+        el("span", { text: label }),
+        el("span", { text: pageText }),
+      ]),
+    ]
+  );
 
   if (
     pair.left === null ||
@@ -2330,6 +2344,7 @@ function collectChanges() {
     updateChangeNav();
     return;
   }
+
   if (state.mode === "pages" || state.mode === "xray") {
     state.changes = $$("#page-view .page-row").filter((row) =>
       Array.from(row.querySelectorAll(".rect")).some((rect) => rect.offsetParent !== null)
@@ -2512,6 +2527,9 @@ function clearSearchHighlights() {
       parent.normalize();
     }
   }
+  for (const hit of $$("#page-view .rect.search-hit")) {
+    hit.remove();
+  }
 }
 
 function highlightTextInContainer(container, lowerQ, matchLen) {
@@ -2550,6 +2568,57 @@ function highlightTextInContainer(container, lowerQ, matchLen) {
   }
 }
 
+function performPageSearch(lowerQ, matchLen) {
+  const data = state.comparison;
+  if (!data || !data.rows) return;
+  const filter = state.search.filter || "all";
+  const hits = [];
+
+  for (let rowIndex = 0; rowIndex < data.rows.length; rowIndex++) {
+    const row = data.rows[rowIndex];
+    if (filter === "add" && row.kind !== "insert") continue;
+    if (filter === "del" && row.kind !== "delete") continue;
+    if (filter === "mod" && row.kind !== "replace") continue;
+
+    for (const side of ["left", "right"]) {
+      const line = row[side];
+      if (!line || !line.text || !line.bbox) continue;
+      const lowerText = line.text.toLowerCase();
+      let idx = lowerText.indexOf(lowerQ);
+      if (idx === -1) continue;
+
+      const card =
+        state.mode === "xray"
+          ? $(`#page-view .page-card[data-xray-left="${line.page}"], #page-view .page-card[data-xray-right="${line.page}"]`)
+          : $(`#page-view .page-card[data-side="${side}"][data-page="${line.page}"]`);
+      const canvas = card ? card.querySelector(".page-canvas") : null;
+      const size = data.pages && data.pages[side] ? data.pages[side][line.page] : null;
+      if (!canvas || !size) continue;
+
+      const [bx0, btop, bx1, bbottom] = line.bbox;
+      const totalLen = Math.max(line.text.length, 1);
+      const boxWidth = bx1 - bx0;
+      while (idx !== -1) {
+        const subX0 = bx0 + boxWidth * (idx / totalLen);
+        const subX1 = bx0 + boxWidth * ((idx + matchLen) / totalLen);
+        const hit = el("div", {
+          class: "rect search-hit",
+          title: line.text,
+          style:
+            `left:${(subX0 / size.width) * 100}%;` +
+            `top:${(btop / size.height) * 100}%;` +
+            `width:${(Math.max(subX1 - subX0, 4) / size.width) * 100}%;` +
+            `height:${(Math.max(bbottom - btop, 4) / size.height) * 100}%`,
+        });
+        canvas.append(hit);
+        hits.push(hit);
+        idx = lowerText.indexOf(lowerQ, idx + matchLen);
+      }
+    }
+  }
+  state.search.matches = hits;
+}
+
 function updateSearchCount() {
   const countEl = $("#search-count");
   if (!countEl) return;
@@ -2569,18 +2638,21 @@ function performSearch(query) {
     return;
   }
 
-  const rows = Array.from(document.querySelectorAll("#text-view .row"));
   const lowerQ = q.toLowerCase();
 
-  for (const row of rows) {
-    if (row.offsetParent === null) continue; // Skip hidden rows
-    const textContainers = row.querySelectorAll(".cell .text");
-    for (const container of textContainers) {
-      highlightTextInContainer(container, lowerQ, q.length);
+  if (state.mode === "pages" || state.mode === "xray") {
+    performPageSearch(lowerQ, q.length);
+  } else {
+    const rows = Array.from(document.querySelectorAll("#text-view .row"));
+    for (const row of rows) {
+      if (row.offsetParent === null) continue; // Skip hidden rows
+      const textContainers = row.querySelectorAll(".cell .text");
+      for (const container of textContainers) {
+        highlightTextInContainer(container, lowerQ, q.length);
+      }
     }
+    state.search.matches = Array.from(document.querySelectorAll("#text-view mark.search-match"));
   }
-
-  state.search.matches = Array.from(document.querySelectorAll("#text-view mark.search-match"));
   if (state.search.matches.length > 0) {
     state.search.index = 0;
     state.search.matches[0].classList.add("active");
@@ -2720,6 +2792,10 @@ function setMode(mode) {
   }
   if (state.comparison && (prevMode !== mode) && isPageMode) {
     renderPages();
+  }
+  const searchBar = $("#search-bar");
+  if (searchBar && !searchBar.hidden && state.search && state.search.query) {
+    performSearch(state.search.query);
   }
   applyZoom();
   collectChanges();
@@ -2861,12 +2937,24 @@ function renderFolderDiff(folderData) {
 /* ---------- box outline color ---------- */
 const BOX_COLOR_KEY = "diffanydoc:box-color";
 const BOX_COLORS = ["amber", "ruby", "blue", "contrast"];
+const BOX_SIZE_KEY = "diffanydoc:box-size";
+const BOX_SIZES = ["compact", "normal", "large"];
 
 function applyBoxColor(name) {
   const color = BOX_COLORS.includes(name) ? name : "amber";
   document.body.dataset.boxColor = color;
   for (const item of $$("#box-color-menu [data-color]")) {
     const active = item.dataset.color === color;
+    item.classList.toggle("active", active);
+    item.setAttribute("aria-checked", String(active));
+  }
+}
+
+function applyBoxSize(name) {
+  const size = BOX_SIZES.includes(name) ? name : "normal";
+  document.body.dataset.boxSize = size;
+  for (const item of $$("#box-color-menu [data-box-size]")) {
+    const active = item.dataset.boxSize === size;
     item.classList.toggle("active", active);
     item.setAttribute("aria-checked", String(active));
   }
@@ -2880,6 +2968,15 @@ function setupBoxColor() {
       closeMenus();
       applyBoxColor(item.dataset.color);
       safeStorageSet(BOX_COLOR_KEY, item.dataset.color);
+    });
+  }
+  const savedSize = safeStorageGet(BOX_SIZE_KEY);
+  applyBoxSize(savedSize);
+  for (const item of $$("#box-color-menu [data-box-size]")) {
+    item.addEventListener("click", () => {
+      closeMenus();
+      applyBoxSize(item.dataset.boxSize);
+      safeStorageSet(BOX_SIZE_KEY, item.dataset.boxSize);
     });
   }
 }

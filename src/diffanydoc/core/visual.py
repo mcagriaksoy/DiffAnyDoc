@@ -140,20 +140,28 @@ def _compare_page(
         changed_pixels = 0
         mask = Image.new("L", (width, height), 0)
 
-    boxes = _mask_regions(mask, scale)
-    left_regions: list[BBox] = []
-    right_regions: list[BBox] = []
+    left_l = left_canvas.convert("L")
+    right_shifted_l = right_shifted.convert("L")
+    left_darker, right_darker = _polarity_masks(left_l, right_shifted_l, is_lossy=is_lossy)
+    left_mask = ImageChops.darker(mask, left_darker)
+    right_mask = ImageChops.darker(mask, right_darker)
+    if left_mask.getbbox() is None and right_mask.getbbox() is None:
+        left_mask = mask
+        right_mask = mask
+
     left_w, left_h = left.width / scale, left.height / scale
     right_w, right_h = right.width / scale, right.height / scale
-    for box in boxes:
-        left_box = _clip_to_page(box, scale, 0, 0, left_w, left_h)
-        if left_box is not None:
-            left_regions.append(left_box)
-        right_box = _clip_to_page(
-            box, scale, shift[0], shift[1], right_w, right_h
-        )
-        if right_box is not None:
-            right_regions.append(right_box)
+    left_regions: list[BBox] = [
+        clipped
+        for box in _mask_regions(left_mask, scale)
+        if (clipped := _clip_to_page(box, scale, 0, 0, left_w, left_h)) is not None
+    ]
+    right_regions: list[BBox] = [
+        clipped
+        for box in _mask_regions(right_mask, scale)
+        if (clipped := _clip_to_page(box, scale, shift[0], shift[1], right_w, right_h))
+        is not None
+    ]
 
     if not left_regions and not right_regions:
         changed_pixels = 0
@@ -279,33 +287,66 @@ def _runs(values: list[int] | tuple[int, ...], gap: int) -> list[tuple[int, int]
     return runs
 
 
-def _mask_regions(mask: Image.Image, scale: float) -> list[BBox]:
-    """Turn a change mask into boxes in canvas pixels.
+def _polarity_masks(
+    left_l: Image.Image, right_shifted_l: Image.Image, *, is_lossy: bool
+) -> tuple[Image.Image, Image.Image]:
+    """Return (left_darker, right_darker) 8-bit masks matching X-Ray polarity."""
+    polarity_threshold = 22 if is_lossy else 14
+    left_darker = ImageChops.subtract(right_shifted_l, left_l).point(
+        lambda v: 255 if v > polarity_threshold else 0
+    )
+    right_darker = ImageChops.subtract(left_l, right_shifted_l).point(
+        lambda v: 255 if v > polarity_threshold else 0
+    )
+    return left_darker, right_darker
 
-    Rows first: changed text lines are separate bands. Inside each band the
-    columns are grouped too, so a change in the right column does not paint the
-    whole page width.
+
+def _tighten_box(mask: Image.Image, box: BBox, width: int, height: int) -> BBox | None:
+    """Tighten a candidate box to its actual non-zero pixels plus 1px margin."""
+    x0, top, x1, bottom = int(box[0]), int(box[1]), int(box[2]), int(box[3])
+    tight = mask.crop((x0, top, x1, bottom)).getbbox()
+    if tight is None:
+        return None
+    return (
+        max(0, x0 + tight[0] - 1),
+        max(0, top + tight[1] - 1),
+        min(width, x0 + tight[2] + 1),
+        min(height, top + tight[3] + 1),
+    )
+
+
+def _mask_regions(mask: Image.Image, scale: float) -> list[BBox]:
+    """Turn a change mask into tight boxes in canvas pixels.
+
+    Uses two-pass XY projection followed by per-box ``getbbox()`` tightening so
+    unrelated changes on the same horizontal band do not inflate each other into
+    large page-spanning rectangles.
     """
     width, height = mask.size
-    rows = _runs(_row_projection(mask), gap=max(1, round(scale * 2)))
-    column_gap = max(2, round(scale * 8))
+    row_gap = max(1, round(scale * 2))
+    rows = _runs(_row_projection(mask), gap=row_gap)
+    column_gap = max(2, round(scale * 6))
     boxes: list[BBox] = []
     for top, bottom in rows:
         band = mask.crop((0, top, width, bottom))
         band_height = bottom - top
         band_boxes: list[BBox] = []
         for x0, x1 in _runs(_column_projection(band), gap=column_gap):
-            pixels = band.crop((x0, 0, x1, band_height)).histogram()[255]
+            col_crop = band.crop((x0, 0, x1, band_height))
+            pixels = col_crop.histogram()[255]
             if pixels < 18 or (x1 - x0 < 6 and band_height < 6):
                 continue
-            band_boxes.append(
-                (
-                    max(0, x0 - 1),
-                    max(0, top - 1),
-                    min(width, x1 + 1),
-                    min(height, bottom + 1),
+            # Split tall sparse columns by internal row gaps before tightening.
+            sub_rows = _runs(_row_projection(col_crop), gap=row_gap)
+            for sub_top, sub_bot in sub_rows:
+                sub_pixels = col_crop.crop((0, sub_top, x1 - x0, sub_bot)).histogram()[255]
+                if sub_pixels < 18:
+                    continue
+                tight = _tighten_box(
+                    mask, (x0, top + sub_top, x1, top + sub_bot), width, height
                 )
-            )
+                if tight is not None:
+                    band_boxes.append(tight)
         if band_boxes and len(boxes) + len(band_boxes) > 120:
             # A dense page turns into hundreds of boxes that add nothing for
             # the reader; one box per changed line is the useful fallback.
@@ -388,13 +429,7 @@ def render_xray_page_png(
     red_layer = Image.new("RGB", (width, height), (224, 27, 36))
     green_layer = Image.new("RGB", (width, height), (38, 162, 105))
 
-    polarity_threshold = 22 if is_lossy else 14
-    left_darker = ImageChops.subtract(right_shifted_l, left_l).point(
-        lambda v: 255 if v > polarity_threshold else 0
-    )
-    right_darker = ImageChops.subtract(left_l, right_shifted_l).point(
-        lambda v: 255 if v > polarity_threshold else 0
-    )
+    left_darker, right_darker = _polarity_masks(left_l, right_shifted_l, is_lossy=is_lossy)
     highlight = Image.composite(red_layer, highlight, left_darker)
     highlight = Image.composite(green_layer, highlight, right_darker)
 
