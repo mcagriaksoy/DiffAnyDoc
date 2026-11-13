@@ -194,7 +194,10 @@ class VisualDiff:
 
     @property
     def region_count(self) -> int:
-        return sum(len(page.left_regions) for page in self.pages)
+        return sum(
+            max(len(page.left_regions), len(page.right_regions))
+            for page in self.pages
+        )
 
     def as_dict(self) -> dict[str, Any]:
         return {

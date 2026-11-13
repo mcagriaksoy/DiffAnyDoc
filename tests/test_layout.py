@@ -190,3 +190,42 @@ def test_change_rects_clips_merged_heading_span_to_changed_word() -> None:
     assert len(word_rects) == 1
     assert word_rects[0]["x0"] > 150.0
     assert word_rects[0]["x1"] == 260.0
+
+
+def test_pdf_page_frame_border_is_not_treated_as_table(tmp_path: Path) -> None:
+    """A full-page drawing/schematic border must not swallow word-level coordinates."""
+    import pdfplumber
+    from PIL import Image, ImageDraw
+    from diffanydoc.core.adapters import load
+
+    # Build a 2-page-like PDF via Pillow with a full-page ruled frame + title block
+    # and text inside it.
+    img = Image.new("RGB", (600, 800), "white")
+    draw = ImageDraw.Draw(img)
+    draw.rectangle((20, 20, 580, 780), outline="black", width=2)
+    draw.rectangle((350, 700, 580, 780), outline="black", width=2)
+    pdf_path = tmp_path / "frame.pdf"
+    img.save(pdf_path, "PDF", resolution=72.0)
+
+    # Also verify _extract_tables skips a mock table whose row spans >35% of page height.
+    from diffanydoc.core.adapters.pdf import _extract_tables
+
+    class _MockRow:
+        bbox = (20.0, 20.0, 580.0, 700.0)
+
+    class _MockTable:
+        bbox = (20.0, 20.0, 580.0, 780.0)
+        rows = [_MockRow()]
+
+        def extract(self):
+            return [["PCM2902C", "Sheet 1"], ["Rev 1.0", "A4"]]
+
+    class _MockPage:
+        height = 800.0
+
+        def find_tables(self):
+            return [_MockTable()]
+
+    blocks, boxes = _extract_tables(_MockPage())
+    assert blocks == []
+    assert boxes == []

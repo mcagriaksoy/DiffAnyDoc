@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.6.0] - 2026-11-13
+
+### Added
+- **Auto-Open `Pages` Tab for Non-Text / Scanned PDFs & Images**: Comparisons with no extracted text layer, OCR-only pages, or images now open directly on the `Pages` tab instead of an empty `Text` view.
+
+### Fixed
+- **X-Ray-Guided `Pages` Box Clustering (`visual.py`)**: Replaced coarse single-pass row/column projections with two-pass XY splitting + `getbbox()` tightening and X-Ray polarity masks (`_polarity_masks`), so `Pages` boxes tightly hug actual changed ink on each side instead of painting large areas or empty opposite-side space.
+- **Windows CLI UTF-8 Output & PyInstaller Smoke Test**: Handled `cp1252` `UnicodeEncodeError` in `cli._emit()` and bundled `pdfplumber` in `diffanydoc.spec` so the Windows portable `.exe` build and smoke test succeed cleanly.
+
 ## [0.5.0] - 2026-11-12
 
 ### Added
