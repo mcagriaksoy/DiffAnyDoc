@@ -1100,6 +1100,16 @@ a {
   background: color-mix(in srgb, var(--warning-color) 8%, var(--window-bg-color));
 }
 
+.row.moved .cell {
+  background: color-mix(in srgb, var(--accent-color) 7%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent-color);
+}
+
+.row.moved .cell .gutter {
+  color: var(--accent-color);
+  background: color-mix(in srgb, var(--accent-color) 10%, var(--window-bg-color));
+}
+
 .seg-del {
   padding: 1px 2px;
   background: var(--diff-del-strong);

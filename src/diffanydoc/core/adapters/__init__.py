@@ -15,6 +15,7 @@ from .doc import DocAdapter
 from .docx import DocxAdapter
 from .image import ImageAdapter
 from .pdf import PdfAdapter
+from .presentation import PresentationAdapter
 from .text import TextAdapter
 from .xlsx import XlsxAdapter
 
@@ -22,6 +23,7 @@ register(PdfAdapter())
 register(DocxAdapter())
 register(DocAdapter())
 register(XlsxAdapter())
+register(PresentationAdapter())
 register(ImageAdapter())
 register(TextAdapter())
 

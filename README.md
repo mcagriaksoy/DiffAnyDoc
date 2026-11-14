@@ -5,29 +5,17 @@ It shows text differences and marks changed lines with boxes on PDF pages.
 
 ![DiffAnyDoc screenshot](docs/screenshot.png)
 
-## Status
+## Features
 
-This repository contains **M0 + M1 + M2 + M3 + M4** in working order:
-
-- Adapter layer for PDF, DOCX, DOC/ODT/RTF, XLSX, images (PNG/JPG/TIFF/WEBP) and text files
-- Fast SHA-256 byte checksum check: identical files return immediately without loading or parsing
-- Line alignment plus word-level inline differences
-- Page matching (inserting a page no longer makes every later page look changed)
-- Visual (pixel) page diff: rendered pages, small registration offsets, noise
-  tolerance and changed regions (works on both PDFs and images)
-- Structural PDF/DOCX/XLSX diff: paragraphs, headers/footers/footnotes, table rows,
-  merged-cell expansion and individual cells (including ruled PDF tables), so a
-  changed price is one cell, not a rewritten row
-- Optional formatting/style comparison (`--format-diff` or UI checkbox) for font,
-  size, bold, italic, underline and heading changes
-- Zero-config embedded OCR for scanned/hybrid PDFs and images via **RapidOCR** (`rapidocr-onnxruntime`, Apache-2.0), with word boxes and an on-disk cache keyed by file content
-- X-Ray Vision composite view (`render_xray_page_png`) + interactive manual bounding-box annotations on pages
-- Multi-tab comparison sessions and side-to-side line/document merge (`A → B`, `B → A`)
-- Instant background preloading (`/api/preload`, `/api/preload-path`) when the first file is selected
-- Self-contained HTML report and stable JSON output
-- `diff`, `info`, `formats`, `serve`, `desktop`, `select`, `integrate` commands
-- Web UI and a **native desktop window** (pywebview / GTK)
-- 114 tests (`pytest`)
+- **Cross-Format Semantic Comparison**: PDF, DOCX, DOC/ODT/RTF, XLSX/XLSM, CSV/TSV, images (PNG/JPG/TIFF/WEBP/BMP), and plain text / source code
+- **Fast SHA-256 Checksum & Preloading**: Byte-identical files short-circuit immediately; background preloading starts as soon as the first file is selected
+- **Word-Level & Cell-Aware Diff**: Line alignment with word-level inline highlights, table row/cell matching, merged-cell expansion, and optional numeric tolerance
+- **Page & Visual (Pixel) Diff**: Side-by-side rendered pages with pixel-registered bounding boxes, noise tolerance, and changed-region navigation
+- **X-Ray Vision Overlay**: Pixel-registered composite overlay highlighting removed ink in red and added ink in green, plus interactive bounding-box annotations
+- **Zero-Config Embedded OCR**: Automatic OCR for scanned/hybrid PDFs and images via **RapidOCR** (`rapidocr-onnxruntime`, Apache-2.0) with SHA-256 disk caching
+- **Folder & Directory Comparison**: Recursive directory tree comparison with status filters and one-click file diff tabs
+- **Interactive Merging & Reports**: Multi-tab sessions, side-to-side line/document merge (`A → B`, `B → A`), and offline HTML / printable PDF reports
+- **Native Desktop & CLI**: Native desktop window (`pywebview` / GTK), file manager context menu integration, and `diff`, `info`, `formats`, `serve`, `desktop`, `select`, `integrate` commands
 
 ## Screenshots
 

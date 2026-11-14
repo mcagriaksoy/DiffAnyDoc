@@ -128,6 +128,8 @@ class Row:
     #: Number of identical rows folded away before this row (0 = nothing hidden).
     hidden_before: int = 0
     format_changes: list[str] = field(default_factory=list)
+    #: True when a deleted/inserted line appears identically elsewhere in the other document.
+    moved: bool = False
 
 
 @dataclass(slots=True)

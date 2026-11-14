@@ -1719,7 +1719,7 @@ function renderText() {
                 : row.kind === "replace"
                   ? "mod"
                   : "equal"
-          }`,
+          }${row.moved ? " moved" : ""}`,
         },
         [
           buildCell(
@@ -1940,9 +1940,35 @@ function onCellClick(event, cell, side) {
 }
 
 /* ---------- page view ---------- */
+let _pageObserver = null;
+
+function getPageObserver() {
+  if (_pageObserver) return _pageObserver;
+  if (typeof IntersectionObserver === "undefined") return null;
+  _pageObserver = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const img = entry.target;
+        const base = img.dataset.base;
+        if (base && !img.getAttribute("src")) {
+          img.src = `${base}?dpi=${pageDpi()}`;
+        }
+        _pageObserver.unobserve(img);
+      }
+    },
+    { rootMargin: "800px 0px" }
+  );
+  return _pageObserver;
+}
+
 function renderPages() {
   const data = state.comparison;
   const container = $("#page-view");
+  if (_pageObserver) {
+    _pageObserver.disconnect();
+    _pageObserver = null;
+  }
   container.replaceChildren();
 
   const visualPages = { left: {}, right: {} };
@@ -3078,7 +3104,12 @@ function pageImage(base, alt, eager = false) {
   img.addEventListener("error", () => {
     img.closest(".page-canvas")?.classList.remove("is-loading");
   });
-  img.src = `${base}?dpi=${pageDpi()}`;
+  const obs = eager ? null : getPageObserver();
+  if (obs) {
+    obs.observe(img);
+  } else {
+    img.src = `${base}?dpi=${pageDpi()}`;
+  }
   return img;
 }
 
@@ -3088,6 +3119,7 @@ function scheduleDpiUpdate() {
   dpiTimer = setTimeout(() => {
     const dpi = pageDpi();
     for (const img of $$("#page-view img[data-base]")) {
+      if (!img.getAttribute("src")) continue;
       const next = `${img.dataset.base}?dpi=${dpi}`;
       if (img.getAttribute("src") !== next) {
         img.closest(".page-canvas")?.classList.add("is-loading");
