@@ -21,6 +21,7 @@ def _client():
 
 
 def test_accent_falls_back_without_desktop_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(system.sys, "platform", "linux")
     monkeypatch.setattr(system.shutil, "which", lambda _name: None)
     system.accent_color.cache_clear()
     try:
