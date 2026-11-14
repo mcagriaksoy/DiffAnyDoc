@@ -13,6 +13,7 @@ from .base import (
 )
 from .doc import DocAdapter
 from .docx import DocxAdapter
+from .email_archive import EmailArchiveAdapter
 from .image import ImageAdapter
 from .pdf import PdfAdapter
 from .presentation import PresentationAdapter
@@ -24,6 +25,7 @@ register(DocxAdapter())
 register(DocAdapter())
 register(XlsxAdapter())
 register(PresentationAdapter())
+register(EmailArchiveAdapter())
 register(ImageAdapter())
 register(TextAdapter())
 

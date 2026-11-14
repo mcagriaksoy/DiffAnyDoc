@@ -18,11 +18,6 @@ classifiers = [
     "Topic :: Utilities",
 ]
 
-[project.urls]
-Homepage = "https://github.com/mcagriaksoy/DiffAnyDoc"
-Repository = "https://github.com/mcagriaksoy/DiffAnyDoc"
-Issues = "https://github.com/mcagriaksoy/DiffAnyDoc/issues"
-
 # All runtime dependencies are permissively licensed, so a closed-source
 # commercial build stays possible. Do not add AGPL/GPL libraries here.
 dependencies = [
@@ -31,6 +26,11 @@ dependencies = [
     "Pillow>=10",         # MIT-CMU - image handling
     "rapidocr-onnxruntime>=1.3",  # Apache-2.0 - embedded ONNX OCR engine
 ]
+
+[project.urls]
+Homepage = "https://github.com/mcagriaksoy/DiffAnyDoc"
+Repository = "https://github.com/mcagriaksoy/DiffAnyDoc"
+Issues = "https://github.com/mcagriaksoy/DiffAnyDoc/issues"
 
 [project.optional-dependencies]
 web = [
