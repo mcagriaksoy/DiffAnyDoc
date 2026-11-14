@@ -126,7 +126,7 @@ def test_cli_diff_folders(tmp_path: Path) -> None:
         str(dir1),
         str(dir2),
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     assert proc.returncode == 0
     out = proc.stdout
     assert "alpha.txt" not in out or "beta.txt" in out
