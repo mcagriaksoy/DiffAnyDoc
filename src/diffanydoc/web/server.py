@@ -318,6 +318,31 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc))
 
+    @app.post("/api/compare-directories/csv")
+    async def compare_directories_csv_endpoint(body: dict[str, Any]) -> Response:
+        import csv
+        import io
+
+        left = str(body.get("left", "")).strip()
+        right = str(body.get("right", "")).strip()
+        if not left or not right:
+            raise HTTPException(status_code=400, detail="both left and right directory paths required")
+        l_path = Path(left).expanduser().resolve()
+        r_path = Path(right).expanduser().resolve()
+        if not l_path.is_dir() or not r_path.is_dir():
+            raise HTTPException(status_code=400, detail="both paths must be existing directories")
+        diff_res = compare_folders(l_path, r_path)
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["status", "rel_path", "left_size", "right_size"])
+        for item in diff_res.items:
+            writer.writerow([item.status, item.rel_path, item.left_size or "", item.right_size or ""])
+        return Response(
+            content=buf.getvalue().encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="folder-diff.csv"'},
+        )
+
     @app.get("/api/compare/{comparison_id}")
     def get_comparison(comparison_id: str) -> JSONResponse:
         return JSONResponse(_get(comparison_id).payload)
