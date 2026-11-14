@@ -461,6 +461,7 @@ def _run_compare(
     numeric_tolerance: float | None = None,
     ignore_headers_footers: bool = False,
 ) -> Comparison:
+    effective_ocr = bool(ocr and ocr_available())
     options = DiffOptions(
         context=context,
         case_sensitive=case_sensitive,
@@ -468,12 +469,27 @@ def _run_compare(
         collapse_whitespace=collapse_whitespace,
         compare_formatting=compare_formatting,
         visual=visual,
-        ocr=ocr,
+        ocr=effective_ocr,
         ocr_language=ocr_language,
         numeric_tolerance=numeric_tolerance,
         ignore_headers_footers=ignore_headers_footers,
     )
-    result = compare(left_path, right_path, options)
+    try:
+        result = compare(left_path, right_path, options)
+    except OcrError:
+        options = DiffOptions(
+            context=context,
+            case_sensitive=case_sensitive,
+            fold_equal=fold_equal,
+            collapse_whitespace=collapse_whitespace,
+            compare_formatting=compare_formatting,
+            visual=visual,
+            ocr=False,
+            ocr_language=ocr_language,
+            numeric_tolerance=numeric_tolerance,
+            ignore_headers_footers=ignore_headers_footers,
+        )
+        result = compare(left_path, right_path, options)
 
     payload = result_to_dict(result)
     payload["id"] = uuid.uuid4().hex if directory else None

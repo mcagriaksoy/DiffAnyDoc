@@ -111,6 +111,14 @@
       <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" cy="6.5" r="4.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10 10l4 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
     </button>
 
+    <button class="flat icon" id="help-button" type="button" data-i18n-title="menu.help" data-i18n-aria-label="menu.help">
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.35"/>
+        <path d="M6.2 6.2a1.9 1.9 0 0 1 3.5.9c0 1.2-1.7 1.4-1.7 2.5" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/>
+        <circle cx="8" cy="11.8" r="0.85" fill="currentColor"/>
+      </svg>
+    </button>
+
     <div class="menu-wrap">
       <button class="flat icon" id="lang-button" data-menu="lang-menu" aria-haspopup="menu" aria-expanded="false" data-i18n-title="lang.label" data-i18n-aria-label="lang.label">
         <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -332,6 +340,17 @@
   </div>
   <div class="dialog-body">
     <p data-i18n="about.description">Compare PDF and text documents side by side. Everything runs on your machine.</p>
+    <p class="about-author" data-i18n="about.author">Created by mcagriaksoy</p>
+    <div class="about-links">
+      <a class="about-link" href="https://github.com/mcagriaksoy/DiffAnyDoc" target="_blank" rel="noopener">
+        <span data-i18n="about.github">GitHub Repository</span>
+        <span class="about-link-url">github.com/mcagriaksoy/DiffAnyDoc</span>
+      </a>
+      <a class="about-link" href="https://github.com/mcagriaksoy/DiffAnyDoc/issues" target="_blank" rel="noopener">
+        <span data-i18n="about.issues">Questions &amp; Issues (GitHub Issues)</span>
+        <span class="about-link-url">github.com/mcagriaksoy/DiffAnyDoc/issues</span>
+      </a>
+    </div>
   </div>
   <div class="dialog-actions">
     <button class="flat" id="about-license" type="button" data-i18n="menu.license">License Agreement</button>
@@ -359,10 +378,40 @@
       <p data-i18n="help.start.ocr">Scanned pages and images are read with built-in OCR. Nothing leaves your machine.</p>
     </section>
     <section class="help-panel" data-help-panel="modes" role="tabpanel" hidden>
-      <p data-i18n="help.modes.text">Text: both documents side by side, line by line. Only the changed words are highlighted.</p>
-      <p data-i18n="help.modes.pages">Pages: the rendered pages with boxes on the changed text. Pick the box color with the color button.</p>
-      <p data-i18n="help.modes.xray">X-Ray: both pages laid on top of each other. Removed ink is red, added ink is green.</p>
-      <p data-i18n="help.modes.zoom">In Pages and X-Ray, zoom with the zoom buttons or Ctrl + mouse wheel. Hold Space and drag, or drag with the middle mouse button, to move a zoomed page.</p>
+      <p class="help-hint" data-i18n="help.previewHint">Click any preview image to enlarge or shrink it.</p>
+      <div class="help-gallery">
+        <article class="help-card">
+          <p data-i18n="help.modes.text">Text: both documents side by side, line by line. Only the changed words are highlighted.</p>
+          <figure class="help-figure">
+            <img src="/static/help/Screenshot_Textview.png" alt="Text diff view" loading="lazy">
+          </figure>
+        </article>
+        <article class="help-card">
+          <p data-i18n="help.modes.pages">Pages: the rendered pages with boxes on the changed text. Pick the box color with the color button.</p>
+          <figure class="help-figure">
+            <img src="/static/help/Screenshot_Pageview.png" alt="PDF pages view" loading="lazy">
+          </figure>
+        </article>
+        <article class="help-card">
+          <p data-i18n="help.modes.pagesTable">Pages (Tables / CSV): changed cells are outlined directly on the rendered table.</p>
+          <figure class="help-figure">
+            <img src="/static/help/Screenshot_Pageview2.png" alt="Table pages view" loading="lazy">
+          </figure>
+        </article>
+        <article class="help-card">
+          <p data-i18n="help.modes.xray">X-Ray: both pages laid on top of each other. Removed ink is red, added ink is green.</p>
+          <figure class="help-figure">
+            <img src="/static/help/Screenshot_xrayView.png" alt="X-Ray overlay view" loading="lazy">
+          </figure>
+        </article>
+        <article class="help-card">
+          <p data-i18n="help.modes.report">Reports: export a self-contained HTML or PDF report with SHA-256 checksums and similarity stats.</p>
+          <figure class="help-figure">
+            <img src="/static/help/Screenshot_PDFReport.png" alt="Offline HTML and PDF report" loading="lazy">
+          </figure>
+        </article>
+      </div>
+      <p data-i18n="help.modes.zoom">In Pages and X-Ray, zoom with the zoom buttons or Ctrl + mouse wheel. Drag to pan a zoomed page.</p>
     </section>
     <section class="help-panel" data-help-panel="merge" role="tabpanel" hidden>
       <p data-i18n="help.merge.line">Each changed line has an arrow next to its number. → copies the left line to the right side, ← copies the right line to the left side.</p>

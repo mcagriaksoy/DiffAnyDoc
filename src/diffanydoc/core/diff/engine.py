@@ -281,6 +281,7 @@ def compare(
     )
 
     rows = _build_rows(left_lines, right_lines, options)
+    _mark_moved_rows(rows)
     stats = _stats(left_lines, right_lines, rows)
     if options.fold_equal or len(rows) > _AUTO_FOLD_LINE_THRESHOLD:
         rows = _fold_equal_runs(rows, max(options.context, 3))
@@ -556,6 +557,32 @@ def _stats(left: Sequence[Line], right: Sequence[Line], rows: Sequence[Row]) -> 
 
 def _is_change(row: Row) -> bool:
     return row.kind != "equal" or bool(getattr(row, "format_changes", None))
+
+
+_MIN_MOVE_LEN = 12
+
+
+def _mark_moved_rows(rows: list[Row]) -> None:
+    """Flag deleted/inserted rows whose normalized text appears identically on the other side."""
+    inserts_by_text: dict[str, list[Row]] = {}
+    for row in rows:
+        if row.kind == "insert" and row.right is not None:
+            key = row.right.norm.strip()
+            if len(key) >= _MIN_MOVE_LEN:
+                inserts_by_text.setdefault(key, []).append(row)
+
+    if not inserts_by_text:
+        return
+
+    for row in rows:
+        if row.kind == "delete" and row.left is not None:
+            key = row.left.norm.strip()
+            if len(key) >= _MIN_MOVE_LEN:
+                bucket = inserts_by_text.get(key)
+                if bucket:
+                    partner = bucket.pop(0)
+                    row.moved = True
+                    partner.moved = True
 
 
 def fold_equal_runs(rows: Sequence[Row], context: int) -> list[Row]:

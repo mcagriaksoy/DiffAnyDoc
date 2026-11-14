@@ -537,7 +537,7 @@ a {
 
 /* ---------- upload / empty state ---------- */
 .upload-view {
-  max-width: 760px;
+  max-width: 960px;
   margin: 0 auto;
   padding: var(--space-5) var(--space-3) 64px;
 }
@@ -578,9 +578,9 @@ a {
   align-items: center;
   justify-content: center;
   gap: var(--space-1);
-  min-height: 132px;
-  padding: var(--space-3);
-  border: 1px solid var(--border-color);
+  min-height: 200px;
+  padding: var(--space-4);
+  border: 1.5px dashed var(--border-color);
   border-radius: var(--radius-md);
   background: var(--view-bg-color);
   text-align: center;
@@ -590,6 +590,7 @@ a {
 
 .drop:hover {
   background: var(--hover-tint);
+  border-color: color-mix(in srgb, var(--accent-color) 55%, var(--border-color));
 }
 
 .drop.dragover {
@@ -1097,6 +1098,16 @@ a {
 
 .row.mod .cell .gutter {
   background: color-mix(in srgb, var(--warning-color) 8%, var(--window-bg-color));
+}
+
+.row.moved .cell {
+  background: color-mix(in srgb, var(--accent-color) 7%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent-color);
+}
+
+.row.moved .cell .gutter {
+  color: var(--accent-color);
+  background: color-mix(in srgb, var(--accent-color) 10%, var(--window-bg-color));
 }
 
 .seg-del {
@@ -1768,6 +1779,41 @@ body.dragging .drop {
   margin: 0 0 var(--space-2);
 }
 
+.about-author {
+  color: var(--text-color);
+  font-weight: 600;
+}
+
+.about-links {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: var(--space-2);
+}
+
+.about-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--window-bg-color);
+  color: var(--text-color);
+  text-decoration: none;
+  font-size: 13px;
+}
+
+.about-link:hover {
+  border-color: var(--accent-color);
+}
+
+.about-link-url {
+  color: var(--accent-color);
+  font-size: 12px;
+}
+
 .dialog-actions {
   display: flex;
   justify-content: flex-end;
@@ -1780,8 +1826,71 @@ body.dragging .drop {
   margin-bottom: var(--space-2);
 }
 
+#help-dialog .dialog-body {
+  max-height: min(72vh, 620px);
+  overflow-y: auto;
+}
+
 .help-panel {
   min-height: 160px;
+}
+
+.help-hint {
+  font-size: var(--font-size-caption);
+  color: var(--dim-label-color);
+  margin-bottom: var(--space-2);
+}
+
+.help-gallery {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.help-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--window-bg-color);
+}
+
+.help-card:has(.help-figure.expanded) {
+  grid-column: 1 / -1;
+}
+
+.help-card p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-color);
+}
+
+.help-figure {
+  margin: 0;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--view-bg-color);
+  cursor: zoom-in;
+}
+
+.help-figure.expanded {
+  cursor: zoom-out;
+}
+
+.help-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+@media (max-width: 640px) {
+  .help-gallery {
+    grid-template-columns: 1fr;
+  }
 }
 
 .help-keys {
@@ -2063,18 +2172,23 @@ kbd {
   min-height: 2px;
   border-radius: 1px;
   pointer-events: none;
+  opacity: 0.85;
 }
 
 .minimap-mark.add {
-  background: var(--diff-ins-strong);
+  background: var(--success-color);
 }
 
 .minimap-mark.del {
-  background: var(--diff-del-strong);
+  background: var(--error-color);
 }
 
 .minimap-mark.mod {
   background: var(--warning-color);
+}
+
+.minimap-mark.visual {
+  background: var(--accent-color);
 }
 
 .minimap-viewport {

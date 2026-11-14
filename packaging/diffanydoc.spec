@@ -27,8 +27,45 @@ analysis = Analysis(
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
-    excludes=["tkinter", "pytest"],
+    excludes=[
+        "tkinter",
+        "_tkinter",
+        "idlelib",
+        "unittest",
+        "pydoc",
+        "pydoc_data",
+        "doctest",
+        "lib2to3",
+        "ensurepip",
+        "curses",
+        "pytest",
+        "setuptools",
+        "pip",
+        "wheel",
+        "matplotlib",
+        "scipy",
+        "pandas",
+        "IPython",
+        "notebook",
+    ],
 )
+
+# Trim third-party type stubs, test suites, and debug symbols to shrink the bundle
+# without enabling UPX (which triggers antivirus false-positives on Windows).
+def _keep_data(entry):
+    dest = entry[0].replace("\\", "/").lower()
+    if dest.startswith("diffanydoc/"):
+        return True
+    if dest.endswith((".pyi", ".pdb")):
+        return False
+    parts = dest.split("/")
+    return "tests" not in parts and "test" not in parts
+
+analysis.datas = [d for d in analysis.datas if _keep_data(d)]
+analysis.binaries = [
+    b for b in analysis.binaries
+    if not b[0].replace("\\", "/").lower().endswith(".pdb")
+]
 pyz = PYZ(analysis.pure)
 
 # Icon and version resource apply to Windows only.

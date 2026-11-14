@@ -7,7 +7,11 @@
 AppId={{6C1F3A52-8B47-4E0D-9D6A-2F7B5C9E41A8}
 AppName=DiffAnyDoc
 AppVersion={#AppVersion}
-AppPublisher=DiffAnyDoc
+AppPublisher=mcagriaksoy (Mehmet Cagri Aksoy)
+AppPublisherURL=https://github.com/mcagriaksoy/DiffAnyDoc
+AppSupportURL=https://github.com/mcagriaksoy/DiffAnyDoc/issues
+AppUpdatesURL=https://github.com/mcagriaksoy/DiffAnyDoc/releases
+LicenseFile=..\..\LICENSE
 DefaultDirName={autopf}\DiffAnyDoc
 DefaultGroupName=DiffAnyDoc
 PrivilegesRequired=lowest

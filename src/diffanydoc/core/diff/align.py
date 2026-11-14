@@ -59,6 +59,18 @@ def align_pages(left: Document, right: Document) -> list[PagePair]:
         left_keys = [str(page.label) for page in left.pages]
         right_keys = [str(page.label) for page in right.pages]
     else:
+        if left_text == right_text:
+            return [
+                PagePair(left=i, right=i, similarity=1.0)
+                for i in range(left.page_count)
+            ]
+        if left.page_count * right.page_count <= 250_000:
+            return _align_block(
+                list(range(left.page_count)),
+                list(range(right.page_count)),
+                left_words,
+                right_words,
+            )
         left_keys, right_keys = left_text, right_text
 
     matcher = SequenceMatcher(None, left_keys, right_keys, autojunk=False)
@@ -107,7 +119,10 @@ def _align_block(
         move[0][j] = 3
     for i in range(1, n + 1):
         for j in range(1, m + 1):
-            diag = score[i - 1][j - 1] + similarity[i - 1][j - 1] - MATCH_THRESHOLD
+            sim = similarity[i - 1][j - 1]
+            # Tiny positional tie-breaker so repeated/identical pages pair at matching offsets.
+            tie = 1e-5 * (1.0 - abs(i / n - j / m)) if sim >= MATCH_THRESHOLD else 0.0
+            diag = score[i - 1][j - 1] + sim - MATCH_THRESHOLD + tie
             up = score[i - 1][j]
             side = score[i][j - 1]
             best = max(diag, up, side)

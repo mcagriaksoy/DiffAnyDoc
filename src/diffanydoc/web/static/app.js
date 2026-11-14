@@ -399,6 +399,9 @@ function showHelpPanel(name) {
 
 function openHelp() {
   closeMenus();
+  for (const fig of $$(".help-figure.expanded")) {
+    fig.classList.remove("expanded");
+  }
   const dialog = $("#help-dialog");
   if (!dialog.open) dialog.showModal();
 }
@@ -432,8 +435,12 @@ function setupDialogs() {
       tab.addEventListener("click", () => showLicensePanel(tab.dataset.license));
     }
     if ($("#help")) $("#help").addEventListener("click", openHelp);
+    if ($("#help-button")) $("#help-button").addEventListener("click", openHelp);
     for (const tab of $$(".help-tab")) {
       tab.addEventListener("click", () => showHelpPanel(tab.dataset.help));
+    }
+    for (const fig of $$(".help-figure")) {
+      fig.addEventListener("click", () => fig.classList.toggle("expanded"));
     }
     if ($("#updates")) {
       $("#updates").addEventListener("click", () => {
@@ -1712,7 +1719,7 @@ function renderText() {
                 : row.kind === "replace"
                   ? "mod"
                   : "equal"
-          }`,
+          }${row.moved ? " moved" : ""}`,
         },
         [
           buildCell(
@@ -1933,9 +1940,35 @@ function onCellClick(event, cell, side) {
 }
 
 /* ---------- page view ---------- */
+let _pageObserver = null;
+
+function getPageObserver() {
+  if (_pageObserver) return _pageObserver;
+  if (typeof IntersectionObserver === "undefined") return null;
+  _pageObserver = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const img = entry.target;
+        const base = img.dataset.base;
+        if (base && !img.getAttribute("src")) {
+          img.src = `${base}?dpi=${pageDpi()}`;
+        }
+        _pageObserver.unobserve(img);
+      }
+    },
+    { rootMargin: "800px 0px" }
+  );
+  return _pageObserver;
+}
+
 function renderPages() {
   const data = state.comparison;
   const container = $("#page-view");
+  if (_pageObserver) {
+    _pageObserver.disconnect();
+    _pageObserver = null;
+  }
   container.replaceChildren();
 
   const visualPages = { left: {}, right: {} };
@@ -2431,21 +2464,28 @@ function renderMinimap() {
   );
   const trackHeight = track.clientHeight || (window.innerHeight - 48);
 
+  const nodes =
+    state.mode === "pages" || state.mode === "xray"
+      ? $$("#page-view .rect:not(.search-hit)").filter((r) => r.offsetParent !== null)
+      : state.changes;
+
   const fragment = document.createDocumentFragment();
-  for (const node of state.changes) {
+  for (const node of nodes) {
     const rect = node.getBoundingClientRect();
     const elemTop = rect.top + window.scrollY;
     const ratio = Math.min(Math.max(elemTop / docHeight, 0), 1);
     const topPx = Math.round(ratio * trackHeight);
+    const heightPx = Math.min(18, Math.max(2, Math.round((rect.height / docHeight) * trackHeight)));
 
     let kind = "mod";
-    if (node.classList.contains("add")) kind = "add";
-    else if (node.classList.contains("del")) kind = "del";
-    else if (node.classList.contains("mod")) kind = "mod";
+    if (node.classList.contains("add") || node.classList.contains("insert")) kind = "add";
+    else if (node.classList.contains("del") || node.classList.contains("delete")) kind = "del";
+    else if (node.classList.contains("visual")) kind = "visual";
+    else if (node.classList.contains("mod") || node.classList.contains("replace")) kind = "mod";
 
     const mark = el("div", {
       class: `minimap-mark ${kind}`,
-      style: `top: ${topPx}px`,
+      style: `top: ${topPx}px; height: ${heightPx}px`,
     });
     fragment.appendChild(mark);
   }
@@ -3064,7 +3104,12 @@ function pageImage(base, alt, eager = false) {
   img.addEventListener("error", () => {
     img.closest(".page-canvas")?.classList.remove("is-loading");
   });
-  img.src = `${base}?dpi=${pageDpi()}`;
+  const obs = eager ? null : getPageObserver();
+  if (obs) {
+    obs.observe(img);
+  } else {
+    img.src = `${base}?dpi=${pageDpi()}`;
+  }
   return img;
 }
 
@@ -3074,6 +3119,7 @@ function scheduleDpiUpdate() {
   dpiTimer = setTimeout(() => {
     const dpi = pageDpi();
     for (const img of $$("#page-view img[data-base]")) {
+      if (!img.getAttribute("src")) continue;
       const next = `${img.dataset.base}?dpi=${dpi}`;
       if (img.getAttribute("src") !== next) {
         img.closest(".page-canvas")?.classList.add("is-loading");
@@ -3175,19 +3221,43 @@ function setupPageZoom() {
     { passive: false }
   );
 
-  // Capture phase: panning wins over annotation drawing.
+  // Capture phase: panning wins over annotation drawing when Space/middle-click
+  // is used, and works with left-drag whenever zoomed/scrollable.
   view.addEventListener(
     "mousedown",
     (event) => {
-      if (!(event.button === 1 || (event.button === 0 && pan.ready))) return;
+      if (event.target.closest("button, a, input, select, textarea, .rect-del")) return;
+      const isMiddle = event.button === 1;
+      const isLeft = event.button === 0;
+      if (!isMiddle && !isLeft) return;
+      if (state.annotating && isLeft && !pan.ready) return;
+
+      const canScrollX = view.scrollWidth > view.clientWidth + 1;
+      const canScrollY =
+        document.documentElement.scrollHeight > window.innerHeight + 1 ||
+        view.scrollHeight > view.clientHeight + 1;
+      if (!isMiddle && !pan.ready && !canScrollX && !canScrollY) return;
+
       event.preventDefault();
-      event.stopPropagation();
-      let lastX = event.clientX;
-      let lastY = event.clientY;
-      document.body.classList.add("panning");
+      if (isMiddle || pan.ready) event.stopPropagation();
+
+      const startX = event.clientX;
+      const startY = event.clientY;
+      let lastX = startX;
+      let lastY = startY;
+      let moved = false;
+
       const onMove = (move) => {
-        view.scrollLeft -= move.clientX - lastX;
-        window.scrollBy(0, -(move.clientY - lastY));
+        const dx = move.clientX - lastX;
+        const dy = move.clientY - lastY;
+        if (!moved && Math.hypot(move.clientX - startX, move.clientY - startY) > 4) {
+          moved = true;
+          document.body.classList.add("panning");
+        }
+        if (moved) {
+          view.scrollLeft -= dx;
+          window.scrollBy(0, -dy);
+        }
         lastX = move.clientX;
         lastY = move.clientY;
       };
@@ -3195,6 +3265,14 @@ function setupPageZoom() {
         window.removeEventListener("mousemove", onMove);
         window.removeEventListener("mouseup", onUp);
         document.body.classList.remove("panning");
+        if (moved) {
+          const suppressClick = (clickEvent) => {
+            clickEvent.preventDefault();
+            clickEvent.stopPropagation();
+          };
+          view.addEventListener("click", suppressClick, { capture: true, once: true });
+          setTimeout(() => view.removeEventListener("click", suppressClick, { capture: true }), 0);
+        }
       };
       window.addEventListener("mousemove", onMove);
       window.addEventListener("mouseup", onUp);
