@@ -1547,7 +1547,8 @@ function renderResult() {
 
   $("#visual-wrap").hidden = !state.visual;
   if (state.visual) {
-    document.body.classList.toggle("visual-off", isTextOnlyMode);
+    const hasExtractedRows = Boolean(data.rows && data.rows.length > 0);
+    document.body.classList.toggle("visual-off", hasExtractedRows || isTextOnlyMode);
   }
   if (canRender && preferPagesTab && state.mode === "text" && !state._reloading) {
     state.mode = "pages";
@@ -1780,19 +1781,32 @@ function renderText() {
       );
     }
     if (!row.left && !row.right) continue;
+    const hasShiftMeta = Boolean(
+      (row.left && row.left.style && row.left.style.position_shift) ||
+        (row.right && row.right.style && row.right.style.position_shift)
+    );
+    const hasInlineDiff = Boolean(
+      (row.left_inline && row.left_inline.some((s) => s.kind !== "equal")) ||
+        (row.right_inline && row.right_inline.some((s) => s.kind !== "equal"))
+    );
+    const isShiftOnly = hasShiftMeta && !hasInlineDiff && Boolean(row.left && row.right);
+    const rowKindClass =
+      row.kind === "insert"
+        ? "add"
+        : row.kind === "delete"
+          ? "del"
+          : isShiftOnly
+            ? row.kind === "replace"
+              ? "shifted"
+              : "equal"
+            : row.kind === "replace"
+              ? "mod"
+              : "equal";
     fragment.append(
       el(
         "div",
         {
-          class: `row ${
-            row.kind === "insert"
-              ? "add"
-              : row.kind === "delete"
-                ? "del"
-                : row.kind === "replace"
-                  ? "mod"
-                  : "equal"
-          }${row.moved ? " moved" : ""}`,
+          class: `row ${rowKindClass}${row.moved ? " moved" : ""}`,
         },
         [
           buildCell(
@@ -1800,7 +1814,7 @@ function renderText() {
             row.left_inline,
             lastPage.left,
             "left",
-            row.kind !== "equal",
+            row.kind !== "equal" && !isShiftOnly,
             rowIndex,
             row.move_id || movePairNumbers.get(rowIndex) || 0
           ),
@@ -1809,7 +1823,7 @@ function renderText() {
             row.right_inline,
             lastPage.right,
             "right",
-            row.kind !== "equal",
+            row.kind !== "equal" && !isShiftOnly,
             rowIndex,
             row.move_id || movePairNumbers.get(rowIndex) || 0
           ),
@@ -1852,28 +1866,35 @@ function buildCell(
   } else {
     text.textContent = line.text;
   }
-  if (moveNum > 0) {
-    text.append(
+  const shiftMeta = line.style && line.style.position_shift;
+  const effectiveNum = (shiftMeta && shiftMeta.id) || moveNum || 0;
+  if (effectiveNum > 0) {
+    text.prepend(
       el("span", {
-        class: "move-badge",
-        title: `Moved / matched at another position (#${moveNum})`,
-        text: `(${moveNum})`,
+        class: "move-badge shift-num-badge",
+        title: `#${effectiveNum}`,
+        text: `#${effectiveNum}`,
       })
     );
   }
-  if (line.style && line.style.position_shift) {
-    const shift = line.style.position_shift;
+  if (shiftMeta) {
     const isTextOnly =
       state.comparison &&
       state.comparison.options &&
       state.comparison.options.compare_mode === "text_only";
+    const tagText = effectiveNum
+      ? i18n.t(side === "left" ? "shift.leftTag" : "shift.rightTag", {
+          id: effectiveNum,
+          shift: shiftMeta.label,
+        })
+      : `\u2194 ${shiftMeta.label}`;
     text.append(
       el("span", {
         class: `page-tag shift-tag${isTextOnly ? " shift-muted" : ""}`,
         title: i18n.t(isTextOnly ? "shift.ignoredHint" : "shift.detectedHint", {
-          shift: shift.label,
+          shift: shiftMeta.label,
         }),
-        text: `\u2194 ${shift.label}`,
+        text: `\u2194 ${tagText}`,
       })
     );
   } else if (line.style && line.style.style_change) {
@@ -2100,12 +2121,12 @@ function renderPages() {
 
   for (let pairIdx = 0; pairIdx < data.page_map.length; pairIdx++) {
     const pair = data.page_map[pairIdx];
-    container.append(
-      el("div", { class: "page-row" }, [
-        buildPageCard("left", pair.left, visualPages.left[pair.left], pairIdx),
-        buildPageCard("right", pair.right, visualPages.right[pair.right], pairIdx),
-      ])
-    );
+    const rowEl = el("div", { class: "page-row" }, [
+      buildPageCard("left", pair.left, visualPages.left[pair.left], pairIdx),
+      buildPageCard("right", pair.right, visualPages.right[pair.right], pairIdx),
+    ]);
+    attachCrossPageShiftArrows(rowEl);
+    container.append(rowEl);
   }
 }
 
@@ -2194,11 +2215,16 @@ function buildXrayCard(pair, pairIdx, visualPage) {
       rKind,
       rTitle,
       size.width,
-      size.height
+      size.height,
+      rect.row ?? -1,
+      "xray",
+      rect
     );
   }
   if (!isTextOnlyMode) {
+    renderPageShiftArrows(canvas, activeXrayRects, "xray", size);
     for (const box of (visualPage && visualPage.left_regions) || []) {
+      if (_boxCoveredByRects(box, activeXrayRects)) continue;
       addRect(canvas, box, "visual", i18n.t("visual.region"), size.width, size.height);
     }
   }
@@ -2232,22 +2258,42 @@ function _boxCoveredByRects(box, rects) {
   const bArea = Math.max(bx1 - bx0, 0) * Math.max(bbottom - btop, 0);
   if (bArea <= 0) return false;
   for (const r of rects) {
+    const rArea = Math.max(r.x1 - r.x0, 0) * Math.max(r.bottom - r.top, 0);
     const ix0 = Math.max(bx0, r.x0);
     const itop = Math.max(btop, r.top);
     const ix1 = Math.min(bx1, r.x1);
     const ibottom = Math.min(bbottom, r.bottom);
     if (ix1 > ix0 && ibottom > itop) {
       const inter = (ix1 - ix0) * (ibottom - itop);
-      if (inter / bArea >= 0.5) return true;
+      const minArea = Math.min(bArea, Math.max(rArea, 1));
+      if (inter / bArea >= 0.35 || inter / minArea >= 0.35) return true;
     }
   }
   return false;
 }
 
-function addRect(canvas, box, kind, title, pageWidth, pageHeight, row = -1, side = "") {
+function setShiftHover(shiftId, active) {
+  if (!shiftId) return;
+  for (const node of $$(`[data-shift-id="${shiftId}"]`)) {
+    node.classList.toggle("is-shift-active", active);
+  }
+}
+
+function addRect(
+  canvas,
+  box,
+  kind,
+  title,
+  pageWidth,
+  pageHeight,
+  row = -1,
+  side = "",
+  meta = null
+) {
   const [x0, top, x1, bottom] = box;
   const width = Math.max(x1 - x0, 0.5);
   const height = Math.max(bottom - top, 0.5);
+  const shiftId = meta && meta.shift_id ? Number(meta.shift_id) : 0;
   const attrs = {
     class: `rect ${kind}`,
     title,
@@ -2257,6 +2303,11 @@ function addRect(canvas, box, kind, title, pageWidth, pageHeight, row = -1, side
       `width:${(width / pageWidth) * 100}%;` +
       `height:${(height / pageHeight) * 100}%`,
   };
+  if (shiftId > 0) {
+    attrs["data-shift-id"] = String(shiftId);
+    attrs.onmouseenter = () => setShiftHover(shiftId, true);
+    attrs.onmouseleave = () => setShiftHover(shiftId, false);
+  }
   if (row >= 0) {
     attrs["data-row"] = String(row);
     attrs.onclick = (e) => {
@@ -2265,7 +2316,175 @@ function addRect(canvas, box, kind, title, pageWidth, pageHeight, row = -1, side
       jumpToTextRow(row, side);
     };
   }
-  canvas.append(el("div", attrs));
+  const children = [];
+  if (kind === "shift" && shiftId > 0) {
+    children.push(
+      el("span", {
+        class: "rect-shift-badge",
+        text: String(shiftId),
+      })
+    );
+  }
+  canvas.append(el("div", attrs, children));
+}
+
+function renderPageShiftArrows(canvas, activeRects, side, size) {
+  if (side !== "right" && side !== "xray") return;
+  const shiftRects = (activeRects || []).filter(
+    (r) =>
+      r.kind === "shift" &&
+      Array.isArray(r.left_bbox) &&
+      Array.isArray(r.right_bbox) &&
+      r.left_page === r.right_page
+  );
+  if (!shiftRects.length) return;
+
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("class", "page-shift-svg");
+  svg.setAttribute("viewBox", `0 0 ${size.width} ${size.height}`);
+  svg.setAttribute("preserveAspectRatio", "none");
+
+  const defs = document.createElementNS(ns, "defs");
+  const marker = document.createElementNS(ns, "marker");
+  marker.setAttribute("id", `shift-arrow-${side}`);
+  marker.setAttribute("viewBox", "0 0 10 10");
+  marker.setAttribute("refX", "8");
+  marker.setAttribute("refY", "5");
+  marker.setAttribute("markerWidth", "6");
+  marker.setAttribute("markerHeight", "6");
+  marker.setAttribute("orient", "auto-start-reverse");
+  const arrowPath = document.createElementNS(ns, "path");
+  arrowPath.setAttribute("d", "M 0 1.5 L 9 5 L 0 8.5 z");
+  arrowPath.setAttribute("fill", "currentColor");
+  marker.appendChild(arrowPath);
+  defs.appendChild(marker);
+  svg.appendChild(defs);
+
+  const seen = new Set();
+  for (const r of shiftRects) {
+    const key = r.shift_id || r.row;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const [lx0, ltop, lx1, lbottom] = r.left_bbox;
+    const [rx0, rtop, rx1, rbottom] = r.right_bbox;
+    const lcx = (lx0 + lx1) / 2;
+    const lcy = (ltop + lbottom) / 2;
+    const rcx = (rx0 + rx1) / 2;
+    const rcy = (rtop + rbottom) / 2;
+    if (Math.hypot(rcx - lcx, rcy - lcy) < 4) continue;
+
+    const g = document.createElementNS(ns, "g");
+    g.setAttribute("class", "shift-vector-group");
+    if (r.shift_id) g.setAttribute("data-shift-id", String(r.shift_id));
+
+    const ghost = document.createElementNS(ns, "rect");
+    ghost.setAttribute("class", "shift-ghost-box");
+    ghost.setAttribute("x", String(lx0));
+    ghost.setAttribute("y", String(ltop));
+    ghost.setAttribute("width", String(Math.max(lx1 - lx0, 2)));
+    ghost.setAttribute("height", String(Math.max(lbottom - ltop, 2)));
+    ghost.setAttribute("rx", "2");
+    g.appendChild(ghost);
+
+    const dot = document.createElementNS(ns, "circle");
+    dot.setAttribute("class", "shift-origin-dot");
+    dot.setAttribute("cx", String(lcx));
+    dot.setAttribute("cy", String(lcy));
+    dot.setAttribute("r", "2.6");
+    g.appendChild(dot);
+
+    const line = document.createElementNS(ns, "path");
+    const midX = (lcx + rcx) / 2;
+    const midY = (lcy + rcy) / 2 - Math.min(18, Math.abs(rcx - lcx) * 0.12);
+    line.setAttribute("class", "shift-vector-line");
+    line.setAttribute("d", `M ${lcx} ${lcy} Q ${midX} ${midY} ${rcx} ${rcy}`);
+    line.setAttribute("marker-end", `url(#shift-arrow-${side})`);
+    g.appendChild(line);
+
+    svg.appendChild(g);
+  }
+  canvas.appendChild(svg);
+}
+
+function attachCrossPageShiftArrows(rowEl) {
+  const leftShiftRects = rowEl.querySelectorAll('.page-card[data-side="left"] .rect.shift[data-shift-id]');
+  const rightShiftRects = rowEl.querySelectorAll('.page-card[data-side="right"] .rect.shift[data-shift-id]');
+  if (!leftShiftRects.length || !rightShiftRects.length) return;
+
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("class", "cross-page-svg");
+
+  const update = () => {
+    const rowBounds = rowEl.getBoundingClientRect();
+    if (!rowBounds.width || !rowBounds.height) return;
+    svg.setAttribute("viewBox", `0 0 ${rowBounds.width} ${rowBounds.height}`);
+    svg.replaceChildren();
+
+    const defs = document.createElementNS(ns, "defs");
+    const marker = document.createElementNS(ns, "marker");
+    marker.setAttribute("id", "cross-shift-arrowhead");
+    marker.setAttribute("viewBox", "0 0 10 10");
+    marker.setAttribute("refX", "8");
+    marker.setAttribute("refY", "5");
+    marker.setAttribute("markerWidth", "6");
+    marker.setAttribute("markerHeight", "6");
+    marker.setAttribute("orient", "auto");
+    const p = document.createElementNS(ns, "path");
+    p.setAttribute("d", "M 0 1.5 L 9 5 L 0 8.5 z");
+    p.setAttribute("fill", "currentColor");
+    marker.appendChild(p);
+    defs.appendChild(marker);
+    svg.appendChild(defs);
+
+    const rightMap = new Map();
+    for (const rEl of rightShiftRects) {
+      const id = rEl.getAttribute("data-shift-id");
+      if (id && !rightMap.has(id)) rightMap.set(id, rEl);
+    }
+
+    const seen = new Set();
+    for (const lEl of leftShiftRects) {
+      const id = lEl.getAttribute("data-shift-id");
+      if (!id || seen.has(id) || !rightMap.has(id)) continue;
+      seen.add(id);
+      const rEl = rightMap.get(id);
+      const lb = lEl.getBoundingClientRect();
+      const rb = rEl.getBoundingClientRect();
+      if (!lb.width || !rb.width) continue;
+
+      const x1 = lb.right - rowBounds.left;
+      const y1 = (lb.top + lb.bottom) / 2 - rowBounds.top;
+      const x2 = rb.left - rowBounds.left;
+      const y2 = (rb.top + rb.bottom) / 2 - rowBounds.top;
+      const spanX = Math.max(40, (x2 - x1) * 0.42);
+
+      const path = document.createElementNS(ns, "path");
+      path.setAttribute("class", "cross-shift-path");
+      path.setAttribute("data-shift-id", id);
+      if (lEl.classList.contains("is-shift-active")) {
+        path.classList.add("is-shift-active");
+      }
+      path.setAttribute(
+        "d",
+        `M ${x1} ${y1} C ${x1 + spanX} ${y1}, ${x2 - spanX} ${y2}, ${x2} ${y2}`
+      );
+      path.setAttribute("marker-end", "url(#cross-shift-arrowhead)");
+      svg.appendChild(path);
+    }
+  };
+
+  rowEl.appendChild(svg);
+  for (const img of rowEl.querySelectorAll("img")) {
+    img.addEventListener("load", () => requestAnimationFrame(update), { once: true });
+  }
+  requestAnimationFrame(update);
+  if (typeof ResizeObserver !== "undefined") {
+    const ro = new ResizeObserver(() => requestAnimationFrame(update));
+    ro.observe(rowEl);
+  }
 }
 
 function buildPageCard(side, index, visualPage, pairIdx = 0) {
@@ -2338,8 +2557,12 @@ function buildPageCard(side, index, visualPage, pairIdx = 0) {
       size.width,
       size.height,
       rect.row,
-      side
+      side,
+      rect
     );
+  }
+  if (!isTextOnlyMode) {
+    renderPageShiftArrows(canvas, activeRects, side, size);
   }
 
   const visualBoxes =
@@ -2513,9 +2736,9 @@ function collectChanges() {
       Array.from(row.querySelectorAll(".rect")).some((rect) => rect.offsetParent !== null)
     );
   } else {
-    state.changes = $$("#text-view .row.add, #text-view .row.del, #text-view .row.mod").filter(
-      (row) => row.offsetParent !== null
-    );
+    state.changes = $$(
+      "#text-view .row.add, #text-view .row.del, #text-view .row.mod, #text-view .row.shifted"
+    ).filter((row) => row.offsetParent !== null);
   }
   state.changeIndex = -1;
   updateChangeNav();

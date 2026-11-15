@@ -427,6 +427,77 @@ def test_pdf_shifted_text_strict_vs_text_only_mode(tmp_path: Path) -> None:
     assert text_only_rects["right"] == {}
 
 
+def test_pdf_reordered_and_shifted_blocks_numbered_and_paired(tmp_path: Path) -> None:
+    from diffanydoc.core.diff.geometry import change_rects
+
+    # Left PDF has 3 blocks in top-to-bottom order
+    left_lines = [
+        "1. Bolum: Kurumsal Giris",
+        "2. Bolum: Teknik Sartname",
+        "3. Bolum: Maliyet Tablosu",
+    ]
+    left_pdf = write_pdf(tmp_path / "reordered-left.pdf", [left_lines])
+
+    # Right PDF has the exact same 3 blocks but in a different vertical order
+    # AND shifted horizontally to the right
+    right_lines = [
+        "3. Bolum: Maliyet Tablosu",
+        "1. Bolum: Kurumsal Giris",
+        "2. Bolum: Teknik Sartname",
+    ]
+    right_pdf = write_pdf(
+        tmp_path / "reordered-right.pdf",
+        [right_lines],
+        line_offsets={0: (80.0, 0.0), 1: (45.0, -20.0), 2: (60.0, -40.0)},
+    )
+
+    strict_res = compare(
+        left_pdf,
+        right_pdf,
+        DiffOptions(compare_mode="strict", fold_equal=False),
+    )
+    # Must NOT produce any false deletions or insertions
+    assert strict_res.stats.added == 0
+    assert strict_res.stats.removed == 0
+    assert len(strict_res.rows) == 3
+
+    # Every row is paired (left and right both exist) with no inline word deletions/insertions
+    shift_ids: list[int] = []
+    for row in strict_res.rows:
+        assert row.left is not None and row.right is not None
+        assert row.left.text == row.right.text
+        assert all(s.kind == "equal" for s in row.left_inline)
+        assert all(s.kind == "equal" for s in row.right_inline)
+        smeta = row.right.style.get("position_shift")
+        assert smeta is not None
+        shift_ids.append(smeta["id"])
+        assert smeta["left_bbox"] is not None
+        assert smeta["right_bbox"] is not None
+
+    assert shift_ids == [1, 2, 3]
+
+    rects = change_rects(strict_res)
+    left_rects = rects["left"].get("0", [])
+    right_rects = rects["right"].get("0", [])
+    assert len(left_rects) == 3
+    assert len(right_rects) == 3
+    assert [r["shift_id"] for r in left_rects] == [1, 2, 3]
+    assert all(r["kind"] == "shift" for r in right_rects)
+
+    # In text_only mode, all 3 blocks are 100% equal with 0 changes
+    text_only_res = compare(
+        left_pdf,
+        right_pdf,
+        DiffOptions(compare_mode="text_only", fold_equal=False),
+    )
+    assert text_only_res.identical is True
+    assert text_only_res.stats.added == 0
+    assert text_only_res.stats.removed == 0
+    assert text_only_res.stats.changed == 0
+    assert text_only_res.stats.similarity == 1.0
+
+
+
 
 
 

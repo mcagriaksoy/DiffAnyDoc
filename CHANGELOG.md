@@ -10,9 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.7.0] - 2026-11-15
 
 ### Added
-- **Switchable Full-PDF Visual/Position Mode vs. Ignore Layout Shifts (Text-Only) Mode**: Added coordinate shift detection (`_detect_position_shifts` in `engine.py` and `"shift"` overlay boxes in `geometry.py`) alongside an instant topbar switch (`#opt-text-only-mode`, labeled `"Ignore layout shifts (Text only)"` / `"Kaymaları yok say (Sadece metin)"` with tooltip and Help documentation in `#help-dialog`) backed by `/api/compare/{id}/recompare`:
-  - **Visual & Position Mode (`strict`)**: Detects and highlights horizontally or vertically shifted lines/spans (`>= 4.5 pt`) even when the text words are 100% identical, drawing `.rect.shift` boxes on the PDF pages and marking the row with a directional shift pill (`↔ → Δx +50pt`).
-  - **Ignore Layout Shifts / Text-Only Mode (`text_only`)**: Compares only the extracted text / OCR content, ignoring layout and coordinate shifts so shifted identical text is not flagged as a change (`0` changes, `100%` similarity, no page error boxes) while displaying a subtle muted position note on the unchanged row.
+- **Numbered Layout-Shift Matching (`1, 2, 3...`), Split/Wrapped Line Reconciliation & SVG Arrow Overlays**:
+  - Added `_reconcile_split_lines` and exact-move reservation in `engine.py` so text blocks that moved vertically/horizontally, changed reading order, or wrapped across different column widths are paired 1:1 instead of being painted as deletions, insertions, or modified text.
+  - Sequentially numbers every shifted/reordered block (`#1`, `#2`, `#3`...) across both `Text` and `Pages` views:
+    - **`Pages` & `X-Ray` Views**: Draws numbered `.rect-shift-badge` callouts (`1`, `2`, `3`) on Left and Right pages, on-page SVG displacement vector arrows (`page-shift-svg`) from ghost origin boxes to new locations, and cross-page cubic Bezier arrows (`cross-page-svg`) connecting `#1` on Left Page A to `#1` on Right Page B.
+    - **`Text` View**: Styles pure position shifts with `.row.shifted` (accent-blue indicator rather than red/green/amber error colors) and displays `#1 · Sağda mevcut (→ Δx +50pt)` / `#1 · Soldan kaydı (→ Δx +50pt)`.
+- **Switchable Full-PDF Visual/Position Mode vs. Ignore Layout Shifts (Text-Only) Mode**: Added coordinate shift detection (`_detect_position_shifts` in `engine.py` and `"shift"` overlay boxes in `geometry.py`) alongside an instant topbar switch (`#opt-text-only-mode`, labeled `"Ignore layout shifts (Text only)"` / `"Kaymaları yok say (Sadece metin)"` with tooltip and Help documentation in `#help-dialog`) backed by `/api/compare/{id}/recompare`.
 
 ### Changed
 - **Compact Initial Window & `1366x768` Screen Fit**: Reduced default desktop window dimensions (`1160x700`, minimum `860x560`) and compacted initial upload screen spacing (`.upload-view`, `.status`, `.drop`, plus `@media (max-height: 800px)` rules) so the entire welcome/upload screen fits cleanly on `1366x768` displays without vertical clipping or scrolling.

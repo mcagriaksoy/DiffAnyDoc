@@ -138,8 +138,19 @@ def change_rects(result: DiffResult) -> dict[str, dict[str, list[dict[str, Any]]
             pass_inline = inline if (row.kind == "replace" and has_text_diff) else None
             for rect in line_rects(line, kind, index, pass_inline, side):
                 if kind == "shift" and line.style and line.style.get("position_shift"):
-                    shift_lbl = line.style["position_shift"].get("label", "")
+                    smeta = line.style["position_shift"]
+                    shift_lbl = smeta.get("label", "")
+                    shift_id = smeta.get("id", 0)
+                    rect["shift_id"] = shift_id
+                    rect["dx"] = smeta.get("dx", 0.0)
+                    rect["dy"] = smeta.get("dy", 0.0)
+                    rect["shift_label"] = shift_lbl
+                    rect["left_bbox"] = smeta.get("left_bbox")
+                    rect["right_bbox"] = smeta.get("right_bbox")
+                    rect["left_page"] = smeta.get("left_page")
+                    rect["right_page"] = smeta.get("right_page")
+                    prefix = f"#{shift_id} " if shift_id else ""
                     if shift_lbl:
-                        rect["text"] = f"{rect['text']} ({shift_lbl})"
+                        rect["text"] = f"{prefix}{rect['text']} ({shift_lbl})"
                 out[side].setdefault(str(rect.pop("page")), []).append(rect)
     return out
