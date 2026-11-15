@@ -4592,9 +4592,29 @@ async function renderAiView() {
       },
       [
         el("option", {
+          value: "smollm2-135m",
+          selected: activePreset === "smollm2-135m",
+          text: i18n.t("ai.presetTiny"),
+        }),
+        el("option", {
+          value: "qwen-0.5b-q2",
+          selected: activePreset === "qwen-0.5b-q2",
+          text: i18n.t("ai.presetNano"),
+        }),
+        el("option", {
+          value: "smollm2-360m",
+          selected: activePreset === "smollm2-360m",
+          text: i18n.t("ai.presetFeather"),
+        }),
+        el("option", {
           value: "qwen-0.5b",
           selected: activePreset === "qwen-0.5b",
           text: i18n.t("ai.presetFast"),
+        }),
+        el("option", {
+          value: "qwen3-0.6b",
+          selected: activePreset === "qwen3-0.6b",
+          text: i18n.t("ai.presetQwen3"),
         }),
         el("option", {
           value: "qwen-1.5b",

@@ -112,7 +112,15 @@ def test_ai_web_endpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     assert status_resp.status_code == 200
     status_data = status_resp.json()
     assert "presets" in status_data
-    assert any(p["id"] == "qwen-0.5b" for p in status_data["presets"])
+    preset_ids = {p["id"] for p in status_data["presets"]}
+    assert {
+        "smollm2-135m",
+        "qwen-0.5b-q2",
+        "smollm2-360m",
+        "qwen-0.5b",
+        "qwen3-0.6b",
+        "qwen-1.5b",
+    }.issubset(preset_ids)
 
     cfg_resp = client.post(
         "/api/ai/config",
