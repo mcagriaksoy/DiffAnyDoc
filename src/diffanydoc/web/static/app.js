@@ -2374,7 +2374,7 @@ function addRect(
 }
 
 function renderPageShiftArrows(canvas, activeRects, side, size) {
-  if (side !== "right" && side !== "xray") return;
+  if (side !== "xray") return;
   const shiftRects = (activeRects || []).filter(
     (r) =>
       r.kind === "shift" &&
@@ -2476,7 +2476,7 @@ function attachCrossPageShiftArrows(rowEl) {
     marker.setAttribute("refY", "5");
     marker.setAttribute("markerWidth", "6");
     marker.setAttribute("markerHeight", "6");
-    marker.setAttribute("orient", "auto");
+    marker.setAttribute("orient", "auto-start-reverse");
     const p = document.createElementNS(ns, "path");
     p.setAttribute("d", "M 0 1.5 L 9 5 L 0 8.5 z");
     p.setAttribute("fill", "currentColor");
@@ -2516,6 +2516,7 @@ function attachCrossPageShiftArrows(rowEl) {
         "d",
         `M ${x1} ${y1} C ${x1 + spanX} ${y1}, ${x2 - spanX} ${y2}, ${x2} ${y2}`
       );
+      path.setAttribute("marker-start", "url(#cross-shift-arrowhead)");
       path.setAttribute("marker-end", "url(#cross-shift-arrowhead)");
       svg.appendChild(path);
     }
