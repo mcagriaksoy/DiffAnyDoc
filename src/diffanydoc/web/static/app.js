@@ -474,6 +474,7 @@ function setupDialogs() {
 function openSettings() {
   closeMenus();
   loadIntegrationStatus();
+  loadAiStatus();
   if ($("#settings-dialog")) $("#settings-dialog").showModal();
 }
 
@@ -770,7 +771,7 @@ function isReady() {
 }
 
 function canReload() {
-  return isReady();
+  return isReady() || Boolean(state.comparison && state.comparison.id);
 }
 
 function updateCompareButton() {
@@ -788,13 +789,18 @@ function hideError() {
 }
 
 /* ---------- comparison ---------- */
-async function comparisonRequest() {
+async function comparisonRequest(useExistingId = false) {
   const caseSensitive = $("#opt-case") ? !$("#opt-case").checked : true;
   const collapseWhitespace = $("#opt-space") ? $("#opt-space").checked : true;
   const formatCheckbox = $("#opt-format");
   const compareFormatting = Boolean(formatCheckbox && formatCheckbox.checked);
   const headersCheckbox = $("#opt-headers");
   const ignoreHeadersFooters = Boolean(headersCheckbox && headersCheckbox.checked);
+  const modeSelect = $("#opt-compare-mode");
+  const textOnlyToggle = $("#opt-text-only-mode");
+  const compareMode = (textOnlyToggle && textOnlyToggle.checked)
+    ? "text_only"
+    : ((modeSelect && modeSelect.value) || "strict");
   const ocrCheckbox = $("#opt-ocr");
   const ocr = ocrCheckbox ? Boolean(ocrCheckbox.checked) : true;
   const ocrLangSelect = $("#opt-ocr-lang");
@@ -804,6 +810,27 @@ async function comparisonRequest() {
   if (tolInput && tolInput.value && tolInput.value.trim() !== "") {
     const parsed = parseFloat(tolInput.value);
     if (Number.isFinite(parsed) && parsed >= 0) numericTolerance = parsed;
+  }
+
+  if (useExistingId && state.comparison && state.comparison.id) {
+    const resp = await fetch(`/api/compare/${state.comparison.id}/recompare`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        case_sensitive: caseSensitive,
+        collapse_whitespace: collapseWhitespace,
+        compare_formatting: compareFormatting,
+        fold_equal: false,
+        context: 3,
+        visual: true,
+        ocr,
+        ocr_language: ocrLanguage,
+        numeric_tolerance: numericTolerance,
+        ignore_headers_footers: ignoreHeadersFooters,
+        compare_mode: compareMode,
+      }),
+    });
+    if (resp.ok || !isReady()) return resp;
   }
 
   if (desktop.available && desktop.paths.left && desktop.paths.right) {
@@ -826,6 +853,7 @@ async function comparisonRequest() {
         ocr_language: ocrLanguage,
         numeric_tolerance: numericTolerance,
         ignore_headers_footers: ignoreHeadersFooters,
+        compare_mode: compareMode,
       }),
     });
   }
@@ -855,6 +883,7 @@ async function comparisonRequest() {
     form.append("numeric_tolerance", String(numericTolerance));
   }
   form.append("ignore_headers_footers", String(ignoreHeadersFooters));
+  form.append("compare_mode", compareMode);
   return postFormWithProgress("/api/compare", form, (fraction) => {
     const pct = Math.round(fraction * 35);
     setCompareProgress(pct, "progress.uploading");
@@ -1008,21 +1037,23 @@ async function reloadComparison() {
   const mode = state.mode;
   const reload = $("#reload");
   state.comparing = true;
+  state._reloading = true;
   reload.disabled = true;
   reload.classList.add("busy");
 
   try {
-    const response = await comparisonRequest();
+    const response = await comparisonRequest(true);
     if (!response.ok) throw new Error(await readError(response));
     state.comparison = await response.json();
     renderResult();
-    if (!$("#tab-pages").disabled) setMode(mode);
+    if (!$("#tab-pages").disabled || mode === "text") setMode(mode);
     window.scrollTo({ top: scroll });
     showToast(i18n.t("reload.done"));
   } catch (error) {
     showToast(error.message || i18n.t("error.generic"), true);
   } finally {
     state.comparing = false;
+    state._reloading = false;
     reload.disabled = false;
     reload.classList.remove("busy");
     updateCompareButton();
@@ -1506,11 +1537,21 @@ function renderResult() {
   const preferPagesTab =
     isNonTextDoc || data.left.kind === "pdf" || data.right.kind === "pdf";
 
+  const compareMode = (data.options && data.options.compare_mode) || "strict";
+  const isTextOnlyMode = compareMode === "text_only";
+  if ($("#opt-text-only-mode")) {
+    $("#opt-text-only-mode").checked = isTextOnlyMode;
+  }
+  if ($("#opt-compare-mode")) {
+    $("#opt-compare-mode").value = compareMode;
+  }
+
   $("#visual-wrap").hidden = !state.visual;
   if (state.visual) {
-    document.body.classList.toggle("visual-off", !isNonTextDoc);
+    const hasExtractedRows = Boolean(data.rows && data.rows.length > 0);
+    document.body.classList.toggle("visual-off", hasExtractedRows || isTextOnlyMode);
   }
-  if (canRender && preferPagesTab && state.mode === "text") {
+  if (canRender && preferPagesTab && state.mode === "text" && !state._reloading) {
     state.mode = "pages";
   }
   $("#opt-visual").checked = !document.body.classList.contains("visual-off");
@@ -1698,6 +1739,40 @@ function renderText() {
       )
     );
   }
+  const movePairNumbers = new Map();
+  const pendingMoveDeletes = new Map();
+  const pendingMoveInserts = new Map();
+  let nextMoveNum = 1;
+  const moveKey = (text) => String(text || "").trim().toLowerCase().replace(/\s+/g, " ");
+  for (let i = 0; i < data.rows.length; i++) {
+    const r = data.rows[i];
+    if (!r.moved) continue;
+    if (r.kind === "delete" && r.left) {
+      const k = moveKey(r.left.text);
+      const q = pendingMoveInserts.get(k);
+      if (q && q.length) {
+        const pairIdx = q.shift();
+        const num = nextMoveNum++;
+        movePairNumbers.set(i, num);
+        movePairNumbers.set(pairIdx, num);
+      } else {
+        if (!pendingMoveDeletes.has(k)) pendingMoveDeletes.set(k, []);
+        pendingMoveDeletes.get(k).push(i);
+      }
+    } else if (r.kind === "insert" && r.right) {
+      const k = moveKey(r.right.text);
+      const q = pendingMoveDeletes.get(k);
+      if (q && q.length) {
+        const pairIdx = q.shift();
+        const num = nextMoveNum++;
+        movePairNumbers.set(pairIdx, num);
+        movePairNumbers.set(i, num);
+      } else {
+        if (!pendingMoveInserts.has(k)) pendingMoveInserts.set(k, []);
+        pendingMoveInserts.get(k).push(i);
+      }
+    }
+  }
   const lastPage = { left: -1, right: -1 };
   for (let rowIndex = 0; rowIndex < data.rows.length; rowIndex++) {
     const row = data.rows[rowIndex];
@@ -1707,19 +1782,32 @@ function renderText() {
       );
     }
     if (!row.left && !row.right) continue;
+    const hasShiftMeta = Boolean(
+      (row.left && row.left.style && row.left.style.position_shift) ||
+        (row.right && row.right.style && row.right.style.position_shift)
+    );
+    const hasInlineDiff = Boolean(
+      (row.left_inline && row.left_inline.some((s) => s.kind !== "equal")) ||
+        (row.right_inline && row.right_inline.some((s) => s.kind !== "equal"))
+    );
+    const isShiftOnly = hasShiftMeta && !hasInlineDiff && Boolean(row.left && row.right);
+    const rowKindClass =
+      row.kind === "insert"
+        ? "add"
+        : row.kind === "delete"
+          ? "del"
+          : isShiftOnly
+            ? row.kind === "replace"
+              ? "shifted"
+              : "equal"
+            : row.kind === "replace"
+              ? "mod"
+              : "equal";
     fragment.append(
       el(
         "div",
         {
-          class: `row ${
-            row.kind === "insert"
-              ? "add"
-              : row.kind === "delete"
-                ? "del"
-                : row.kind === "replace"
-                  ? "mod"
-                  : "equal"
-          }${row.moved ? " moved" : ""}`,
+          class: `row ${rowKindClass}${row.moved ? " moved" : ""}`,
         },
         [
           buildCell(
@@ -1727,16 +1815,18 @@ function renderText() {
             row.left_inline,
             lastPage.left,
             "left",
-            row.kind !== "equal",
-            rowIndex
+            row.kind !== "equal" && !isShiftOnly,
+            rowIndex,
+            row.move_id || movePairNumbers.get(rowIndex) || 0
           ),
           buildCell(
             row.right,
             row.right_inline,
             lastPage.right,
             "right",
-            row.kind !== "equal",
-            rowIndex
+            row.kind !== "equal" && !isShiftOnly,
+            rowIndex,
+            row.move_id || movePairNumbers.get(rowIndex) || 0
           ),
         ]
       )
@@ -1754,7 +1844,8 @@ function buildCell(
   previousPage = -1,
   side = "left",
   copyable = false,
-  rowIndex = -1
+  rowIndex = -1,
+  moveNum = 0
 ) {
   if (!line) return el("div", { class: "cell" });
   const text = el("span", { class: "text" });
@@ -1776,7 +1867,38 @@ function buildCell(
   } else {
     text.textContent = line.text;
   }
-  if (line.style && line.style.style_change) {
+  const shiftMeta = line.style && line.style.position_shift;
+  const effectiveNum = (shiftMeta && shiftMeta.id) || moveNum || 0;
+  if (effectiveNum > 0) {
+    text.prepend(
+      el("span", {
+        class: "move-badge shift-num-badge",
+        title: `#${effectiveNum}`,
+        text: `#${effectiveNum}`,
+      })
+    );
+  }
+  if (shiftMeta) {
+    const isTextOnly =
+      state.comparison &&
+      state.comparison.options &&
+      state.comparison.options.compare_mode === "text_only";
+    const tagText = effectiveNum
+      ? i18n.t(side === "left" ? "shift.leftTag" : "shift.rightTag", {
+          id: effectiveNum,
+          shift: shiftMeta.label,
+        })
+      : `\u2194 ${shiftMeta.label}`;
+    text.append(
+      el("span", {
+        class: `page-tag shift-tag${isTextOnly ? " shift-muted" : ""}`,
+        title: i18n.t(isTextOnly ? "shift.ignoredHint" : "shift.detectedHint", {
+          shift: shiftMeta.label,
+        }),
+        text: `\u2194 ${tagText}`,
+      })
+    );
+  } else if (line.style && line.style.style_change) {
     text.append(
       el("span", {
         class: "page-tag",
@@ -1784,6 +1906,19 @@ function buildCell(
         text: line.style.summary || line.style.style_change,
       })
     );
+  }
+  if (side === "right" || (side === "left" && !state.comparison.rows[rowIndex]?.right)) {
+    const aiItem = findAiItemForRow(rowIndex, effectiveNum);
+    if (aiItem) {
+      const cat = aiItem.category || "content";
+      text.append(
+        el("span", {
+          class: `page-tag ai-inline-pill cat-${cat}`,
+          title: aiItem.explanation || aiItem.title || "",
+          text: `\u2728 ${i18n.t(`ai.cat.${cat}`)}: ${aiItem.explanation || aiItem.title}`,
+        })
+      );
+    }
   }
   const gutter = el("span", { class: "gutter" });
   if (copyable) {
@@ -1937,6 +2072,33 @@ function onCellClick(event, cell, side) {
       })
     );
   }
+
+  const rowObj = state.comparison && state.comparison.rows && state.comparison.rows[rowIndex];
+  const hasShift = Boolean(
+    rowObj &&
+      ((rowObj.left && rowObj.left.style && rowObj.left.style.position_shift) ||
+        (rowObj.right && rowObj.right.style && rowObj.right.style.position_shift))
+  );
+  if (
+    textEl &&
+    state.comparison &&
+    state.comparison.id &&
+    Number.isFinite(rowIndex) &&
+    rowIndex >= 0 &&
+    rowObj &&
+    (rowObj.kind !== "equal" || hasShift)
+  ) {
+    const aiBtn = el("button", {
+      class: "match-select-btn ai-explain-btn",
+      type: "button",
+      text: `\u2728 ${i18n.t("ai.explainRow")}`,
+      onclick: async (e) => {
+        e.stopPropagation();
+        await explainRowInline(rowIndex, textEl, aiBtn);
+      },
+    });
+    textEl.append(aiBtn);
+  }
 }
 
 /* ---------- page view ---------- */
@@ -2000,12 +2162,12 @@ function renderPages() {
 
   for (let pairIdx = 0; pairIdx < data.page_map.length; pairIdx++) {
     const pair = data.page_map[pairIdx];
-    container.append(
-      el("div", { class: "page-row" }, [
-        buildPageCard("left", pair.left, visualPages.left[pair.left], pairIdx),
-        buildPageCard("right", pair.right, visualPages.right[pair.right], pairIdx),
-      ])
-    );
+    const rowEl = el("div", { class: "page-row" }, [
+      buildPageCard("left", pair.left, visualPages.left[pair.left], pairIdx),
+      buildPageCard("right", pair.right, visualPages.right[pair.right], pairIdx),
+    ]);
+    attachCrossPageShiftArrows(rowEl);
+    container.append(rowEl);
   }
 }
 
@@ -2073,18 +2235,39 @@ function buildXrayCard(pair, pairIdx, visualPage) {
   const activeXrayRects = combinedRects.filter(
     (r) => !(r.level === "line" && xrayRowsWithWords.has(r.row))
   );
+  const isTextOnlyMode =
+    data.options && data.options.compare_mode === "text_only";
   for (const rect of activeXrayRects) {
+    const rKind =
+      rect.kind === "insert"
+        ? "insert"
+        : rect.kind === "delete"
+          ? "delete"
+          : rect.kind === "shift"
+            ? "shift"
+            : "replace";
+    const rTitle =
+      rect.kind === "shift"
+        ? `${i18n.t("shift.badge")}: ${rect.text}`
+        : `${rect.kind}: ${rect.text}`;
     addRect(
       canvas,
       [rect.x0, rect.top, rect.x1, rect.bottom],
-      rect.kind === "insert" ? "insert" : rect.kind === "delete" ? "delete" : "replace",
-      `${rect.kind}: ${rect.text}`,
+      rKind,
+      rTitle,
       size.width,
-      size.height
+      size.height,
+      rect.row ?? -1,
+      "xray",
+      rect
     );
   }
-  for (const box of (visualPage && visualPage.left_regions) || []) {
-    addRect(canvas, box, "visual", i18n.t("visual.region"), size.width, size.height);
+  if (!isTextOnlyMode) {
+    renderPageShiftArrows(canvas, activeXrayRects, "xray", size);
+    for (const box of (visualPage && visualPage.left_regions) || []) {
+      if (_boxCoveredByRects(box, activeXrayRects)) continue;
+      addRect(canvas, box, "visual", i18n.t("visual.region"), size.width, size.height);
+    }
   }
 
   renderManualAnnotations(canvas, pairIdx, "xray");
@@ -2116,22 +2299,42 @@ function _boxCoveredByRects(box, rects) {
   const bArea = Math.max(bx1 - bx0, 0) * Math.max(bbottom - btop, 0);
   if (bArea <= 0) return false;
   for (const r of rects) {
+    const rArea = Math.max(r.x1 - r.x0, 0) * Math.max(r.bottom - r.top, 0);
     const ix0 = Math.max(bx0, r.x0);
     const itop = Math.max(btop, r.top);
     const ix1 = Math.min(bx1, r.x1);
     const ibottom = Math.min(bbottom, r.bottom);
     if (ix1 > ix0 && ibottom > itop) {
       const inter = (ix1 - ix0) * (ibottom - itop);
-      if (inter / bArea >= 0.5) return true;
+      const minArea = Math.min(bArea, Math.max(rArea, 1));
+      if (inter / bArea >= 0.35 || inter / minArea >= 0.35) return true;
     }
   }
   return false;
 }
 
-function addRect(canvas, box, kind, title, pageWidth, pageHeight, row = -1, side = "") {
+function setShiftHover(shiftId, active) {
+  if (!shiftId) return;
+  for (const node of $$(`[data-shift-id="${shiftId}"]`)) {
+    node.classList.toggle("is-shift-active", active);
+  }
+}
+
+function addRect(
+  canvas,
+  box,
+  kind,
+  title,
+  pageWidth,
+  pageHeight,
+  row = -1,
+  side = "",
+  meta = null
+) {
   const [x0, top, x1, bottom] = box;
   const width = Math.max(x1 - x0, 0.5);
   const height = Math.max(bottom - top, 0.5);
+  const shiftId = meta && meta.shift_id ? Number(meta.shift_id) : 0;
   const attrs = {
     class: `rect ${kind}`,
     title,
@@ -2141,6 +2344,11 @@ function addRect(canvas, box, kind, title, pageWidth, pageHeight, row = -1, side
       `width:${(width / pageWidth) * 100}%;` +
       `height:${(height / pageHeight) * 100}%`,
   };
+  if (shiftId > 0) {
+    attrs["data-shift-id"] = String(shiftId);
+    attrs.onmouseenter = () => setShiftHover(shiftId, true);
+    attrs.onmouseleave = () => setShiftHover(shiftId, false);
+  }
   if (row >= 0) {
     attrs["data-row"] = String(row);
     attrs.onclick = (e) => {
@@ -2149,7 +2357,175 @@ function addRect(canvas, box, kind, title, pageWidth, pageHeight, row = -1, side
       jumpToTextRow(row, side);
     };
   }
-  canvas.append(el("div", attrs));
+  const children = [];
+  if (kind === "shift" && shiftId > 0) {
+    children.push(
+      el("span", {
+        class: "rect-shift-badge",
+        text: String(shiftId),
+      })
+    );
+  }
+  canvas.append(el("div", attrs, children));
+}
+
+function renderPageShiftArrows(canvas, activeRects, side, size) {
+  if (side !== "right" && side !== "xray") return;
+  const shiftRects = (activeRects || []).filter(
+    (r) =>
+      r.kind === "shift" &&
+      Array.isArray(r.left_bbox) &&
+      Array.isArray(r.right_bbox) &&
+      r.left_page === r.right_page
+  );
+  if (!shiftRects.length) return;
+
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("class", "page-shift-svg");
+  svg.setAttribute("viewBox", `0 0 ${size.width} ${size.height}`);
+  svg.setAttribute("preserveAspectRatio", "none");
+
+  const defs = document.createElementNS(ns, "defs");
+  const marker = document.createElementNS(ns, "marker");
+  marker.setAttribute("id", `shift-arrow-${side}`);
+  marker.setAttribute("viewBox", "0 0 10 10");
+  marker.setAttribute("refX", "8");
+  marker.setAttribute("refY", "5");
+  marker.setAttribute("markerWidth", "6");
+  marker.setAttribute("markerHeight", "6");
+  marker.setAttribute("orient", "auto-start-reverse");
+  const arrowPath = document.createElementNS(ns, "path");
+  arrowPath.setAttribute("d", "M 0 1.5 L 9 5 L 0 8.5 z");
+  arrowPath.setAttribute("fill", "currentColor");
+  marker.appendChild(arrowPath);
+  defs.appendChild(marker);
+  svg.appendChild(defs);
+
+  const seen = new Set();
+  for (const r of shiftRects) {
+    const key = r.shift_id || r.row;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const [lx0, ltop, lx1, lbottom] = r.left_bbox;
+    const [rx0, rtop, rx1, rbottom] = r.right_bbox;
+    const lcx = (lx0 + lx1) / 2;
+    const lcy = (ltop + lbottom) / 2;
+    const rcx = (rx0 + rx1) / 2;
+    const rcy = (rtop + rbottom) / 2;
+    if (Math.hypot(rcx - lcx, rcy - lcy) < 4) continue;
+
+    const g = document.createElementNS(ns, "g");
+    g.setAttribute("class", "shift-vector-group");
+    if (r.shift_id) g.setAttribute("data-shift-id", String(r.shift_id));
+
+    const ghost = document.createElementNS(ns, "rect");
+    ghost.setAttribute("class", "shift-ghost-box");
+    ghost.setAttribute("x", String(lx0));
+    ghost.setAttribute("y", String(ltop));
+    ghost.setAttribute("width", String(Math.max(lx1 - lx0, 2)));
+    ghost.setAttribute("height", String(Math.max(lbottom - ltop, 2)));
+    ghost.setAttribute("rx", "2");
+    g.appendChild(ghost);
+
+    const dot = document.createElementNS(ns, "circle");
+    dot.setAttribute("class", "shift-origin-dot");
+    dot.setAttribute("cx", String(lcx));
+    dot.setAttribute("cy", String(lcy));
+    dot.setAttribute("r", "2.6");
+    g.appendChild(dot);
+
+    const line = document.createElementNS(ns, "path");
+    const midX = (lcx + rcx) / 2;
+    const midY = (lcy + rcy) / 2 - Math.min(18, Math.abs(rcx - lcx) * 0.12);
+    line.setAttribute("class", "shift-vector-line");
+    line.setAttribute("d", `M ${lcx} ${lcy} Q ${midX} ${midY} ${rcx} ${rcy}`);
+    line.setAttribute("marker-end", `url(#shift-arrow-${side})`);
+    g.appendChild(line);
+
+    svg.appendChild(g);
+  }
+  canvas.appendChild(svg);
+}
+
+function attachCrossPageShiftArrows(rowEl) {
+  const leftShiftRects = rowEl.querySelectorAll('.page-card[data-side="left"] .rect.shift[data-shift-id]');
+  const rightShiftRects = rowEl.querySelectorAll('.page-card[data-side="right"] .rect.shift[data-shift-id]');
+  if (!leftShiftRects.length || !rightShiftRects.length) return;
+
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("class", "cross-page-svg");
+
+  const update = () => {
+    const rowBounds = rowEl.getBoundingClientRect();
+    if (!rowBounds.width || !rowBounds.height) return;
+    svg.setAttribute("viewBox", `0 0 ${rowBounds.width} ${rowBounds.height}`);
+    svg.replaceChildren();
+
+    const defs = document.createElementNS(ns, "defs");
+    const marker = document.createElementNS(ns, "marker");
+    marker.setAttribute("id", "cross-shift-arrowhead");
+    marker.setAttribute("viewBox", "0 0 10 10");
+    marker.setAttribute("refX", "8");
+    marker.setAttribute("refY", "5");
+    marker.setAttribute("markerWidth", "6");
+    marker.setAttribute("markerHeight", "6");
+    marker.setAttribute("orient", "auto");
+    const p = document.createElementNS(ns, "path");
+    p.setAttribute("d", "M 0 1.5 L 9 5 L 0 8.5 z");
+    p.setAttribute("fill", "currentColor");
+    marker.appendChild(p);
+    defs.appendChild(marker);
+    svg.appendChild(defs);
+
+    const rightMap = new Map();
+    for (const rEl of rightShiftRects) {
+      const id = rEl.getAttribute("data-shift-id");
+      if (id && !rightMap.has(id)) rightMap.set(id, rEl);
+    }
+
+    const seen = new Set();
+    for (const lEl of leftShiftRects) {
+      const id = lEl.getAttribute("data-shift-id");
+      if (!id || seen.has(id) || !rightMap.has(id)) continue;
+      seen.add(id);
+      const rEl = rightMap.get(id);
+      const lb = lEl.getBoundingClientRect();
+      const rb = rEl.getBoundingClientRect();
+      if (!lb.width || !rb.width) continue;
+
+      const x1 = lb.right - rowBounds.left;
+      const y1 = (lb.top + lb.bottom) / 2 - rowBounds.top;
+      const x2 = rb.left - rowBounds.left;
+      const y2 = (rb.top + rb.bottom) / 2 - rowBounds.top;
+      const spanX = Math.max(40, (x2 - x1) * 0.42);
+
+      const path = document.createElementNS(ns, "path");
+      path.setAttribute("class", "cross-shift-path");
+      path.setAttribute("data-shift-id", id);
+      if (lEl.classList.contains("is-shift-active")) {
+        path.classList.add("is-shift-active");
+      }
+      path.setAttribute(
+        "d",
+        `M ${x1} ${y1} C ${x1 + spanX} ${y1}, ${x2 - spanX} ${y2}, ${x2} ${y2}`
+      );
+      path.setAttribute("marker-end", "url(#cross-shift-arrowhead)");
+      svg.appendChild(path);
+    }
+  };
+
+  rowEl.appendChild(svg);
+  for (const img of rowEl.querySelectorAll("img")) {
+    img.addEventListener("load", () => requestAnimationFrame(update), { once: true });
+  }
+  requestAnimationFrame(update);
+  if (typeof ResizeObserver !== "undefined") {
+    const ro = new ResizeObserver(() => requestAnimationFrame(update));
+    ro.observe(rowEl);
+  }
 }
 
 function buildPageCard(side, index, visualPage, pairIdx = 0) {
@@ -2199,23 +2575,41 @@ function buildPageCard(side, index, visualPage, pairIdx = 0) {
   const activeRects = rects.filter(
     (r) => !(r.level === "line" && rowsWithWords.has(r.row))
   );
+  const isTextOnlyMode =
+    data.options && data.options.compare_mode === "text_only";
   for (const rect of activeRects) {
+    const rKind =
+      rect.kind === "insert"
+        ? "insert"
+        : rect.kind === "delete"
+          ? "delete"
+          : rect.kind === "shift"
+            ? "shift"
+            : "replace";
+    const rTitle =
+      rect.kind === "shift"
+        ? `${i18n.t("shift.badge")}: ${rect.text}`
+        : `${rect.kind}: ${rect.text}`;
     addRect(
       canvas,
       [rect.x0, rect.top, rect.x1, rect.bottom],
-      rect.kind === "insert" ? "insert" : rect.kind === "delete" ? "delete" : "replace",
-      `${rect.kind}: ${rect.text}`,
+      rKind,
+      rTitle,
       size.width,
       size.height,
       rect.row,
-      side
+      side,
+      rect
     );
+  }
+  if (!isTextOnlyMode) {
+    renderPageShiftArrows(canvas, activeRects, side, size);
   }
 
   const visualBoxes =
-    visualPage && side === "left"
+    !isTextOnlyMode && visualPage && side === "left"
       ? visualPage.left_regions
-      : visualPage
+      : !isTextOnlyMode && visualPage
         ? visualPage.right_regions
         : [];
   for (const box of visualBoxes || []) {
@@ -2383,9 +2777,9 @@ function collectChanges() {
       Array.from(row.querySelectorAll(".rect")).some((rect) => rect.offsetParent !== null)
     );
   } else {
-    state.changes = $$("#text-view .row.add, #text-view .row.del, #text-view .row.mod").filter(
-      (row) => row.offsetParent !== null
-    );
+    state.changes = $$(
+      "#text-view .row.add, #text-view .row.del, #text-view .row.mod, #text-view .row.shifted"
+    ).filter((row) => row.offsetParent !== null);
   }
   state.changeIndex = -1;
   updateChangeNav();
@@ -2816,13 +3210,16 @@ function setMode(mode) {
   state.mode = mode;
   $$(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.mode === mode));
   const isPageMode = mode === "pages" || mode === "xray";
+  const isAiMode = mode === "ai";
   const isFolderMode = mode === "folder";
   $("#text-view").hidden = mode !== "text";
   $("#page-view").hidden = !isPageMode;
+  if ($("#ai-view")) $("#ai-view").hidden = !isAiMode;
   if ($("#folder-view")) $("#folder-view").hidden = !isFolderMode;
   const stickyHeader = $(".result-sticky-header");
   if (stickyHeader) stickyHeader.hidden = isFolderMode;
   $("#only-diff-wrap").hidden = mode !== "text";
+  if ($("#text-only-mode-wrap")) $("#text-only-mode-wrap").hidden = isFolderMode;
   $("#zoom-wrap").hidden = !isPageMode;
   if ($("#boxes-wrap")) $("#boxes-wrap").hidden = !isPageMode;
   $("#box-color-wrap").hidden = !isPageMode;
@@ -2833,6 +3230,9 @@ function setMode(mode) {
   if (state.comparison && (prevMode !== mode) && isPageMode) {
     renderPages();
   }
+  if (isAiMode) {
+    renderAiView();
+  }
   const searchBar = $("#search-bar");
   if (searchBar && !searchBar.hidden && state.search && state.search.query) {
     performSearch(state.search.query);
@@ -2842,7 +3242,14 @@ function setMode(mode) {
   syncActiveTab();
 
   if (state.comparison && state.comparison.id) {
-    const view = mode === "pages" ? "&view=pages" : mode === "xray" ? "&view=xray" : "";
+    const view =
+      mode === "pages"
+        ? "&view=pages"
+        : mode === "xray"
+          ? "&view=xray"
+          : mode === "ai"
+            ? "&view=ai"
+            : "";
     history.replaceState(
       null,
       "",
@@ -2873,6 +3280,7 @@ function renderFolderDiff(folderData) {
   $("#tab-pages").disabled = true;
   if ($("#tab-xray")) $("#tab-xray").disabled = true;
   $("#only-diff-wrap").hidden = true;
+  if ($("#text-only-mode-wrap")) $("#text-only-mode-wrap").hidden = true;
   $("#zoom-wrap").hidden = true;
   if ($("#boxes-wrap")) $("#boxes-wrap").hidden = true;
   $("#box-color-wrap").hidden = true;
@@ -3312,6 +3720,7 @@ function showUploadView() {
   $("#upload-view").hidden = false;
   $("#view-tabs").hidden = true;
   $("#only-diff-wrap").hidden = true;
+  if ($("#text-only-mode-wrap")) $("#text-only-mode-wrap").hidden = true;
   $("#visual-wrap").hidden = true;
   $("#zoom-wrap").hidden = true;
   if ($("#boxes-wrap")) $("#boxes-wrap").hidden = true;
@@ -3868,3 +4277,478 @@ async function init() {
 }
 
 init();
+
+$("#opt-text-only-mode")?.addEventListener("change", (e) => {
+  const mode = e.target.checked ? "text_only" : "strict";
+  const select = $("#opt-compare-mode");
+  if (select) select.value = mode;
+  if (state.comparison && canReload()) {
+    reloadComparison();
+  }
+});
+
+$("#opt-compare-mode")?.addEventListener("change", (e) => {
+  const toggle = $("#opt-text-only-mode");
+  if (toggle) toggle.checked = e.target.value === "text_only";
+});
+
+/* ---------- Local AI Semantic Comparison (Phase 1: llamafile + GGUF / Custom) ---------- */
+let aiPollTimer = 0;
+
+async function loadAiStatus() {
+  try {
+    const response = await fetch("/api/ai/status");
+    if (!response.ok) return null;
+    const status = await response.json();
+    state.aiStatus = status;
+    syncSettingsAiUI(status);
+    return status;
+  } catch (_) {
+    return null;
+  }
+}
+
+function syncSettingsAiUI(status) {
+  if (!status) return;
+  const presetEl = $("#settings-ai-preset");
+  const customWrap = $("#settings-ai-custom-wrap");
+  const pathEl = $("#settings-ai-custom-path");
+  const urlEl = $("#settings-ai-custom-url");
+  const modelEl = $("#settings-ai-custom-model");
+  const statusText = $("#settings-ai-status-text");
+  const dirText = $("#settings-ai-dir-text");
+  const dlBtn = $("#settings-ai-download");
+
+  const cfg = status.config || {};
+  const preset = cfg.preset || "qwen-0.5b";
+  if (presetEl && document.activeElement !== presetEl) {
+    presetEl.value = preset;
+  }
+  if (customWrap) {
+    customWrap.hidden = (presetEl ? presetEl.value : preset) !== "custom";
+  }
+  if (pathEl && document.activeElement !== pathEl) {
+    pathEl.value = cfg.custom_model || cfg.custom_model_path || "";
+  }
+  if (urlEl && document.activeElement !== urlEl) {
+    urlEl.value = cfg.custom_endpoint || cfg.custom_endpoint_url || "";
+  }
+  if (modelEl && document.activeElement !== modelEl) {
+    modelEl.value = cfg.custom_model || cfg.custom_model_name || "";
+  }
+  if (statusText) {
+    statusText.textContent = status.available
+      ? i18n.t("ai.statusReady", { model: status.active_model_label || preset })
+      : i18n.t("ai.statusMissing");
+  }
+  if (dirText && status.ai_dir) {
+    dirText.textContent = status.ai_dir;
+  }
+  if (dlBtn) {
+    const activePreset = (presetEl ? presetEl.value : preset);
+    const pInfo = (status.presets || []).find((p) => p.id === activePreset);
+    const sizeMb = pInfo && pInfo.size_mb ? pInfo.size_mb : 398;
+    dlBtn.hidden = activePreset === "custom" || Boolean(pInfo && pInfo.installed && status.llamafile_installed);
+    dlBtn.textContent = i18n.t("ai.downloadBtn", { size: sizeMb });
+  }
+}
+
+async function saveAiConfigFromUI(customOverrides = null) {
+  const presetEl = $("#settings-ai-preset");
+  const pathEl = $("#settings-ai-custom-path");
+  const urlEl = $("#settings-ai-custom-url");
+  const modelEl = $("#settings-ai-custom-model");
+  const payload = customOverrides || {
+    preset: presetEl ? presetEl.value : "qwen-0.5b",
+    custom_model_path: pathEl ? pathEl.value.trim() : "",
+    custom_endpoint_url: urlEl ? urlEl.value.trim() : "",
+    custom_model_name: modelEl ? modelEl.value.trim() : "",
+  };
+  try {
+    const resp = await fetch("/api/ai/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) throw new Error(await readError(resp));
+    const status = await resp.json();
+    state.aiStatus = status;
+    syncSettingsAiUI(status);
+    showToast(i18n.t("ai.savedToast"));
+    if (state.mode === "ai") renderAiView();
+    return status;
+  } catch (err) {
+    showToast(err.message || i18n.t("error.generic"), true);
+    return null;
+  }
+}
+
+async function startAiDownload(preset) {
+  try {
+    const resp = await fetch("/api/ai/download", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "start", preset }),
+    });
+    if (!resp.ok) throw new Error(await readError(resp));
+    state.aiStatus = await resp.json();
+    if (state.mode === "ai") renderAiView();
+    clearInterval(aiPollTimer);
+    aiPollTimer = setInterval(async () => {
+      const st = await loadAiStatus();
+      if (state.mode === "ai") renderAiView();
+      if (!st || !st.download || !st.download.active) {
+        clearInterval(aiPollTimer);
+        if (st && st.download && st.download.error) {
+          showToast(st.download.error, true);
+        }
+      }
+    }, 900);
+  } catch (err) {
+    showToast(err.message || i18n.t("error.generic"), true);
+  }
+}
+
+async function cancelAiDownload() {
+  try {
+    await fetch("/api/ai/download", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "cancel" }),
+    });
+    clearInterval(aiPollTimer);
+    await loadAiStatus();
+    if (state.mode === "ai") renderAiView();
+  } catch (_) {}
+}
+
+async function runAiAnalysis() {
+  if (!state.comparison || !state.comparison.id || state.aiRunning) return;
+  state.aiRunning = true;
+  state.aiError = null;
+  renderAiView();
+  try {
+    const resp = await fetch(`/api/compare/${state.comparison.id}/ai`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ language: i18n.lang }),
+    });
+    if (!resp.ok) throw new Error(await readError(resp));
+    const result = await resp.json();
+    state.comparison.ai_analysis = result;
+    renderText();
+    syncActiveTab();
+  } catch (err) {
+    state.aiError = err.message || i18n.t("error.generic");
+  } finally {
+    state.aiRunning = false;
+    renderAiView();
+  }
+}
+
+function findAiItemForRow(rowIndex, effectiveNum) {
+  if (!state.comparison) return null;
+  if (state.comparison.row_ai_map && state.comparison.row_ai_map[rowIndex]) {
+    return state.comparison.row_ai_map[rowIndex];
+  }
+  const items =
+    (state.comparison.ai_analysis && state.comparison.ai_analysis.items) || [];
+  return (
+    items.find((it) => it.row === rowIndex) ||
+    (effectiveNum > 0 ? items.find((it) => it.id === effectiveNum) : null) ||
+    null
+  );
+}
+
+async function explainRowInline(rowIndex, textEl, btnEl) {
+  if (!state.comparison || !state.comparison.id) return;
+  if (!state.aiStatus) await loadAiStatus();
+  if (!state.aiStatus || !state.aiStatus.available) {
+    setMode("ai");
+    return;
+  }
+  btnEl.disabled = true;
+  btnEl.textContent = `\u2728 ${i18n.t("ai.explainingRow")}`;
+  try {
+    const resp = await fetch(`/api/compare/${state.comparison.id}/ai/row`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ row_index: rowIndex, language: i18n.lang }),
+    });
+    if (!resp.ok) throw new Error(await readError(resp));
+    const finding = await resp.json();
+    if (!state.comparison.row_ai_map) state.comparison.row_ai_map = {};
+    state.comparison.row_ai_map[rowIndex] = finding;
+    btnEl.remove();
+    const existingPill = textEl.querySelector(".ai-inline-pill");
+    if (existingPill) existingPill.remove();
+    const cat = finding.category || "content";
+    textEl.append(
+      el("span", {
+        class: `page-tag ai-inline-pill cat-${cat}`,
+        title: finding.explanation || finding.title || "",
+        text: `\u2728 ${i18n.t(`ai.cat.${cat}`)}: ${finding.explanation || finding.title}`,
+      })
+    );
+  } catch (err) {
+    btnEl.disabled = false;
+    btnEl.textContent = `\u2728 ${i18n.t("ai.explainRow")}`;
+    showToast(err.message || i18n.t("error.generic"), true);
+  }
+}
+
+function jumpToAiItemText(item) {
+  setMode("text");
+  const rows = $$("#text-view .row");
+  let targetRow = null;
+  if (item.id) {
+    targetRow = rows.find((r) => {
+      const badge = r.querySelector(".shift-num-badge");
+      return badge && badge.textContent === `#${item.id}`;
+    });
+  }
+  if (!targetRow && (item.left_snippet || item.right_snippet)) {
+    const needle = String(item.right_snippet || item.left_snippet || "")
+      .trim()
+      .slice(0, 36)
+      .toLowerCase();
+    if (needle) {
+      targetRow = rows.find((r) => r.textContent.toLowerCase().includes(needle));
+    }
+  }
+  if (targetRow) {
+    targetRow.classList.add("current");
+    targetRow.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+}
+
+function jumpToAiItemPage(item) {
+  setMode("pages");
+  const pageNum = item.page || 1;
+  const card =
+    $(`#page-view .page-card[data-page="${pageNum}"]`) ||
+    $$("#page-view .page-row")[Math.max(0, pageNum - 1)];
+  if (card) {
+    card.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+}
+
+async function renderAiView() {
+  const container = $("#ai-view");
+  if (!container) return;
+  if (!state.aiStatus) {
+    await loadAiStatus();
+  }
+  const status = state.aiStatus || { available: false, presets: [], config: { preset: "qwen-0.5b" } };
+  const analysis = state.comparison && state.comparison.ai_analysis;
+  const dl = status.download || {};
+  container.replaceChildren();
+
+  const header = el("div", { class: "ai-head" }, [
+    el("div", { class: "ai-head-info" }, [
+      el("h2", { class: "ai-title", text: i18n.t("ai.title") }),
+      el("p", { class: "ai-subtitle", text: i18n.t("ai.subtitle") }),
+    ]),
+    el("div", { class: "ai-head-actions" }, [
+      status.available
+        ? el("button", {
+            class: "suggested",
+            type: "button",
+            disabled: Boolean(state.aiRunning),
+            text: state.aiRunning
+              ? i18n.t("ai.running")
+              : analysis
+                ? i18n.t("ai.rerunBtn")
+                : i18n.t("ai.runBtn"),
+            onclick: () => runAiAnalysis(),
+          })
+        : null,
+      el("button", {
+        class: "flat",
+        type: "button",
+        text: "⚙ " + i18n.t("ai.presetLabel"),
+        onclick: () => openSettings(),
+      }),
+    ]),
+  ]);
+  container.appendChild(header);
+
+  if (!status.available) {
+    const activePreset = (status.config && status.config.preset) || "qwen-0.5b";
+    const presetObj =
+      (status.presets || []).find((p) => p.id === activePreset) ||
+      { id: "qwen-0.5b", size_mb: 398 };
+
+    const presetSelect = el(
+      "select",
+      {
+        class: "pref-select",
+        onchange: async (e) => {
+          await saveAiConfigFromUI({
+            ...(status.config || {}),
+            preset: e.target.value,
+          });
+        },
+      },
+      [
+        el("option", {
+          value: "qwen-0.5b",
+          selected: activePreset === "qwen-0.5b",
+          text: i18n.t("ai.presetFast"),
+        }),
+        el("option", {
+          value: "qwen-1.5b",
+          selected: activePreset === "qwen-1.5b",
+          text: i18n.t("ai.presetBalanced"),
+        }),
+        el("option", {
+          value: "custom",
+          selected: activePreset === "custom",
+          text: i18n.t("ai.presetCustom"),
+        }),
+      ]
+    );
+
+    const setupCard = el("div", { class: "ai-setup-card" }, [
+      el("h3", { text: i18n.t("ai.notInstalledTitle") }),
+      el("p", { text: i18n.t("ai.notInstalledDesc") }),
+      el("div", { class: "ai-setup-controls" }, [
+        presetSelect,
+        dl.active
+          ? el("div", { class: "ai-dl-progress" }, [
+              el("span", {
+                text: i18n.t("ai.downloading", {
+                  stage: dl.stage || "model",
+                  pct: Math.round(dl.percent || 0),
+                }),
+              }),
+              el("button", {
+                class: "flat",
+                type: "button",
+                text: i18n.t("ai.cancelDownload"),
+                onclick: () => cancelAiDownload(),
+              }),
+            ])
+          : activePreset !== "custom"
+            ? el("button", {
+                class: "suggested",
+                type: "button",
+                text: i18n.t("ai.downloadBtn", { size: presetObj.size_mb || 398 }),
+                onclick: () => startAiDownload(activePreset),
+              })
+            : el("button", {
+                class: "suggested",
+                type: "button",
+                text: i18n.t("ai.saveConfig"),
+                onclick: () => openSettings(),
+              }),
+      ]),
+    ]);
+    container.appendChild(setupCard);
+    return;
+  }
+
+  if (state.aiError) {
+    container.appendChild(
+      el("div", { class: "ai-error-banner", text: state.aiError })
+    );
+  }
+
+  if (state.aiRunning) {
+    container.appendChild(
+      el("div", { class: "ai-loading-card" }, [
+        el("div", { class: "spinner" }),
+        el("span", { text: i18n.t("ai.running") }),
+      ])
+    );
+    return;
+  }
+
+  if (!analysis) {
+    container.appendChild(
+      el("div", { class: "ai-empty-prompt" }, [
+        el("p", { text: i18n.t("ai.statusReady", { model: status.active_model_label || "Local AI" }) }),
+        el("button", {
+          class: "suggested",
+          type: "button",
+          text: i18n.t("ai.runBtn"),
+          onclick: () => runAiAnalysis(),
+        }),
+      ])
+    );
+    return;
+  }
+
+  const verdictKey = `ai.verdict.${analysis.verdict || "minor_changes"}`;
+  const summaryCard = el("div", { class: `ai-summary-card verdict-${analysis.verdict || "minor_changes"}` }, [
+    el("div", { class: "ai-summary-top" }, [
+      el("span", { class: `ai-verdict-badge verdict-${analysis.verdict || "minor_changes"}`, text: i18n.t(verdictKey) }),
+      el("span", {
+        class: "ai-meta",
+        text: i18n.t("ai.elapsed", {
+          ms: Math.round(analysis.elapsed_ms || 0),
+          model: analysis.model || "Local AI",
+        }),
+      }),
+    ]),
+    el("p", { class: "ai-summary-text", text: analysis.summary || "" }),
+  ]);
+  container.appendChild(summaryCard);
+
+  const list = el("div", { class: "ai-findings-list" });
+  const canPages = state.comparison && (state.comparison.renderable.left || state.comparison.renderable.right);
+  for (const item of analysis.items || []) {
+    const cat = item.category || "content";
+    const catLabel = i18n.t(`ai.cat.${cat}`);
+    const card = el("div", { class: `ai-finding-card cat-${cat}` }, [
+      el("div", { class: "ai-finding-head" }, [
+        el("span", { class: "ai-finding-num", text: `#${item.id}` }),
+        el("span", { class: `ai-cat-badge cat-${cat}`, text: catLabel }),
+        el("strong", { class: "ai-finding-title", text: item.title || "" }),
+        item.shift_label
+          ? el("span", { class: "page-tag shift-tag", text: `\u2194 ${item.shift_label}` })
+          : null,
+        el("div", { class: "ai-finding-jumps" }, [
+          el("button", {
+            class: "flat",
+            type: "button",
+            text: i18n.t("ai.showInText"),
+            onclick: () => jumpToAiItemText(item),
+          }),
+          canPages && item.page
+            ? el("button", {
+                class: "flat",
+                type: "button",
+                text: i18n.t("ai.showOnPage", { page: item.page }),
+                onclick: () => jumpToAiItemPage(item),
+              })
+            : null,
+        ]),
+      ]),
+      el("p", { class: "ai-finding-exp", text: item.explanation || "" }),
+      item.left_text || item.right_text || item.left_snippet || item.right_snippet
+        ? el("div", { class: "ai-finding-snippets" }, [
+            item.left_text || item.left_snippet
+              ? el("div", { class: "ai-snip ai-snip-left", text: `A: ${item.left_text || item.left_snippet}` })
+              : null,
+            item.right_text || item.right_snippet
+              ? el("div", { class: "ai-snip ai-snip-right", text: `B: ${item.right_text || item.right_snippet}` })
+              : null,
+          ])
+        : null,
+    ]);
+    list.appendChild(card);
+  }
+  container.appendChild(list);
+}
+
+$("#settings-ai-preset")?.addEventListener("change", (e) => {
+  const wrap = $("#settings-ai-custom-wrap");
+  if (wrap) wrap.hidden = e.target.value !== "custom";
+  if (state.aiStatus) syncSettingsAiUI(state.aiStatus);
+});
+$("#settings-ai-save")?.addEventListener("click", () => saveAiConfigFromUI());
+$("#settings-ai-download")?.addEventListener("click", () => {
+  const preset = $("#settings-ai-preset") ? $("#settings-ai-preset").value : "qwen-0.5b";
+  startAiDownload(preset);
+});

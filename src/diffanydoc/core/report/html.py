@@ -105,6 +105,12 @@ del.minor,ins.minor{background:var(--diff-minor-strong);text-decoration:none;
   font-family:inherit;font-size:12px;text-align:center;padding:4px}
 .empty{color:var(--dim-label-color);text-align:center;padding:56px 20px;font-family:inherit}
 body.only-diff tr.equal,body.only-diff tr.gap{display:none}
+.ai-report-box{margin:16px 24px;padding:14px 18px;border:1px solid var(--border-color);
+  border-left:3px solid var(--accent-color);border-radius:8px;background:var(--view-bg-color)}
+.ai-report-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px;font-size:13px;font-weight:700}
+.ai-report-summary{margin:0 0 10px;font-size:13.5px}
+.ai-report-items{margin:0;padding-left:18px;font-size:12.5px}
+.ai-report-items li{margin-bottom:4px}
 footer{color:var(--dim-label-color);font-size:12px;text-align:center;padding:18px}
 
 @media print{
@@ -166,6 +172,7 @@ def render_html(
     mod_class = " mod" if stats.changed else ""
     visual_stats = _visual_stats(result, lang)
     ocr_stats = _ocr_stats(result, lang)
+    ai_block = _ai_html(result, lang)
     return f"""<!doctype html>
 <html lang="{lang}">
 <head>
@@ -200,7 +207,7 @@ def render_html(
   </div>
 </header>
 <main>
-<table>
+{ai_block}<table>
   <thead>
     <tr>
       <th>{html.escape(result.left_path.name)}</th>
@@ -217,6 +224,33 @@ def render_html(
 </body>
 </html>
 """
+
+
+def _ai_html(result: DiffResult, lang: str) -> str:
+    ai = result.ai_analysis
+    if not isinstance(ai, dict) or not ai.get("summary"):
+        return ""
+    verdict = str(ai.get("verdict") or "minor_changes")
+    verdict_label = html.escape(t(f"ai.verdict.{verdict}", lang))
+    title_label = html.escape(t("ai.title", lang))
+    summary_txt = html.escape(str(ai.get("summary") or ""))
+    items_html = []
+    for item in ai.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        fid = html.escape(str(item.get("id") or ""))
+        cat = str(item.get("category") or "content")
+        cat_label = html.escape(t(f"ai.cat.{cat}", lang))
+        it_title = html.escape(str(item.get("title") or ""))
+        it_exp = html.escape(str(item.get("explanation") or ""))
+        items_html.append(f"<li><b>#{fid} [{cat_label}] {it_title}:</b> {it_exp}</li>")
+    ul = f'<ul class="ai-report-items">{"".join(items_html)}</ul>' if items_html else ""
+    return (
+        f'<section class="ai-report-box">'
+        f'<div class="ai-report-head"><span>✨ {title_label}</span><span>{verdict_label}</span></div>'
+        f'<p class="ai-report-summary">{summary_txt}</p>'
+        f"{ul}</section>\n"
+    )
 
 
 def _ocr_stats(result: DiffResult, lang: str) -> str:

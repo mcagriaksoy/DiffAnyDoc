@@ -94,6 +94,49 @@ def create_app() -> FastAPI:
             "languages": installed_languages(),
         }
 
+    @app.get("/api/ai/status")
+    def ai_status_endpoint() -> dict[str, Any]:
+        from ..core.ai import get_status
+
+        return get_status()
+
+    @app.post("/api/ai/config")
+    async def ai_config_endpoint(body: dict[str, Any]) -> dict[str, Any]:
+        from ..core.ai import get_status, load_config, save_config, stop_server
+
+        cfg = load_config()
+        if "preset" in body:
+            cfg.preset = str(body["preset"] or "qwen-0.5b")
+        if "custom_endpoint" in body or "custom_endpoint_url" in body:
+            cfg.custom_endpoint = str(
+                body.get("custom_endpoint") or body.get("custom_endpoint_url") or ""
+            ).strip()
+        if "custom_model" in body or "custom_model_path" in body or "custom_model_name" in body:
+            cfg.custom_model = str(
+                body.get("custom_model")
+                or body.get("custom_model_path")
+                or body.get("custom_model_name")
+                or ""
+            ).strip()
+        save_config(cfg)
+        stop_server()
+        return get_status()
+
+    @app.post("/api/ai/download")
+    async def ai_download_endpoint(body: dict[str, Any]) -> dict[str, Any]:
+        from ..core.ai import AiError, cancel_download, get_status, start_download
+
+        action = str(body.get("action") or "start")
+        if action == "cancel":
+            cancel_download()
+            return get_status()
+        preset = str(body.get("preset") or "qwen-0.5b")
+        try:
+            start_download(preset=preset)
+            return get_status()
+        except AiError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.get("/api/integrate/status")
     def integrate_status() -> dict[str, Any]:
         from .. import integrate
@@ -184,6 +227,7 @@ def create_app() -> FastAPI:
         ocr_language: str = Form("tur+eng"),
         numeric_tolerance: float | None = Form(None),
         ignore_headers_footers: bool = Form(False),
+        compare_mode: str = Form("strict"),
     ) -> JSONResponse:
         directory = Path(tempfile.mkdtemp(prefix="diffanydoc-pre-"))
         try:
@@ -242,6 +286,7 @@ def create_app() -> FastAPI:
         ocr_language: str = Form("tur+eng"),
         numeric_tolerance: float | None = Form(None),
         ignore_headers_footers: bool = Form(False),
+        compare_mode: str = Form("strict"),
     ) -> JSONResponse:
         directory = Path(tempfile.mkdtemp(prefix="diffanydoc-"))
         try:
@@ -273,6 +318,7 @@ def create_app() -> FastAPI:
                 compare_formatting,
                 numeric_tolerance,
                 ignore_headers_footers,
+                compare_mode,
             )
         except Exception:
             shutil.rmtree(directory, ignore_errors=True)
@@ -299,6 +345,7 @@ def create_app() -> FastAPI:
             bool(body.get("compare_formatting", False)),
             float(body["numeric_tolerance"]) if body.get("numeric_tolerance") is not None else None,
             bool(body.get("ignore_headers_footers", False)),
+            str(body.get("compare_mode", "strict")),
         )
         return JSONResponse(_summary(comparison))
 
@@ -346,6 +393,62 @@ def create_app() -> FastAPI:
     @app.get("/api/compare/{comparison_id}")
     def get_comparison(comparison_id: str) -> JSONResponse:
         return JSONResponse(_get(comparison_id).payload)
+
+    @app.post("/api/compare/{comparison_id}/recompare")
+    async def recompare_existing(comparison_id: str, body: dict[str, Any]) -> JSONResponse:
+        existing = _get(comparison_id)
+        if not existing.left.is_file() or not existing.right.is_file():
+            raise HTTPException(status_code=404, detail="source files no longer available")
+        prev_opts = existing.result.options or {}
+        tol_raw = body.get("numeric_tolerance", prev_opts.get("numeric_tolerance"))
+        numeric_tolerance = float(tol_raw) if tol_raw is not None else None
+        updated = _run_compare(
+            existing.left,
+            existing.right,
+            None,
+            int(body.get("context", prev_opts.get("context", 3))),
+            bool(body.get("case_sensitive", prev_opts.get("case_sensitive", True))),
+            bool(body.get("fold_equal", prev_opts.get("fold_equal", False))),
+            bool(body.get("collapse_whitespace", prev_opts.get("collapse_whitespace", True))),
+            bool(body.get("visual", prev_opts.get("visual", True))),
+            bool(body.get("ocr", prev_opts.get("ocr", True))),
+            str(body.get("ocr_language") or prev_opts.get("ocr_language") or "tur+eng"),
+            bool(body.get("compare_formatting", prev_opts.get("compare_formatting", False))),
+            numeric_tolerance,
+            bool(body.get("ignore_headers_footers", prev_opts.get("ignore_headers_footers", False))),
+            str(body.get("compare_mode", prev_opts.get("compare_mode", "strict"))),
+            existing_id=existing.id,
+            existing_dir=existing.directory,
+        )
+        return JSONResponse(_summary(updated))
+
+    @app.post("/api/compare/{comparison_id}/ai")
+    async def analyze_with_ai(comparison_id: str, body: dict[str, Any] | None = None) -> JSONResponse:
+        from ..core.ai import AiError, analyze_comparison
+
+        comparison = _get(comparison_id)
+        lang = str((body or {}).get("language") or (body or {}).get("lang") or "tr")
+        try:
+            analysis = analyze_comparison(comparison.result, language=lang)
+        except AiError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        comparison.result.ai_analysis = analysis.as_dict()
+        return JSONResponse(analysis.as_dict())
+
+    @app.post("/api/compare/{comparison_id}/ai/row")
+    async def explain_row_ai_endpoint(
+        comparison_id: str, body: dict[str, Any]
+    ) -> JSONResponse:
+        from ..core.ai import AiError, explain_row_with_ai
+
+        comparison = _get(comparison_id)
+        row_index = int(body.get("row_index", -1))
+        lang = str(body.get("language") or body.get("lang") or "tr")
+        try:
+            finding = explain_row_with_ai(comparison.result, row_index=row_index, language=lang)
+        except AiError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return JSONResponse(finding.as_dict())
 
     @app.get("/api/compare/{comparison_id}/report", response_class=HTMLResponse)
     def get_report(comparison_id: str, lang: str | None = None) -> HTMLResponse:
@@ -485,6 +588,9 @@ def _run_compare(
     compare_formatting: bool = False,
     numeric_tolerance: float | None = None,
     ignore_headers_footers: bool = False,
+    compare_mode: str = "strict",
+    existing_id: str | None = None,
+    existing_dir: Path | None = None,
 ) -> Comparison:
     effective_ocr = bool(ocr and ocr_available())
     options = DiffOptions(
@@ -498,6 +604,7 @@ def _run_compare(
         ocr_language=ocr_language,
         numeric_tolerance=numeric_tolerance,
         ignore_headers_footers=ignore_headers_footers,
+        compare_mode=compare_mode,
     )
     try:
         result = compare(left_path, right_path, options)
@@ -513,6 +620,7 @@ def _run_compare(
             ocr_language=ocr_language,
             numeric_tolerance=numeric_tolerance,
             ignore_headers_footers=ignore_headers_footers,
+            compare_mode=compare_mode,
         )
         result = compare(left_path, right_path, options)
 
@@ -528,9 +636,10 @@ def _run_compare(
     }
     payload["rects"] = change_rects(result)
 
+    comp_id = existing_id or (uuid.uuid4().hex if directory else uuid.uuid4().hex)
     comparison = Comparison(
-        id=payload["id"] or uuid.uuid4().hex,
-        directory=directory or Path(tempfile.gettempdir()),
+        id=comp_id,
+        directory=existing_dir or directory or Path(tempfile.gettempdir()),
         left=left_path,
         right=right_path,
         result=result,

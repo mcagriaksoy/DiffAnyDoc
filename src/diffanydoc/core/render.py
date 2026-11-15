@@ -8,23 +8,37 @@ use this module, which keeps the two from racing each other.
 from __future__ import annotations
 
 import io
+import sys
 import threading
 from collections import OrderedDict
+from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
 #: Images are large (a page at 96 dpi is ~2.3 MB in RGB); keep few of them.
-_MAX_IMAGES = 12
+_MAX_IMAGES = 16
 _MAX_PNGS = 96
+_MAX_DOCS = 6
 
 _LOCK = threading.Lock()
 _IMAGES: "OrderedDict[tuple[str, int, int], Image.Image]" = OrderedDict()
 _PNGS: "OrderedDict[tuple[str, int, int], bytes]" = OrderedDict()
+_PDF_DOCS: "OrderedDict[tuple[str, int], Any]" = OrderedDict()
+_SHEET_DOCS: "OrderedDict[tuple[str, int], Any]" = OrderedDict()
 
 
 def _key(path: Path, index: int, dpi: int) -> tuple[str, int, int]:
     return (str(path), int(index), int(dpi))
+
+
+def _doc_key(path: Path) -> tuple[str, int]:
+    try:
+        mtime = path.stat().st_mtime_ns
+    except OSError:
+        mtime = 0
+    return (str(path), mtime)
 
 
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
@@ -38,12 +52,20 @@ def is_renderable_path(path: str | Path) -> bool:
     return suffix == ".pdf" or suffix in _IMAGE_SUFFIXES or suffix in supported_extensions()
 
 
+@lru_cache(maxsize=32)
 def _get_font(size: int, bold: bool = False) -> ImageFont.ImageFont:
-    font_names = (
-        ["LiberationSans-Bold.ttf", "DejaVuSans-Bold.ttf", "arialbd.ttf", "Cantarell-Bold.otf"]
-        if bold
-        else ["LiberationSans-Regular.ttf", "DejaVuSans.ttf", "arial.ttf", "Cantarell-Regular.otf"]
-    )
+    if sys.platform == "win32":
+        font_names = (
+            ["arialbd.ttf", "segoeuib.ttf", "LiberationSans-Bold.ttf", "DejaVuSans-Bold.ttf"]
+            if bold
+            else ["arial.ttf", "segoeui.ttf", "LiberationSans-Regular.ttf", "DejaVuSans.ttf"]
+        )
+    else:
+        font_names = (
+            ["LiberationSans-Bold.ttf", "DejaVuSans-Bold.ttf", "arialbd.ttf", "Cantarell-Bold.otf"]
+            if bold
+            else ["LiberationSans-Regular.ttf", "DejaVuSans.ttf", "arial.ttf", "Cantarell-Regular.otf"]
+        )
     for name in font_names:
         try:
             return ImageFont.truetype(name, size)
@@ -61,8 +83,16 @@ def render_sheet_page(path: str | Path, index: int, dpi: int = 96) -> Image.Imag
     from .layout import paginate_document
 
     target = Path(path)
-    doc = load(target)
-    doc = paginate_document(doc)
+    dkey = _doc_key(target)
+    doc = _SHEET_DOCS.get(dkey)
+    if doc is not None:
+        _SHEET_DOCS.move_to_end(dkey)
+    else:
+        doc = paginate_document(load(target))
+        _SHEET_DOCS[dkey] = doc
+        _SHEET_DOCS.move_to_end(dkey)
+        while len(_SHEET_DOCS) > _MAX_DOCS:
+            _SHEET_DOCS.popitem(last=False)
 
     if index < 0 or index >= len(doc.pages):
         raise IndexError(f"page {index} does not exist (total: {len(doc.pages)})")
@@ -216,18 +246,28 @@ def render_page(path: str | Path, index: int, dpi: int = 96) -> Image.Image:
         elif target.suffix.lower() == ".pdf":
             import pypdfium2 as pdfium
 
-            document = pdfium.PdfDocument(str(target))
+            dkey = _doc_key(target)
+            document = _PDF_DOCS.get(dkey)
+            if document is not None:
+                _PDF_DOCS.move_to_end(dkey)
+            else:
+                document = pdfium.PdfDocument(target.read_bytes())
+                _PDF_DOCS[dkey] = document
+                _PDF_DOCS.move_to_end(dkey)
+                while len(_PDF_DOCS) > _MAX_DOCS:
+                    _, old_doc = _PDF_DOCS.popitem(last=False)
+                    try:
+                        old_doc.close()
+                    except Exception:
+                        pass
+            if index < 0 or index >= len(document):
+                raise IndexError(f"page {index} does not exist")
+            page = document[index]
+            bitmap = page.render(scale=max(dpi, 24) / 72)
             try:
-                if index < 0 or index >= len(document):
-                    raise IndexError(f"page {index} does not exist")
-                page = document[index]
-                bitmap = page.render(scale=max(dpi, 24) / 72)
-                try:
-                    image = bitmap.to_pil().convert("RGB")
-                finally:
-                    bitmap.close()
+                image = bitmap.to_pil().convert("RGB")
             finally:
-                document.close()
+                bitmap.close()
         else:
             image = render_sheet_page(target, index, dpi)
 
@@ -247,7 +287,7 @@ def render_page_png(path: str | Path, index: int, dpi: int = 96) -> bytes:
         return cached
 
     buffer = io.BytesIO()
-    render_page(path, index, dpi).save(buffer, format="PNG")
+    render_page(path, index, dpi).save(buffer, format="PNG", compress_level=1)
     data = buffer.getvalue()
 
     _PNGS[key] = data
@@ -262,3 +302,10 @@ def clear_cache() -> None:
     with _LOCK:
         _IMAGES.clear()
         _PNGS.clear()
+        _SHEET_DOCS.clear()
+        while _PDF_DOCS:
+            _, doc = _PDF_DOCS.popitem(last=False)
+            try:
+                doc.close()
+            except Exception:
+                pass

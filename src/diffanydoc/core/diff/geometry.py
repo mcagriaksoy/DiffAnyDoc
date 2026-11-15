@@ -111,15 +111,46 @@ def line_rects(line: Line, kind: str, row: int, inline: list[Segment] | None, si
 def change_rects(result: DiffResult) -> dict[str, dict[str, list[dict[str, Any]]]]:
     """Per side, per page index (as string): the overlay rectangles."""
     out: dict[str, dict[str, list[dict[str, Any]]]] = {"left": {}, "right": {}}
+    is_text_only = (result.options or {}).get("compare_mode") == "text_only"
     for index, row in enumerate(result.rows):
         if row.kind == "equal" and not row.format_changes:
             continue
-        kind = "format" if row.kind == "equal" else row.kind
+        has_text_diff = bool(
+            _changed_ranges(row.left_inline, "left")
+            or _changed_ranges(row.right_inline, "right")
+        )
+        is_shift = bool(
+            (row.left and row.left.style and row.left.style.get("position_shift"))
+            or (row.right and row.right.style and row.right.style.get("position_shift"))
+        )
+        if is_text_only and not has_text_diff and row.kind in ("equal", "replace"):
+            continue
+        kind = (
+            "shift"
+            if (is_shift and not has_text_diff)
+            else ("format" if row.kind == "equal" else row.kind)
+        )
         for side in ("left", "right"):
             line = row.left if side == "left" else row.right
             if line is None:
                 continue
             inline = row.left_inline if side == "left" else row.right_inline
-            for rect in line_rects(line, kind, index, inline if row.kind == "replace" else None, side):
+            pass_inline = inline if (row.kind == "replace" and has_text_diff) else None
+            for rect in line_rects(line, kind, index, pass_inline, side):
+                if kind == "shift" and line.style and line.style.get("position_shift"):
+                    smeta = line.style["position_shift"]
+                    shift_lbl = smeta.get("label", "")
+                    shift_id = smeta.get("id", 0)
+                    rect["shift_id"] = shift_id
+                    rect["dx"] = smeta.get("dx", 0.0)
+                    rect["dy"] = smeta.get("dy", 0.0)
+                    rect["shift_label"] = shift_lbl
+                    rect["left_bbox"] = smeta.get("left_bbox")
+                    rect["right_bbox"] = smeta.get("right_bbox")
+                    rect["left_page"] = smeta.get("left_page")
+                    rect["right_page"] = smeta.get("right_page")
+                    prefix = f"#{shift_id} " if shift_id else ""
+                    if shift_lbl:
+                        rect["text"] = f"{prefix}{rect['text']} ({shift_lbl})"
                 out[side].setdefault(str(rect.pop("page")), []).append(rect)
     return out

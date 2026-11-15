@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.0] - 2026-11-15
+
+### Added
+- **Local AI Semantic Comparison (`src/diffanydoc/core/ai.py` + `✨ AI` View + Inline Row AI & Report Integration)**:
+  - **Phase 1 (Local Engine & `✨ AI` Tab)**: Added a 100% offline Local AI engine powered by Mozilla's `llamafile` (Apache-2.0) and pluggable GGUF models (`Qwen2.5-0.5B-Instruct` ~398 MB Ultra-Fast, `Qwen2.5-1.5B-Instruct` ~986 MB Balanced, or any custom `.gguf`/`.llamafile` model such as `Qwen3.8-Flash-Next` or local OpenAI-compatible server on `127.0.0.1`). Feeds a compact structured JSON digest (`build_comparison_digest`) of content differences and layout shifts to the local model, returning an executive summary, overall semantic verdict (`identical_meaning`, `layout_only`, `minor_changes`, `major_changes`), and numbered semantic findings (`content`, `rewording`, `layout`) with one-click jumps to `Text` and `Pages` views, plus a 1-click background model downloader (`/api/ai/download`).
+  - **Phase 2 (Inline Row AI Explanation, HTML/PDF Report Integration & CLI `--ai`)**:
+    - Added row-level on-demand AI explanations (`explain_row_with_ai` / `POST /api/compare/{id}/ai/row`) and a **`✨ AI ile Açıkla`** (`Explain with AI`) action button on selected rows in `Text` view, plus inline `.ai-inline-pill` badges displaying AI semantic annotations directly alongside diff rows.
+    - Embedded the Local AI Semantic Summary, Verdict, and Numbered Findings into exported **HTML reports** (`src/diffanydoc/core/report/html.py`), **printable PDF reports** (`src/diffanydoc/core/report/pdf.py`), **JSON output** (`src/diffanydoc/core/report/json.py`), and added the `--ai` flag to `diffanydoc diff` in [`src/diffanydoc/cli.py`](file:///home/mcagriaksoy/Desktop/DiffAnyDoc/src/diffanydoc/cli.py).
+- **Numbered Layout-Shift Matching (`1, 2, 3...`), Split/Wrapped Line Reconciliation & SVG Arrow Overlays**:
+  - Added `_reconcile_split_lines` and exact-move reservation in `engine.py` so text blocks that moved vertically/horizontally, changed reading order, or wrapped across different column widths are paired 1:1 instead of being painted as deletions, insertions, or modified text.
+  - Sequentially numbers every shifted/reordered block (`#1`, `#2`, `#3`...) across both `Text` and `Pages` views:
+    - **`Pages` & `X-Ray` Views**: Draws numbered `.rect-shift-badge` callouts (`1`, `2`, `3`) on Left and Right pages, on-page SVG displacement vector arrows (`page-shift-svg`) from ghost origin boxes to new locations, and cross-page cubic Bezier arrows (`cross-page-svg`) connecting `#1` on Left Page A to `#1` on Right Page B.
+    - **`Text` View**: Styles pure position shifts with `.row.shifted` (accent-blue indicator rather than red/green/amber error colors) and displays `#1 · Sağda mevcut (→ Δx +50pt)` / `#1 · Soldan kaydı (→ Δx +50pt)`.
+- **Switchable Full-PDF Visual/Position Mode vs. Ignore Layout Shifts (Text-Only) Mode**: Added coordinate shift detection (`_detect_position_shifts` in `engine.py` and `"shift"` overlay boxes in `geometry.py`) alongside an instant topbar switch (`#opt-text-only-mode`, labeled `"Ignore layout shifts (Text only)"` / `"Kaymaları yok say (Sadece metin)"` with tooltip and Help documentation in `#help-dialog`) backed by `/api/compare/{id}/recompare`.
+
+### Changed
+- **Compact Initial Window & `1366x768` Screen Fit**: Reduced default desktop window dimensions (`1160x700`, minimum `860x560`) and compacted initial upload screen spacing (`.upload-view`, `.status`, `.drop`, plus `@media (max-height: 800px)` rules) so the entire welcome/upload screen fits cleanly on `1366x768` displays without vertical clipping or scrolling.
+- **Windows 10/11 Startup, Rendering & OCR Performance Optimizations**:
+  - Replaced heavy `import rapidocr_onnxruntime` on startup (`/api/ocr/status`) with zero-import `importlib.util.find_spec("rapidocr_onnxruntime")`, deferring ONNX Runtime / OpenCV DLL loading until OCR actually runs.
+  - Added `subprocess.CREATE_NO_WINDOW` on Windows for all Tesseract subprocess calls and skipped redundant `tesseract --list-langs` process creation when embedded RapidOCR is active.
+  - Cached in-memory `pypdfium2.PdfDocument` instances and paginated office sheets in `render.py`, added `@lru_cache` to `_get_font` with native Windows fonts (`arial.ttf`, `segoeui.ttf`) prioritized on `win32`, and switched localhost PNG encoding (`render_page_png`, `render_xray_page_png`) to `compress_level=1` (~4.5x faster).
+  - Optimized visual page registration (`_estimate_shift` in `visual.py`) with a coarse-to-fine grid search (~3.7x fewer full-page pixel comparisons) and bypassed Windows Registry proxy lookups for `127.0.0.1` health checks in `desktop/app.py`.
+
 ## [0.6.0] - 2026-11-13
 
 ### Added

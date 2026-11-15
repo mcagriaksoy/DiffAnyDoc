@@ -96,6 +96,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="exit with code 1 when differences exist (CI / git hooks)",
     )
+    diff.add_argument(
+        "--ai",
+        action="store_true",
+        help="run local AI semantic analysis (llamafile / GGUF) on the comparison",
+    )
 
     info = subparsers.add_parser("info", help="show the parsed outline of a file")
     info.add_argument("file", type=Path)
@@ -113,8 +118,8 @@ def build_parser() -> argparse.ArgumentParser:
         "desktop", help="open the native desktop window (pywebview)"
     )
     desktop.add_argument("files", nargs="*", type=Path, help="1-2 files to open on start")
-    desktop.add_argument("--width", type=int, default=1280)
-    desktop.add_argument("--height", type=int, default=860)
+    desktop.add_argument("--width", type=int, default=1160)
+    desktop.add_argument("--height", type=int, default=700)
     desktop.add_argument("--debug", action="store_true", help="webview developer tools")
 
     select = subparsers.add_parser(
@@ -217,6 +222,13 @@ def _diff(args: argparse.Namespace, language: str) -> int:
         numeric_tolerance=args.tolerance,
     )
     result = compare(args.left, args.right, options)
+    if getattr(args, "ai", False):
+        from .core.ai import AiError, analyze_comparison
+
+        try:
+            analyze_comparison(result, language=language)
+        except AiError as exc:
+            print(t("cli.error", language, message=exc), file=sys.stderr)
     fmt = args.format or _infer_format(args.output)
 
     if fmt == "json":
@@ -318,6 +330,21 @@ def _render_text(result, language: str) -> str:
                 regions=visual.region_count,
             )
         )
+        lines.append("")
+
+    if isinstance(result.ai_analysis, dict) and result.ai_analysis.get("summary"):
+        ai = result.ai_analysis
+        verdict = str(ai.get("verdict") or "minor_changes")
+        verdict_label = t(f"ai.verdict.{verdict}", language)
+        lines.append(f"✨ {t('ai.title', language)} ({verdict_label}):")
+        lines.append(f"   {ai.get('summary')}")
+        for item in ai.get("items") or []:
+            if isinstance(item, dict):
+                cat = str(item.get("category") or "content")
+                cat_label = t(f"ai.cat.{cat}", language)
+                lines.append(
+                    f"   #{item.get('id')} [{cat_label}] {item.get('title')}: {item.get('explanation')}"
+                )
         lines.append("")
 
     if result.identical:

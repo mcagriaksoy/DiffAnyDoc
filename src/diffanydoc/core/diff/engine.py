@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from ..adapters import adapter_for, adapters, load
-from ..model import DiffResult, Document, Line, OcrStats, PagePair, Row, Stats, VisualDiff
+from ..model import DiffResult, Document, Line, OcrStats, PagePair, Row, Segment, Stats, VisualDiff
 from ..ocr import OcrOptions, apply_ocr
 from ..visual import VisualOptions, compare_pdf_pages
 from .align import align_pages
@@ -50,6 +50,8 @@ class DiffOptions:
     ocr_max_pages: int = 60
     #: None = per-user cache directory (``DIFFANYDOC_CACHE_DIR`` overrides).
     ocr_cache_dir: str | None = None
+    #: Comparison mode: "strict" (layout/order-aware) or "text_only" (content-only, order-independent).
+    compare_mode: str = "strict"
     #: Numeric difference tolerance: numbers differing by <= this amount are treated as equal.
     numeric_tolerance: float | None = None
     #: Skip repeating headers, footers, and page numbers in top/bottom 7% bands.
@@ -267,25 +269,44 @@ def compare(
             continue
         ocr = page_stats if ocr is None else ocr.merged(page_stats)
 
+    is_text_only = options.compare_mode == "text_only"
     left_lines = document_lines(
         left_doc,
-        case_sensitive=options.case_sensitive,
-        collapse_whitespace=options.collapse_whitespace,
-        compare_formatting=options.compare_formatting,
-        reflow=options.reflow,
+        case_sensitive=False if is_text_only else options.case_sensitive,
+        collapse_whitespace=True if is_text_only else options.collapse_whitespace,
+        compare_formatting=False if is_text_only else options.compare_formatting,
+        reflow=True if is_text_only else options.reflow,
         ignore_headers_footers=options.ignore_headers_footers,
     )
     right_lines = document_lines(
         right_doc,
-        case_sensitive=options.case_sensitive,
-        collapse_whitespace=options.collapse_whitespace,
-        compare_formatting=options.compare_formatting,
-        reflow=options.reflow,
+        case_sensitive=False if is_text_only else options.case_sensitive,
+        collapse_whitespace=True if is_text_only else options.collapse_whitespace,
+        compare_formatting=False if is_text_only else options.compare_formatting,
+        reflow=True if is_text_only else options.reflow,
         ignore_headers_footers=options.ignore_headers_footers,
     )
 
+    has_real_geometry = (
+        left_doc.kind in ("pdf", "image") and right_doc.kind in ("pdf", "image")
+    )
+    if has_real_geometry:
+        left_lines, right_lines = _reconcile_split_lines(
+            left_lines,
+            right_lines,
+            case_sensitive=False if is_text_only else options.case_sensitive,
+            collapse_whitespace=True if is_text_only else options.collapse_whitespace,
+        )
+
     rows = _build_rows(left_lines, right_lines, options)
     _mark_moved_rows(rows)
+    if is_text_only or has_real_geometry:
+        rows = _collapse_moved_to_equal(
+            rows,
+            pair_fuzzy=has_real_geometry and not is_text_only,
+            tolerance=options.numeric_tolerance,
+        )
+    _detect_position_shifts(rows, options, has_real_geometry=has_real_geometry)
     stats = _stats(left_lines, right_lines, rows)
     if options.fold_equal or len(rows) > _AUTO_FOLD_LINE_THRESHOLD:
         rows = _fold_equal_runs(rows, max(options.context, 3))
@@ -344,6 +365,177 @@ def _coerce(source: str | Path | Document) -> Document:
 _AUTO_FOLD_LINE_THRESHOLD = 1200
 
 
+def _reconcile_split_lines(
+    left: list[Line],
+    right: list[Line],
+    *,
+    case_sensitive: bool,
+    collapse_whitespace: bool,
+) -> tuple[list[Line], list[Line]]:
+    """Reconcile lines that were horizontally grouped or wrapped differently across two PDFs.
+
+    1. Horizontal gap splitting: if a line on side A has wide horizontal gaps
+       between spans (>= 18pt, e.g. two columns/boxes at the same Y coordinate)
+       and splitting at those gaps yields pieces that match lines on side B,
+       split the line into independent ``Line`` objects with their own ``bbox``.
+    2. Wrapped line joining: if 2-3 consecutive unmatched lines on side A equal
+       a single line on side B when joined, merge them into one ``Line``.
+    """
+    from ..layout import union
+    from ..model import Span
+    from ..normalize import normalize_line
+
+    def _norm(txt: str) -> str:
+        return normalize_line(
+            txt,
+            case_sensitive=case_sensitive,
+            collapse_whitespace=collapse_whitespace,
+        ).strip().casefold()
+
+    def _split_wide_gaps(lines: list[Line], other_norms: set[str]) -> list[Line]:
+        out: list[Line] = []
+        for line in lines:
+            if (
+                line.cells is not None
+                or len(line.spans) < 2
+                or _norm(line.text) in other_norms
+            ):
+                out.append(line)
+                continue
+            groups: list[list[Span]] = [[line.spans[0]]]
+            for prev_s, cur_s in zip(line.spans, line.spans[1:]):
+                if cur_s.page == prev_s.page and (cur_s.bbox[0] - prev_s.bbox[2]) >= 18.0:
+                    groups.append([cur_s])
+                else:
+                    groups[-1].append(cur_s)
+            if len(groups) < 2:
+                out.append(line)
+                continue
+            pieces: list[tuple[str, list[Span], Any]] = []
+            matched_any = False
+            for grp in groups:
+                s0 = grp[0].start
+                s1 = grp[-1].end
+                sub_text = line.text[s0:s1].strip()
+                if not sub_text:
+                    continue
+                shift = s0 + (len(line.text[s0:s1]) - len(line.text[s0:s1].lstrip()))
+                sub_spans = [
+                    Span(
+                        max(0, sp.start - shift),
+                        max(0, sp.end - shift),
+                        sp.page,
+                        sp.bbox,
+                    )
+                    for sp in grp
+                ]
+                sub_bbox = union(sp.bbox for sp in grp)
+                if _norm(sub_text) in other_norms:
+                    matched_any = True
+                pieces.append((sub_text, sub_spans, sub_bbox))
+            if matched_any and len(pieces) >= 2:
+                for sub_text, sub_spans, sub_bbox in pieces:
+                    out.append(
+                        Line(
+                            number=line.number,
+                            page=line.page,
+                            text=sub_text,
+                            norm=normalize_line(
+                                sub_text,
+                                case_sensitive=case_sensitive,
+                                collapse_whitespace=collapse_whitespace,
+                            ),
+                            bbox=sub_bbox,
+                            spans=sub_spans,
+                            style=dict(line.style) if line.style else {},
+                            cells=None,
+                        )
+                    )
+            else:
+                out.append(line)
+        for idx, item in enumerate(out, start=1):
+            item.number = idx
+        return out
+
+    right_norm_set = {_norm(l.text) for l in right if _norm(l.text)}
+    left = _split_wide_gaps(left, right_norm_set)
+    left_norm_set = {_norm(l.text) for l in left if _norm(l.text)}
+    right = _split_wide_gaps(right, left_norm_set)
+
+    def _merge_wrapped(lines: list[Line], other_norms: set[str], own_norms: set[str]) -> list[Line]:
+        out: list[Line] = []
+        i = 0
+        n = len(lines)
+        while i < n:
+            cur = lines[i]
+            cur_k = _norm(cur.text)
+            if cur.cells is None and cur_k not in other_norms and i + 1 < n:
+                merged_done = False
+                for span_cnt in (2, 3):
+                    if i + span_cnt > n:
+                        continue
+                    chunk = lines[i : i + span_cnt]
+                    if any(
+                        c.cells is not None
+                        or c.page != cur.page
+                        or (_norm(c.text) in other_norms and _norm(c.text) in own_norms)
+                        for c in chunk
+                    ):
+                        continue
+                    joined_text = " ".join(c.text.strip() for c in chunk if c.text.strip())
+                    if _norm(joined_text) in other_norms:
+                        new_spans: list[Span] = []
+                        parts: list[str] = []
+                        offset = 0
+                        for c in chunk:
+                            t_part = c.text.strip()
+                            if not t_part:
+                                continue
+                            if parts:
+                                parts.append(" ")
+                                offset += 1
+                            for sp in c.spans:
+                                new_spans.append(
+                                    Span(sp.start + offset, sp.end + offset, sp.page, sp.bbox)
+                                )
+                            parts.append(t_part)
+                            offset += len(t_part)
+                        full_text = "".join(parts)
+                        out.append(
+                            Line(
+                                number=cur.number,
+                                page=cur.page,
+                                text=full_text,
+                                norm=normalize_line(
+                                    full_text,
+                                    case_sensitive=case_sensitive,
+                                    collapse_whitespace=collapse_whitespace,
+                                ),
+                                bbox=union(c.bbox for c in chunk if c.bbox is not None),
+                                spans=new_spans,
+                                style=dict(cur.style) if cur.style else {},
+                                cells=None,
+                            )
+                        )
+                        i += span_cnt
+                        merged_done = True
+                        break
+                if merged_done:
+                    continue
+            out.append(cur)
+            i += 1
+        for idx, item in enumerate(out, start=1):
+            item.number = idx
+        return out
+
+    right_norm_set = {_norm(l.text) for l in right if _norm(l.text)}
+    left_norm_set = {_norm(l.text) for l in left if _norm(l.text)}
+    left = _merge_wrapped(left, right_norm_set, left_norm_set)
+    left_norm_set = {_norm(l.text) for l in left if _norm(l.text)}
+    right = _merge_wrapped(right, left_norm_set, right_norm_set)
+    return left, right
+
+
 def _build_rows(
     left: Sequence[Line], right: Sequence[Line], options: DiffOptions
 ) -> list[Row]:
@@ -354,8 +546,24 @@ def _build_rows(
         [line.norm for line in right],
         autojunk=use_autojunk,
     )
+    opcodes = matcher.get_opcodes()
+    unmatched_left: set[str] = set()
+    unmatched_right: set[str] = set()
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag == "equal":
+            continue
+        for a in left[i1:i2]:
+            k = a.norm.strip().casefold()
+            if len(k) >= 2:
+                unmatched_left.add(k)
+        for b in right[j1:j2]:
+            k = b.norm.strip().casefold()
+            if len(k) >= 2:
+                unmatched_right.add(k)
+    exact_moved_keys = unmatched_left & unmatched_right
+
     rows: list[Row] = []
-    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+    for tag, i1, i2, j1, j2 in opcodes:
         if tag == "equal":
             for a, b in zip(left[i1:i2], right[j1:j2]):
                 if options.compare_formatting and _styles_differ(a, b):
@@ -375,6 +583,7 @@ def _build_rows(
                 right[j1:j2],
                 options.pair_threshold,
                 tolerance=options.numeric_tolerance,
+                exact_moved_keys=exact_moved_keys,
             )
         )
     return rows
@@ -446,16 +655,36 @@ def _refine_replacement(
     right: Sequence[Line],
     threshold: float,
     tolerance: float | None = None,
+    exact_moved_keys: set[str] | None = None,
 ) -> list[Row]:
     """Pair up changed lines so a rewrite does not look like delete+insert.
 
     A small look-ahead decides which side owns an unmatched line, which is what
-    makes side-by-side views readable.
+    makes side-by-side views readable. Lines whose exact text appears elsewhere
+    as a moved block are preserved as single rows so move-pairing can match them.
     """
     rows: list[Row] = []
     i = j = 0
     while i < len(left) and j < len(right):
         a, b = left[i], right[j]
+        if exact_moved_keys:
+            ka = a.norm.strip().casefold()
+            kb = b.norm.strip().casefold()
+            if ka != kb:
+                if ka in exact_moved_keys and kb not in exact_moved_keys:
+                    rows.append(_single_row(a, None, "delete"))
+                    i += 1
+                    continue
+                if kb in exact_moved_keys and ka not in exact_moved_keys:
+                    rows.append(_single_row(None, b, "insert"))
+                    j += 1
+                    continue
+                if ka in exact_moved_keys and kb in exact_moved_keys:
+                    rows.append(_single_row(a, None, "delete"))
+                    rows.append(_single_row(None, b, "insert"))
+                    i += 1
+                    j += 1
+                    continue
         sim = line_similarity(a, b)
         if sim >= threshold or (len(left) == len(right) and sim >= 0.2):
             rows.append(_replace_row(a, b, tolerance=tolerance))
@@ -563,30 +792,274 @@ def _is_change(row: Row) -> bool:
     return row.kind != "equal" or bool(getattr(row, "format_changes", None))
 
 
-_MIN_MOVE_LEN = 12
+_MIN_MOVE_LEN = 4
 
 
 def _mark_moved_rows(rows: list[Row]) -> None:
-    """Flag deleted/inserted rows whose normalized text appears identically on the other side."""
+    """Flag deleted/inserted rows whose text appears identically or similarly on the other side."""
+    from difflib import SequenceMatcher
+    import re
+
     inserts_by_text: dict[str, list[Row]] = {}
+    unmatched_inserts: list[Row] = []
     for row in rows:
         if row.kind == "insert" and row.right is not None:
-            key = row.right.norm.strip()
+            key = row.right.norm.strip().casefold()
             if len(key) >= _MIN_MOVE_LEN:
                 inserts_by_text.setdefault(key, []).append(row)
 
-    if not inserts_by_text:
-        return
-
+    next_move_id = 1
+    unmatched_deletes: list[Row] = []
     for row in rows:
         if row.kind == "delete" and row.left is not None:
-            key = row.left.norm.strip()
+            key = row.left.norm.strip().casefold()
             if len(key) >= _MIN_MOVE_LEN:
                 bucket = inserts_by_text.get(key)
                 if bucket:
                     partner = bucket.pop(0)
                     row.moved = True
                     partner.moved = True
+                    row.move_id = next_move_id
+                    partner.move_id = next_move_id
+                    next_move_id += 1
+                else:
+                    unmatched_deletes.append(row)
+
+    for bucket in inserts_by_text.values():
+        unmatched_inserts.extend(bucket)
+
+    if not unmatched_deletes or not unmatched_inserts:
+        return
+
+    def _tokens(text: str) -> set[str]:
+        return {w for w in re.findall(r"\w+", text.casefold()) if len(w) >= 3}
+
+    candidates: list[tuple[float, int, int]] = []
+    ins_tokens = [
+        (_tokens(r.right.norm), r.right.norm.strip().casefold())
+        for r in unmatched_inserts
+        if r.right is not None
+    ]
+    for di, d_row in enumerate(unmatched_deletes):
+        assert d_row.left is not None
+        d_norm = d_row.left.norm.strip().casefold()
+        d_toks = _tokens(d_norm)
+        if not d_toks or len(d_norm) < 6:
+            continue
+        for ii, (i_toks, i_norm) in enumerate(ins_tokens):
+            if not i_toks or len(i_norm) < 6:
+                continue
+            shared = d_toks & i_toks
+            if not any(len(w) >= 4 for w in shared):
+                continue
+            jaccard = len(shared) / len(d_toks | i_toks)
+            seq_ratio = SequenceMatcher(None, d_norm, i_norm).ratio()
+            score = max(jaccard, seq_ratio)
+            if score >= 0.50:
+                candidates.append((score, di, ii))
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    used_d: set[int] = set()
+    used_i: set[int] = set()
+    for _score, di, ii in candidates:
+        if di in used_d or ii in used_i:
+            continue
+        used_d.add(di)
+        used_i.add(ii)
+        d_row = unmatched_deletes[di]
+        i_row = unmatched_inserts[ii]
+        d_row.moved = True
+        i_row.moved = True
+        d_row.move_id = next_move_id
+        i_row.move_id = next_move_id
+        next_move_id += 1
+
+
+def _collapse_moved_to_equal(
+    rows: list[Row],
+    *,
+    pair_fuzzy: bool = False,
+    tolerance: float | None = None,
+) -> list[Row]:
+    """Pair moved delete/insert rows into a single side-by-side Row.
+
+    Exact normalized matches become ``kind="equal"`` (with ``moved=True`` so
+    position shift detection can still number and draw arrows for them on PDFs).
+    When ``pair_fuzzy`` is True (PDF/image layout comparison), fuzzy-matched
+    moved blocks sharing a ``move_id`` are also paired side-by-side.
+    """
+    inserts_by_text: dict[str, list[Row]] = {}
+    inserts_by_move_id: dict[int, Row] = {}
+    for row in rows:
+        if row.kind == "insert" and row.right is not None:
+            key = row.right.norm.strip().casefold()
+            if key:
+                inserts_by_text.setdefault(key, []).append(row)
+            if row.moved and row.move_id:
+                inserts_by_move_id[row.move_id] = row
+
+    consumed_inserts: set[int] = set()
+    paired_by_delete: dict[int, Row] = {}
+
+    for row in rows:
+        if row.kind != "delete" or row.left is None:
+            continue
+        key = row.left.norm.strip().casefold()
+        bucket = inserts_by_text.get(key) if key else None
+        partner: Row | None = None
+        while bucket:
+            cand = bucket.pop(0)
+            if id(cand) not in consumed_inserts:
+                partner = cand
+                break
+        if partner is not None and partner.right is not None:
+            consumed_inserts.add(id(partner))
+            paired_by_delete[id(row)] = Row(
+                kind="equal",
+                left=row.left,
+                right=partner.right,
+                moved=True,
+                move_id=row.move_id or partner.move_id or 1,
+            )
+            continue
+        if pair_fuzzy and row.moved and row.move_id:
+            fuzzy_partner = inserts_by_move_id.get(row.move_id)
+            if (
+                fuzzy_partner is not None
+                and id(fuzzy_partner) not in consumed_inserts
+                and fuzzy_partner.right is not None
+            ):
+                consumed_inserts.add(id(fuzzy_partner))
+                rep = _replace_row(row.left, fuzzy_partner.right, tolerance=tolerance)
+                rep.moved = True
+                rep.move_id = row.move_id
+                paired_by_delete[id(row)] = rep
+
+    out: list[Row] = []
+    for row in rows:
+        if id(row) in consumed_inserts:
+            continue
+        if id(row) in paired_by_delete:
+            out.append(paired_by_delete[id(row)])
+            continue
+        out.append(row)
+    return out
+
+
+_SHIFT_THRESHOLD_PT = 4.5
+
+
+def _format_shift_label(dx: float, dy: float, *, reordered: bool = False) -> str:
+    parts: list[str] = []
+    if abs(dx) >= _SHIFT_THRESHOLD_PT:
+        arrow = "→" if dx > 0 else "←"
+        parts.append(f"{arrow} Δx {dx:+.0f}pt")
+    if abs(dy) >= _SHIFT_THRESHOLD_PT:
+        arrow = "↓" if dy > 0 else "↑"
+        parts.append(f"{arrow} Δy {dy:+.0f}pt")
+    if not parts and reordered:
+        parts.append(f"↕ Δy {dy:+.0f}pt")
+    return " · ".join(parts) if parts else f"Δx {dx:+.0f}pt"
+
+
+def _detect_position_shifts(
+    rows: list[Row],
+    options: DiffOptions,
+    *,
+    has_real_geometry: bool,
+) -> None:
+    """Detect and sequentially number (1, 2, 3...) matched blocks whose position shifted.
+
+    In ``strict`` (Visual & Position) mode, lines whose text is identical but
+    whose bounding box shifted or reordered on the page are numbered ``#1, #2, #3...``
+    and flagged with ``position_shift`` metadata (including both left & right
+    bounding boxes so the UI can draw numbered badges and connecting arrows).
+    In ``text_only`` (Ignore Layout Shifts) mode, they remain ``kind="equal"``
+    (0 changes, 100% similarity).
+    """
+    if not has_real_geometry:
+        return
+    is_text_only = options.compare_mode == "text_only"
+    prev_bottom: dict[tuple[int, int], tuple[float, float]] = {}
+    shift_seq = 0
+    block_seq = 0
+
+    for row in rows:
+        a = row.left
+        b = row.right
+        if a is None or b is None or a.bbox is None or b.bbox is None:
+            continue
+        block_seq += 1
+        was_reordered = bool(row.moved)
+        page_key = (a.page, b.page)
+        dx = b.bbox[0] - a.bbox[0]
+        raw_dy = b.bbox[1] - a.bbox[1]
+        if page_key in prev_bottom:
+            prev_a_bot, prev_b_bot = prev_bottom[page_key]
+            eff_dy = (b.bbox[1] - prev_b_bot) - (a.bbox[1] - prev_a_bot)
+        else:
+            eff_dy = raw_dy
+        prev_bottom[page_key] = (a.bbox[3], b.bbox[3])
+
+        if abs(dx) < _SHIFT_THRESHOLD_PT and a.spans and b.spans and len(a.spans) == len(b.spans):
+            best_span_dx = 0.0
+            for sa, sb in zip(a.spans, b.spans):
+                sdx = sb.bbox[0] - sa.bbox[0]
+                if abs(sdx) > abs(best_span_dx):
+                    best_span_dx = sdx
+            if abs(best_span_dx) >= _SHIFT_THRESHOLD_PT:
+                dx = best_span_dx
+
+        is_shifted = (
+            abs(dx) >= _SHIFT_THRESHOLD_PT
+            or abs(eff_dy) >= _SHIFT_THRESHOLD_PT
+            or (was_reordered and abs(raw_dy) >= _SHIFT_THRESHOLD_PT)
+            or (a.page != b.page)
+        )
+        if not is_shifted:
+            if is_text_only:
+                row.moved = False
+                row.move_id = 0
+            continue
+
+        shift_seq += 1
+        row.move_id = shift_seq
+        dy_for_label = (
+            raw_dy
+            if (abs(eff_dy) >= _SHIFT_THRESHOLD_PT or was_reordered or a.page != b.page)
+            else 0.0
+        )
+        label = _format_shift_label(dx, dy_for_label, reordered=was_reordered)
+        shift_meta = {
+            "id": shift_seq,
+            "block_num": block_seq,
+            "dx": round(dx, 1),
+            "dy": round(raw_dy, 1),
+            "eff_dy": round(eff_dy, 1),
+            "reordered": was_reordered,
+            "left_bbox": [round(v, 2) for v in a.bbox],
+            "right_bbox": [round(v, 2) for v in b.bbox],
+            "left_page": a.page,
+            "right_page": b.page,
+            "label": label,
+        }
+        a.style = {**(a.style or {}), "position_shift": shift_meta}
+        b.style = {**(b.style or {}), "position_shift": shift_meta}
+
+        if row.kind == "equal":
+            if not is_text_only:
+                row.kind = "replace"
+                row.moved = True
+                if label not in row.format_changes:
+                    row.format_changes.append(label)
+                a.style["style_change"] = label
+                a.style["summary"] = label
+                b.style["style_change"] = label
+                b.style["summary"] = label
+                row.left_inline = [Segment(kind="equal", text=a.text)]
+                row.right_inline = [Segment(kind="equal", text=b.text)]
+            else:
+                row.moved = False
 
 
 def fold_equal_runs(rows: Sequence[Row], context: int) -> list[Row]:

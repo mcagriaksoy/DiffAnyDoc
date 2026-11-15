@@ -128,8 +128,10 @@ class Row:
     #: Number of identical rows folded away before this row (0 = nothing hidden).
     hidden_before: int = 0
     format_changes: list[str] = field(default_factory=list)
-    #: True when a deleted/inserted line appears identically elsewhere in the other document.
+    #: True when a deleted/inserted line appears identically or similarly elsewhere in the other document.
     moved: bool = False
+    #: 1-based pair identifier linking a moved/matched delete row with its insert counterpart.
+    move_id: int | None = None
 
 
 @dataclass(slots=True)
@@ -311,6 +313,7 @@ class DiffResult:
     right_sha256: str | None = None
     left_pages: list[tuple[float, float]] = field(default_factory=list)
     right_pages: list[tuple[float, float]] = field(default_factory=list)
+    ai_analysis: dict[str, Any] | None = None
 
     @property
     def identical(self) -> bool:
