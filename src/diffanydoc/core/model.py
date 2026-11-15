@@ -313,6 +313,7 @@ class DiffResult:
     right_sha256: str | None = None
     left_pages: list[tuple[float, float]] = field(default_factory=list)
     right_pages: list[tuple[float, float]] = field(default_factory=list)
+    ai_analysis: dict[str, Any] | None = None
 
     @property
     def identical(self) -> bool:

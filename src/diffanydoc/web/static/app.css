@@ -2653,3 +2653,327 @@ body.boxes-off .page-shift-svg,
 body.boxes-off .cross-page-svg {
   display: none;
 }
+
+/* ---------- Local AI Semantic View (libadwaita flat cards) ---------- */
+.ai-view {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 20px 24px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ai-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.ai-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.ai-subtitle {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--dim-label-color);
+  max-width: 640px;
+}
+
+.ai-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-setup-card,
+.ai-summary-card,
+.ai-finding-card,
+.ai-empty-prompt,
+.ai-loading-card {
+  background: var(--card-bg-color);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+
+.ai-setup-card h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+
+.ai-setup-card p {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--dim-label-color);
+}
+
+.ai-setup-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ai-dl-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-color);
+}
+
+.ai-error-banner {
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--diff-del-bg);
+  color: var(--diff-del-strong);
+  font-size: 13px;
+}
+
+.ai-loading-card,
+.ai-empty-prompt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13.5px;
+}
+
+.ai-summary-card {
+  border-left: 3px solid var(--accent-color);
+}
+
+.ai-summary-card.verdict-major_changes {
+  border-left-color: var(--diff-del-strong);
+}
+
+.ai-summary-card.verdict-minor_changes {
+  border-left-color: var(--warning-color);
+}
+
+.ai-summary-card.verdict-identical_meaning {
+  border-left-color: var(--diff-ins-strong);
+}
+
+.ai-summary-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.ai-verdict-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--accent-color) 16%, transparent);
+  color: var(--accent-color);
+}
+
+.ai-verdict-badge.verdict-major_changes {
+  background: var(--diff-del-bg);
+  color: var(--diff-del-strong);
+}
+
+.ai-verdict-badge.verdict-minor_changes {
+  background: var(--diff-mod-bg);
+  color: var(--warning-color);
+}
+
+.ai-verdict-badge.verdict-identical_meaning {
+  background: var(--diff-ins-bg);
+  color: var(--diff-ins-strong);
+}
+
+.ai-meta {
+  font-size: 12px;
+  color: var(--dim-label-color);
+}
+
+.ai-summary-text {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.ai-findings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ai-finding-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-left: 3px solid var(--border-color);
+}
+
+.ai-finding-card.cat-content {
+  border-left-color: var(--diff-del-strong);
+}
+
+.ai-finding-card.cat-rewording {
+  border-left-color: var(--warning-color);
+}
+
+.ai-finding-card.cat-layout {
+  border-left-color: var(--accent-color);
+}
+
+.ai-finding-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ai-finding-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--headerbar-bg-color);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ai-cat-badge {
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ai-cat-badge.cat-content {
+  background: var(--diff-del-bg);
+  color: var(--diff-del-strong);
+}
+
+.ai-cat-badge.cat-rewording {
+  background: var(--diff-mod-bg);
+  color: var(--warning-color);
+}
+
+.ai-cat-badge.cat-layout {
+  background: color-mix(in srgb, var(--accent-color) 15%, transparent);
+  color: var(--accent-color);
+}
+
+.ai-finding-title {
+  font-size: 13.5px;
+}
+
+.ai-finding-jumps {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ai-finding-exp {
+  margin: 0;
+  font-size: 13px;
+  color: var(--window-fg-color);
+  line-height: 1.45;
+}
+
+.ai-finding-snippets {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.ai-snip {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--view-bg-color);
+  border: 1px solid var(--border-color);
+  overflow-wrap: anywhere;
+}
+
+.ai-custom-fields {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.ai-custom-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.ai-field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--dim-label-color);
+}
+
+.ai-text-input,
+.pref-select {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--view-bg-color);
+  color: var(--window-fg-color);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+
+.ai-settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-inline-pill {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 5px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.ai-inline-pill.cat-content {
+  background: var(--diff-del-bg);
+  color: var(--diff-del-strong);
+  border: 1px solid color-mix(in srgb, var(--diff-del-strong) 30%, transparent);
+}
+
+.ai-inline-pill.cat-rewording {
+  background: var(--diff-mod-bg);
+  color: var(--warning-color);
+  border: 1px solid color-mix(in srgb, var(--warning-color) 30%, transparent);
+}
+
+.ai-inline-pill.cat-layout {
+  background: color-mix(in srgb, var(--accent-color) 14%, transparent);
+  color: var(--accent-color);
+  border: 1px solid color-mix(in srgb, var(--accent-color) 30%, transparent);
+}

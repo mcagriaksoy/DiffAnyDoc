@@ -288,6 +288,37 @@ def render_pdf(
 
     y += banner_h + 24
 
+    # Local AI Semantic Summary Card (if available)
+    if isinstance(result.ai_analysis, dict) and result.ai_analysis.get("summary"):
+        ai = result.ai_analysis
+        verdict = str(ai.get("verdict") or "minor_changes")
+        verdict_label = t(f"ai.verdict.{verdict}", lang)
+        ai_title = f"AI Semantic Analysis  ·  {verdict_label}"
+        ai_items = [it for it in (ai.get("items") or []) if isinstance(it, dict)][:5]
+        ai_box_h = 68 + len(ai_items) * 20
+        cur_draw.rounded_rectangle(
+            [(MARGIN_X, y), (PAGE_WIDTH - MARGIN_X, y + ai_box_h)],
+            radius=6,
+            fill=ACCENT_BLUE_LIGHT,
+            outline=ACCENT_BLUE,
+            width=1,
+        )
+        cur_draw.text((MARGIN_X + 16, y + 10), ai_title, fill=ACCENT_BLUE, font=font_h3)
+        sum_trunc = _truncate_text(
+            cur_draw, str(ai.get("summary") or ""), font_body, CONTENT_WIDTH - 32
+        )
+        cur_draw.text((MARGIN_X + 16, y + 34), sum_trunc, fill=TEXT_MAIN, font=font_body)
+        iy = y + 58
+        for it in ai_items:
+            fid = it.get("id", "")
+            cat = str(it.get("category") or "content")
+            cat_label = t(f"ai.cat.{cat}", lang)
+            line_str = f"#{fid} [{cat_label}] {it.get('title', '')}: {it.get('explanation', '')}"
+            line_trunc = _truncate_text(cur_draw, line_str, font_caption, CONTENT_WIDTH - 32)
+            cur_draw.text((MARGIN_X + 22, iy), line_trunc, fill=TEXT_MUTED, font=font_caption)
+            iy += 20
+        y += ai_box_h + 18
+
     # Detailed Comparison Table Header helper
     col_w = (CONTENT_WIDTH - 16) // 2
     col_b_x = MARGIN_X + col_w + 16

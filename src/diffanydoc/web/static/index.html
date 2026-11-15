@@ -32,6 +32,7 @@
       <button class="tab active" data-mode="text" role="tab" data-i18n="tab.text">Text</button>
       <button class="tab" data-mode="pages" role="tab" id="tab-pages" data-i18n="tab.pages">Pages</button>
       <button class="tab" data-mode="xray" role="tab" id="tab-xray" data-i18n="tab.xray">X-Ray</button>
+      <button class="tab" data-mode="ai" role="tab" id="tab-ai" data-i18n="tab.ai">✨ AI</button>
       <button class="tab" data-mode="folder" role="tab" id="tab-folder" data-i18n="folder.title" hidden>Folder</button>
     </div>
     <div class="diff-nav" id="top-diff-nav" hidden>
@@ -331,6 +332,7 @@
 
     <div class="panes" id="text-view"></div>
     <div class="pages" id="page-view" hidden></div>
+    <div class="ai-view" id="ai-view" hidden></div>
     <div class="folder-view" id="folder-view" hidden></div>
     <aside class="diff-minimap" id="diff-minimap" aria-label="Overview minimap" hidden>
       <div class="minimap-track" id="minimap-track">
@@ -658,6 +660,53 @@
             <input type="checkbox" id="settings-default-format">
             <span data-i18n="opt.formatDiff">Compare formatting</span>
           </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Local AI Engine Group -->
+    <div class="pref-group">
+      <h3 class="pref-group-title" data-i18n="ai.settingsTitle">Local AI Engine (llamafile / GGUF)</h3>
+      <p class="pref-group-desc" data-i18n="ai.settingsDesc">Choose a built-in small Qwen preset or point to any custom GGUF model (such as Qwen3.8-Flash-Next) or local server.</p>
+
+      <div class="pref-card">
+        <div class="pref-row">
+          <div class="pref-row-info">
+            <span class="pref-row-title" data-i18n="ai.presetLabel">AI Model Preset</span>
+            <span class="pref-row-subtitle" id="settings-ai-status-text"></span>
+          </div>
+          <select id="settings-ai-preset" class="pref-select">
+            <option value="qwen-0.5b" data-i18n="ai.presetFast">Qwen2.5-0.5B Instruct (Ultra-Fast · ~398 MB)</option>
+            <option value="qwen-1.5b" data-i18n="ai.presetBalanced">Qwen2.5-1.5B Instruct (Balanced · ~986 MB)</option>
+            <option value="custom" data-i18n="ai.presetCustom">Custom Model (.gguf / Qwen3.8-Flash-Next / Local URL)</option>
+          </select>
+        </div>
+
+        <div class="pref-row ai-custom-fields" id="settings-ai-custom-wrap" hidden>
+          <div class="ai-custom-grid">
+            <label class="ai-field-label">
+              <span data-i18n="ai.customPathLabel">Custom .gguf / .llamafile path</span>
+              <input type="text" id="settings-ai-custom-path" class="ai-text-input" placeholder="/path/to/Qwen3.8-Flash-Next-Q4_K_M.gguf">
+            </label>
+            <label class="ai-field-label">
+              <span data-i18n="ai.customUrlLabel">Or local OpenAI-compatible URL (e.g. http://127.0.0.1:8080/v1)</span>
+              <input type="text" id="settings-ai-custom-url" class="ai-text-input" placeholder="http://127.0.0.1:8080/v1">
+            </label>
+            <label class="ai-field-label">
+              <span data-i18n="ai.customModelLabel">Model name (optional, e.g. qwen3.8-flash-next)</span>
+              <input type="text" id="settings-ai-custom-model" class="ai-text-input" placeholder="qwen3.8-flash-next">
+            </label>
+          </div>
+        </div>
+
+        <div class="pref-row">
+          <div class="pref-row-info">
+            <span class="pref-row-subtitle" id="settings-ai-dir-text"></span>
+          </div>
+          <div class="ai-settings-actions">
+            <button class="flat" id="settings-ai-download" type="button" data-i18n="ai.downloadBtn">Download &amp; Set Up</button>
+            <button class="suggested" id="settings-ai-save" type="button" data-i18n="ai.saveConfig">Save AI Settings</button>
+          </div>
         </div>
       </div>
     </div>

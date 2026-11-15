@@ -94,6 +94,49 @@ def create_app() -> FastAPI:
             "languages": installed_languages(),
         }
 
+    @app.get("/api/ai/status")
+    def ai_status_endpoint() -> dict[str, Any]:
+        from ..core.ai import get_status
+
+        return get_status()
+
+    @app.post("/api/ai/config")
+    async def ai_config_endpoint(body: dict[str, Any]) -> dict[str, Any]:
+        from ..core.ai import get_status, load_config, save_config, stop_server
+
+        cfg = load_config()
+        if "preset" in body:
+            cfg.preset = str(body["preset"] or "qwen-0.5b")
+        if "custom_endpoint" in body or "custom_endpoint_url" in body:
+            cfg.custom_endpoint = str(
+                body.get("custom_endpoint") or body.get("custom_endpoint_url") or ""
+            ).strip()
+        if "custom_model" in body or "custom_model_path" in body or "custom_model_name" in body:
+            cfg.custom_model = str(
+                body.get("custom_model")
+                or body.get("custom_model_path")
+                or body.get("custom_model_name")
+                or ""
+            ).strip()
+        save_config(cfg)
+        stop_server()
+        return get_status()
+
+    @app.post("/api/ai/download")
+    async def ai_download_endpoint(body: dict[str, Any]) -> dict[str, Any]:
+        from ..core.ai import AiError, cancel_download, get_status, start_download
+
+        action = str(body.get("action") or "start")
+        if action == "cancel":
+            cancel_download()
+            return get_status()
+        preset = str(body.get("preset") or "qwen-0.5b")
+        try:
+            start_download(preset=preset)
+            return get_status()
+        except AiError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.get("/api/integrate/status")
     def integrate_status() -> dict[str, Any]:
         from .. import integrate
@@ -378,6 +421,34 @@ def create_app() -> FastAPI:
             existing_dir=existing.directory,
         )
         return JSONResponse(_summary(updated))
+
+    @app.post("/api/compare/{comparison_id}/ai")
+    async def analyze_with_ai(comparison_id: str, body: dict[str, Any] | None = None) -> JSONResponse:
+        from ..core.ai import AiError, analyze_comparison
+
+        comparison = _get(comparison_id)
+        lang = str((body or {}).get("language") or (body or {}).get("lang") or "tr")
+        try:
+            analysis = analyze_comparison(comparison.result, language=lang)
+        except AiError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        comparison.result.ai_analysis = analysis.as_dict()
+        return JSONResponse(analysis.as_dict())
+
+    @app.post("/api/compare/{comparison_id}/ai/row")
+    async def explain_row_ai_endpoint(
+        comparison_id: str, body: dict[str, Any]
+    ) -> JSONResponse:
+        from ..core.ai import AiError, explain_row_with_ai
+
+        comparison = _get(comparison_id)
+        row_index = int(body.get("row_index", -1))
+        lang = str(body.get("language") or body.get("lang") or "tr")
+        try:
+            finding = explain_row_with_ai(comparison.result, row_index=row_index, language=lang)
+        except AiError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return JSONResponse(finding.as_dict())
 
     @app.get("/api/compare/{comparison_id}/report", response_class=HTMLResponse)
     def get_report(comparison_id: str, lang: str | None = None) -> HTMLResponse:

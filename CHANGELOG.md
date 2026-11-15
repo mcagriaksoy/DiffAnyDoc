@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.7.0] - 2026-11-15
 
 ### Added
+- **Local AI Semantic Comparison (`src/diffanydoc/core/ai.py` + `✨ AI` View + Inline Row AI & Report Integration)**:
+  - **Phase 1 (Local Engine & `✨ AI` Tab)**: Added a 100% offline Local AI engine powered by Mozilla's `llamafile` (Apache-2.0) and pluggable GGUF models (`Qwen2.5-0.5B-Instruct` ~398 MB Ultra-Fast, `Qwen2.5-1.5B-Instruct` ~986 MB Balanced, or any custom `.gguf`/`.llamafile` model such as `Qwen3.8-Flash-Next` or local OpenAI-compatible server on `127.0.0.1`). Feeds a compact structured JSON digest (`build_comparison_digest`) of content differences and layout shifts to the local model, returning an executive summary, overall semantic verdict (`identical_meaning`, `layout_only`, `minor_changes`, `major_changes`), and numbered semantic findings (`content`, `rewording`, `layout`) with one-click jumps to `Text` and `Pages` views, plus a 1-click background model downloader (`/api/ai/download`).
+  - **Phase 2 (Inline Row AI Explanation, HTML/PDF Report Integration & CLI `--ai`)**:
+    - Added row-level on-demand AI explanations (`explain_row_with_ai` / `POST /api/compare/{id}/ai/row`) and a **`✨ AI ile Açıkla`** (`Explain with AI`) action button on selected rows in `Text` view, plus inline `.ai-inline-pill` badges displaying AI semantic annotations directly alongside diff rows.
+    - Embedded the Local AI Semantic Summary, Verdict, and Numbered Findings into exported **HTML reports** (`src/diffanydoc/core/report/html.py`), **printable PDF reports** (`src/diffanydoc/core/report/pdf.py`), **JSON output** (`src/diffanydoc/core/report/json.py`), and added the `--ai` flag to `diffanydoc diff` in [`src/diffanydoc/cli.py`](file:///home/mcagriaksoy/Desktop/DiffAnyDoc/src/diffanydoc/cli.py).
 - **Numbered Layout-Shift Matching (`1, 2, 3...`), Split/Wrapped Line Reconciliation & SVG Arrow Overlays**:
   - Added `_reconcile_split_lines` and exact-move reservation in `engine.py` so text blocks that moved vertically/horizontally, changed reading order, or wrapped across different column widths are paired 1:1 instead of being painted as deletions, insertions, or modified text.
   - Sequentially numbers every shifted/reordered block (`#1`, `#2`, `#3`...) across both `Text` and `Pages` views:
