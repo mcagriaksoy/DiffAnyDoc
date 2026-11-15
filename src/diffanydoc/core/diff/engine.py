@@ -231,18 +231,6 @@ def compare(
                 max_shift=0.0,
                 truncated=len(dims) > limit,
             )
-        left_doc, left_ocr = _load_or_cached(left, left_hash, options)
-        left_lines = document_lines(
-            left_doc,
-            case_sensitive=options.case_sensitive,
-            collapse_whitespace=options.collapse_whitespace,
-            compare_formatting=options.compare_formatting,
-            reflow=options.reflow,
-            ignore_headers_footers=options.ignore_headers_footers,
-        )
-        left_chars = sum(len(line.text) for line in left_lines)
-        left_words = sum(len(line.text.split()) for line in left_lines)
-        left_reading_time = left_words / 200.0
         return DiffResult(
             left_path=left_path,
             right_path=right_path,
@@ -251,18 +239,12 @@ def compare(
             rows=[],
             page_map=page_map,
             stats=Stats(
-                left_lines=len(left_lines),
-                right_lines=len(left_lines),
+                left_lines=0,
+                right_lines=0,
                 similarity=1.0,
-                left_words=left_words,
-                right_words=left_words,
-                left_chars=left_chars,
-                right_chars=left_chars,
-                left_reading_time_min=left_reading_time,
-                right_reading_time_min=left_reading_time,
             ),
             visual=visual,
-            ocr=left_ocr,
+            ocr=None,
             options=asdict(options),
             byte_identical=True,
             left_sha256=left_hash,
