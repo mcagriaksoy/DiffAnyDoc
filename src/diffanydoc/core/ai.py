@@ -33,17 +33,6 @@ from .model import DiffResult, Row
 
 #: Built-in Apache-2.0 GGUF model presets optimised for fast CPU inference.
 MODEL_PRESETS: dict[str, dict[str, Any]] = {
-    "smollm2-135m": {
-        "id": "smollm2-135m",
-        "name": "SmolLM2-135M-Instruct (Q4_K_M · Tiny · ~105 MB)",
-        "filename": "SmolLM2-135M-Instruct-Q4_K_M.gguf",
-        "size_mb": 105,
-        "license": "Apache-2.0",
-        "url": (
-            "https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/"
-            "SmolLM2-135M-Instruct-Q4_K_M.gguf"
-        ),
-    },
     "qwen-0.5b-q2": {
         "id": "qwen-0.5b-q2",
         "name": "Qwen2.5-0.5B-Instruct (Q2_K · Nano · ~215 MB)",
@@ -53,6 +42,17 @@ MODEL_PRESETS: dict[str, dict[str, Any]] = {
         "url": (
             "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/"
             "qwen2.5-0.5b-instruct-q2_k.gguf"
+        ),
+    },
+    "smollm2-135m": {
+        "id": "smollm2-135m",
+        "name": "SmolLM2-135M-Instruct (Q4_K_M · Tiny · ~105 MB)",
+        "filename": "SmolLM2-135M-Instruct-Q4_K_M.gguf",
+        "size_mb": 105,
+        "license": "Apache-2.0",
+        "url": (
+            "https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/"
+            "SmolLM2-135M-Instruct-Q4_K_M.gguf"
         ),
     },
     "smollm2-360m": {
@@ -118,7 +118,7 @@ class AiConfig:
     """User-configurable settings for the local AI engine."""
 
     #: Preset key in ``MODEL_PRESETS`` or ``"custom"``.
-    preset: str = "qwen-0.5b"
+    preset: str = "qwen-0.5b-q2"
     #: Optional OpenAI-compatible base URL (e.g. ``http://127.0.0.1:8080/v1``).
     custom_endpoint: str = ""
     #: Optional custom ``.gguf`` / ``.llamafile`` file path or remote model tag.
@@ -195,7 +195,7 @@ def load_config(ai_dir: Path | None = None) -> AiConfig:
         raw = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(raw, dict):
             return AiConfig(
-                preset=str(raw.get("preset") or "qwen-0.5b"),
+                preset=str(raw.get("preset") or "qwen-0.5b-q2"),
                 custom_endpoint=str(raw.get("custom_endpoint") or "").strip(),
                 custom_model=str(raw.get("custom_model") or "").strip(),
                 max_tokens=int(raw.get("max_tokens") or 900),
@@ -256,7 +256,7 @@ def is_model_installed(config: AiConfig | None = None, ai_dir: Path | None = Non
 _DOWNLOAD_LOCK = threading.Lock()
 _DOWNLOAD_STATE: dict[str, Any] = {
     "status": "idle",  # "idle" | "downloading" | "completed" | "cancelled" | "error"
-    "preset": "qwen-0.5b",
+    "preset": "qwen-0.5b-q2",
     "stage": "",
     "downloaded_bytes": 0,
     "total_bytes": 0,
@@ -306,7 +306,7 @@ def _download_file(url: str, dest: Path, stage_name: str, base_done: int, grand_
     return done
 
 
-def start_download(preset: str = "qwen-0.5b", ai_dir: Path | None = None) -> dict[str, Any]:
+def start_download(preset: str = "qwen-0.5b-q2", ai_dir: Path | None = None) -> dict[str, Any]:
     """Start downloading llamafile and the requested GGUF preset in a background thread."""
     if preset not in MODEL_PRESETS:
         raise AiError(f"Unknown model preset: {preset}")

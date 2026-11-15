@@ -4320,7 +4320,7 @@ function syncSettingsAiUI(status) {
   const dlBtn = $("#settings-ai-download");
 
   const cfg = status.config || {};
-  const preset = cfg.preset || "qwen-0.5b";
+  const preset = cfg.preset || "qwen-0.5b-q2";
   if (presetEl && document.activeElement !== presetEl) {
     presetEl.value = preset;
   }
@@ -4347,7 +4347,7 @@ function syncSettingsAiUI(status) {
   if (dlBtn) {
     const activePreset = (presetEl ? presetEl.value : preset);
     const pInfo = (status.presets || []).find((p) => p.id === activePreset);
-    const sizeMb = pInfo && pInfo.size_mb ? pInfo.size_mb : 398;
+    const sizeMb = pInfo && pInfo.size_mb ? pInfo.size_mb : 215;
     dlBtn.hidden = activePreset === "custom" || Boolean(pInfo && pInfo.installed && status.llamafile_installed);
     dlBtn.textContent = i18n.t("ai.downloadBtn", { size: sizeMb });
   }
@@ -4359,7 +4359,7 @@ async function saveAiConfigFromUI(customOverrides = null) {
   const urlEl = $("#settings-ai-custom-url");
   const modelEl = $("#settings-ai-custom-model");
   const payload = customOverrides || {
-    preset: presetEl ? presetEl.value : "qwen-0.5b",
+    preset: presetEl ? presetEl.value : "qwen-0.5b-q2",
     custom_model_path: pathEl ? pathEl.value.trim() : "",
     custom_endpoint_url: urlEl ? urlEl.value.trim() : "",
     custom_model_name: modelEl ? modelEl.value.trim() : "",
@@ -4539,7 +4539,7 @@ async function renderAiView() {
   if (!state.aiStatus) {
     await loadAiStatus();
   }
-  const status = state.aiStatus || { available: false, presets: [], config: { preset: "qwen-0.5b" } };
+  const status = state.aiStatus || { available: false, presets: [], config: { preset: "qwen-0.5b-q2" } };
   const analysis = state.comparison && state.comparison.ai_analysis;
   const dl = status.download || {};
   container.replaceChildren();
@@ -4574,10 +4574,10 @@ async function renderAiView() {
   container.appendChild(header);
 
   if (!status.available) {
-    const activePreset = (status.config && status.config.preset) || "qwen-0.5b";
+    const activePreset = (status.config && status.config.preset) || "qwen-0.5b-q2";
     const presetObj =
       (status.presets || []).find((p) => p.id === activePreset) ||
-      { id: "qwen-0.5b", size_mb: 398 };
+      { id: "qwen-0.5b-q2", size_mb: 215 };
 
     const presetSelect = el(
       "select",
@@ -4592,14 +4592,14 @@ async function renderAiView() {
       },
       [
         el("option", {
-          value: "smollm2-135m",
-          selected: activePreset === "smollm2-135m",
-          text: i18n.t("ai.presetTiny"),
-        }),
-        el("option", {
           value: "qwen-0.5b-q2",
           selected: activePreset === "qwen-0.5b-q2",
           text: i18n.t("ai.presetNano"),
+        }),
+        el("option", {
+          value: "smollm2-135m",
+          selected: activePreset === "smollm2-135m",
+          text: i18n.t("ai.presetTiny"),
         }),
         el("option", {
           value: "smollm2-360m",
@@ -4769,6 +4769,6 @@ $("#settings-ai-preset")?.addEventListener("change", (e) => {
 });
 $("#settings-ai-save")?.addEventListener("click", () => saveAiConfigFromUI());
 $("#settings-ai-download")?.addEventListener("click", () => {
-  const preset = $("#settings-ai-preset") ? $("#settings-ai-preset").value : "qwen-0.5b";
+  const preset = $("#settings-ai-preset") ? $("#settings-ai-preset").value : "qwen-0.5b-q2";
   startAiDownload(preset);
 });

@@ -106,7 +106,7 @@ def create_app() -> FastAPI:
 
         cfg = load_config()
         if "preset" in body:
-            cfg.preset = str(body["preset"] or "qwen-0.5b")
+            cfg.preset = str(body["preset"] or "qwen-0.5b-q2")
         if "custom_endpoint" in body or "custom_endpoint_url" in body:
             cfg.custom_endpoint = str(
                 body.get("custom_endpoint") or body.get("custom_endpoint_url") or ""
@@ -130,7 +130,7 @@ def create_app() -> FastAPI:
         if action == "cancel":
             cancel_download()
             return get_status()
-        preset = str(body.get("preset") or "qwen-0.5b")
+        preset = str(body.get("preset") or "qwen-0.5b-q2")
         try:
             start_download(preset=preset)
             return get_status()
