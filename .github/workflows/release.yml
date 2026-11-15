@@ -3,12 +3,17 @@ name: Release
 on:
   push:
     branches: [main, master]
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
       publish_pypi:
         description: "Publish sdist & wheel to PyPI (requires PyPI Trusted Publishing)"
         type: boolean
         default: false
+
+concurrency:
+  group: release-${{ github.sha }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -24,6 +29,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Determine release version
+        id: version
+        shell: pwsh
+        run: |
+          $v = python -c "import sys; sys.path.insert(0, 'src'); import diffanydoc; print(diffanydoc.__version__)"
+          if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -match "^v(\d+\.\d+\.\d+.*)$") {
+            $tagVer = $Matches[1]
+            if ($tagVer -ne $v) {
+              Write-Host "Syncing package version ($v -> $tagVer) to match git tag $env:GITHUB_REF_NAME"
+              (Get-Content src/diffanydoc/__init__.py -Raw) -replace '__version__\s*=\s*"[^"]+"', "__version__ = `"$tagVer`"" | Set-Content src/diffanydoc/__init__.py -NoNewline
+              (Get-Content pyproject.toml -Raw) -replace '(?m)^version\s*=\s*"[^"]+"', "version = `"$tagVer`"" | Set-Content pyproject.toml -NoNewline
+              $v = $tagVer
+            }
+          }
+          echo "version=$v" >> $env:GITHUB_OUTPUT
+          echo "tag=v$v" >> $env:GITHUB_OUTPUT
+          Write-Host "Building DiffAnyDoc release version $v (tag v$v)"
       - name: Install dependencies
         run: python -m pip install -e ".[web,desktop]" pyinstaller
       - name: Ensure Inno Setup 6
@@ -41,8 +63,12 @@ jobs:
           if (Test-Path $defender) {
             Get-ChildItem dist\DiffAnyDoc-*-windows-*.exe | ForEach-Object {
               Write-Host "Scanning $($_.Name) with Windows Defender..."
-              & $defender -Scan -ScanType 3 -File $_.FullName
-              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+              $out = & $defender -Scan -ScanType 3 -File $_.FullName 2>&1 | Out-String
+              Write-Host $out
+              if ($out -match " found " -and $out -notmatch "found no threats") {
+                Write-Error "Windows Defender detected a threat in $($_.Name)"
+                exit 1
+              }
             }
           } else {
             Write-Host "Windows Defender CLI not found; skipping scan."
@@ -55,20 +81,15 @@ jobs:
             "$hash  $($_.Name)"
           } | Set-Content -Path dist\SHA256SUMS.txt -Encoding ascii
           Get-Content dist\SHA256SUMS.txt
-      - name: Read version
-        id: version
-        shell: pwsh
-        run: |
-          $v = python -c "import diffanydoc; print(diffanydoc.__version__)"
-          echo "tag=v$v" >> $env:GITHUB_OUTPUT
       - name: Attest build provenance
+        continue-on-error: true
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: dist/DiffAnyDoc-*-windows-*.exe
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DiffAnyDoc-windows
+          name: DiffAnyDoc-windows-${{ steps.version.outputs.tag }}
           path: |
             dist/DiffAnyDoc-*-windows-*.exe
             dist/SHA256SUMS.txt

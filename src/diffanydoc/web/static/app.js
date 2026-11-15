@@ -1563,6 +1563,7 @@ function renderResult() {
   }
 
   syncActiveTab();
+  state.dismissedShifts = new Set();
   state._pagesRenderedForId = null;
   state._pagesRenderedMode = null;
   state._textDirty = true;
@@ -2267,7 +2268,6 @@ function buildXrayCard(pair, pairIdx, visualPage) {
     );
   }
   if (!isTextOnlyMode) {
-    renderPageShiftArrows(canvas, activeXrayRects, "xray", size);
     for (const box of (visualPage && visualPage.left_regions) || []) {
       if (_boxCoveredByRects(box, activeXrayRects)) continue;
       addRect(canvas, box, "visual", i18n.t("visual.region"), size.width, size.height);
@@ -2317,11 +2317,58 @@ function _boxCoveredByRects(box, rects) {
   return false;
 }
 
+const _shiftHoverTimers = new Map();
+
 function setShiftHover(shiftId, active) {
   if (!shiftId) return;
-  for (const node of $$(`[data-shift-id="${shiftId}"]`)) {
-    node.classList.toggle("is-shift-active", active);
+  const key = String(shiftId);
+  if (_shiftHoverTimers.has(key)) {
+    clearTimeout(_shiftHoverTimers.get(key));
+    _shiftHoverTimers.delete(key);
   }
+  const apply = () => {
+    for (const node of $$(`[data-shift-id="${key}"]`)) {
+      node.classList.toggle("is-shift-active", active);
+    }
+  };
+  if (active) {
+    apply();
+  } else {
+    _shiftHoverTimers.set(
+      key,
+      setTimeout(() => {
+        _shiftHoverTimers.delete(key);
+        apply();
+      }, 180)
+    );
+  }
+}
+
+function dismissShift(shiftId) {
+  const numId = Number(shiftId);
+  if (!numId) return;
+  if (!state.dismissedShifts) state.dismissedShifts = new Set();
+  state.dismissedShifts.add(numId);
+  for (const node of $$(`#page-view [data-shift-id="${numId}"]`)) {
+    node.remove();
+  }
+  // Renumber remaining shift badges sequentially (1, 2, 3...) without gaps
+  const remainingIds = [];
+  const seenIds = new Set();
+  for (const rect of $$('#page-view .page-card[data-side="left"] .rect.shift[data-shift-id]')) {
+    const sid = rect.getAttribute("data-shift-id");
+    if (sid && !seenIds.has(sid)) {
+      seenIds.add(sid);
+      remainingIds.push(sid);
+    }
+  }
+  remainingIds.forEach((sid, idx) => {
+    const displayNum = String(idx + 1);
+    for (const badge of $$(`#page-view .rect.shift[data-shift-id="${sid}"] .rect-shift-badge`)) {
+      badge.textContent = displayNum;
+    }
+  });
+  collectChanges();
 }
 
 function addRect(
@@ -2339,6 +2386,9 @@ function addRect(
   const width = Math.max(x1 - x0, 0.5);
   const height = Math.max(bottom - top, 0.5);
   const shiftId = meta && meta.shift_id ? Number(meta.shift_id) : 0;
+  if (kind === "shift" && shiftId > 0 && state.dismissedShifts && state.dismissedShifts.has(shiftId)) {
+    return;
+  }
   const attrs = {
     class: `rect ${kind}`,
     title,
@@ -2367,106 +2417,40 @@ function addRect(
       el("span", {
         class: "rect-shift-badge",
         text: String(shiftId),
+      }),
+      el("button", {
+        class: "rect-shift-dismiss",
+        type: "button",
+        title: i18n.t("shift.dismissHint"),
+        "aria-label": i18n.t("shift.dismissHint"),
+        text: "\u00d7",
+        onclick: (e) => {
+          e.stopPropagation();
+          dismissShift(shiftId);
+        },
       })
     );
   }
   canvas.append(el("div", attrs, children));
 }
 
-function renderPageShiftArrows(canvas, activeRects, side, size) {
-  if (side !== "right" && side !== "xray") return;
-  const shiftRects = (activeRects || []).filter(
-    (r) =>
-      r.kind === "shift" &&
-      Array.isArray(r.left_bbox) &&
-      Array.isArray(r.right_bbox) &&
-      r.left_page === r.right_page
-  );
-  if (!shiftRects.length) return;
-
-  const ns = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(ns, "svg");
-  svg.setAttribute("class", "page-shift-svg");
-  svg.setAttribute("viewBox", `0 0 ${size.width} ${size.height}`);
-  svg.setAttribute("preserveAspectRatio", "none");
-
-  const defs = document.createElementNS(ns, "defs");
-  const marker = document.createElementNS(ns, "marker");
-  marker.setAttribute("id", `shift-arrow-${side}`);
-  marker.setAttribute("viewBox", "0 0 10 10");
-  marker.setAttribute("refX", "8");
-  marker.setAttribute("refY", "5");
-  marker.setAttribute("markerWidth", "6");
-  marker.setAttribute("markerHeight", "6");
-  marker.setAttribute("orient", "auto-start-reverse");
-  const arrowPath = document.createElementNS(ns, "path");
-  arrowPath.setAttribute("d", "M 0 1.5 L 9 5 L 0 8.5 z");
-  arrowPath.setAttribute("fill", "currentColor");
-  marker.appendChild(arrowPath);
-  defs.appendChild(marker);
-  svg.appendChild(defs);
-
-  const seen = new Set();
-  for (const r of shiftRects) {
-    const key = r.shift_id || r.row;
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    const [lx0, ltop, lx1, lbottom] = r.left_bbox;
-    const [rx0, rtop, rx1, rbottom] = r.right_bbox;
-    const lcx = (lx0 + lx1) / 2;
-    const lcy = (ltop + lbottom) / 2;
-    const rcx = (rx0 + rx1) / 2;
-    const rcy = (rtop + rbottom) / 2;
-    if (Math.hypot(rcx - lcx, rcy - lcy) < 4) continue;
-
-    const g = document.createElementNS(ns, "g");
-    g.setAttribute("class", "shift-vector-group");
-    if (r.shift_id) g.setAttribute("data-shift-id", String(r.shift_id));
-
-    const ghost = document.createElementNS(ns, "rect");
-    ghost.setAttribute("class", "shift-ghost-box");
-    ghost.setAttribute("x", String(lx0));
-    ghost.setAttribute("y", String(ltop));
-    ghost.setAttribute("width", String(Math.max(lx1 - lx0, 2)));
-    ghost.setAttribute("height", String(Math.max(lbottom - ltop, 2)));
-    ghost.setAttribute("rx", "2");
-    g.appendChild(ghost);
-
-    const dot = document.createElementNS(ns, "circle");
-    dot.setAttribute("class", "shift-origin-dot");
-    dot.setAttribute("cx", String(lcx));
-    dot.setAttribute("cy", String(lcy));
-    dot.setAttribute("r", "2.6");
-    g.appendChild(dot);
-
-    const line = document.createElementNS(ns, "path");
-    const midX = (lcx + rcx) / 2;
-    const midY = (lcy + rcy) / 2 - Math.min(18, Math.abs(rcx - lcx) * 0.12);
-    line.setAttribute("class", "shift-vector-line");
-    line.setAttribute("d", `M ${lcx} ${lcy} Q ${midX} ${midY} ${rcx} ${rcy}`);
-    line.setAttribute("marker-end", `url(#shift-arrow-${side})`);
-    g.appendChild(line);
-
-    svg.appendChild(g);
-  }
-  canvas.appendChild(svg);
-}
-
 function attachCrossPageShiftArrows(rowEl) {
-  const leftShiftRects = rowEl.querySelectorAll('.page-card[data-side="left"] .rect.shift[data-shift-id]');
-  const rightShiftRects = rowEl.querySelectorAll('.page-card[data-side="right"] .rect.shift[data-shift-id]');
-  if (!leftShiftRects.length || !rightShiftRects.length) return;
+  const initLeft = rowEl.querySelectorAll('.page-card[data-side="left"] .rect.shift[data-shift-id]');
+  const initRight = rowEl.querySelectorAll('.page-card[data-side="right"] .rect.shift[data-shift-id]');
+  if (!initLeft.length || !initRight.length) return;
 
   const ns = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(ns, "svg");
   svg.setAttribute("class", "cross-page-svg");
 
   const update = () => {
+    const leftShiftRects = rowEl.querySelectorAll('.page-card[data-side="left"] .rect.shift[data-shift-id]');
+    const rightShiftRects = rowEl.querySelectorAll('.page-card[data-side="right"] .rect.shift[data-shift-id]');
     const rowBounds = rowEl.getBoundingClientRect();
     if (!rowBounds.width || !rowBounds.height) return;
     svg.setAttribute("viewBox", `0 0 ${rowBounds.width} ${rowBounds.height}`);
     svg.replaceChildren();
+    if (!leftShiftRects.length || !rightShiftRects.length) return;
 
     const defs = document.createElementNS(ns, "defs");
     const marker = document.createElementNS(ns, "marker");
@@ -2476,7 +2460,7 @@ function attachCrossPageShiftArrows(rowEl) {
     marker.setAttribute("refY", "5");
     marker.setAttribute("markerWidth", "6");
     marker.setAttribute("markerHeight", "6");
-    marker.setAttribute("orient", "auto");
+    marker.setAttribute("orient", "auto-start-reverse");
     const p = document.createElementNS(ns, "path");
     p.setAttribute("d", "M 0 1.5 L 9 5 L 0 8.5 z");
     p.setAttribute("fill", "currentColor");
@@ -2494,6 +2478,7 @@ function attachCrossPageShiftArrows(rowEl) {
     for (const lEl of leftShiftRects) {
       const id = lEl.getAttribute("data-shift-id");
       if (!id || seen.has(id) || !rightMap.has(id)) continue;
+      if (state.dismissedShifts && state.dismissedShifts.has(Number(id))) continue;
       seen.add(id);
       const rEl = rightMap.get(id);
       const lb = lEl.getBoundingClientRect();
@@ -2505,6 +2490,21 @@ function attachCrossPageShiftArrows(rowEl) {
       const x2 = rb.left - rowBounds.left;
       const y2 = (rb.top + rb.bottom) / 2 - rowBounds.top;
       const spanX = Math.max(40, (x2 - x1) * 0.42);
+      const dAttr = `M ${x1} ${y1} C ${x1 + spanX} ${y1}, ${x2 - spanX} ${y2}, ${x2} ${y2}`;
+
+      const grp = document.createElementNS(ns, "g");
+      grp.setAttribute("class", "cross-shift-group");
+      grp.setAttribute("data-shift-id", id);
+      if (lEl.classList.contains("is-shift-active")) {
+        grp.classList.add("is-shift-active");
+      }
+      grp.addEventListener("mouseenter", () => setShiftHover(id, true));
+      grp.addEventListener("mouseleave", () => setShiftHover(id, false));
+
+      const hitPath = document.createElementNS(ns, "path");
+      hitPath.setAttribute("class", "cross-shift-hit");
+      hitPath.setAttribute("d", dAttr);
+      grp.appendChild(hitPath);
 
       const path = document.createElementNS(ns, "path");
       path.setAttribute("class", "cross-shift-path");
@@ -2512,12 +2512,12 @@ function attachCrossPageShiftArrows(rowEl) {
       if (lEl.classList.contains("is-shift-active")) {
         path.classList.add("is-shift-active");
       }
-      path.setAttribute(
-        "d",
-        `M ${x1} ${y1} C ${x1 + spanX} ${y1}, ${x2 - spanX} ${y2}, ${x2} ${y2}`
-      );
+      path.setAttribute("d", dAttr);
+      path.setAttribute("marker-start", "url(#cross-shift-arrowhead)");
       path.setAttribute("marker-end", "url(#cross-shift-arrowhead)");
-      svg.appendChild(path);
+      grp.appendChild(path);
+
+      svg.appendChild(grp);
     }
   };
 
@@ -2605,9 +2605,6 @@ function buildPageCard(side, index, visualPage, pairIdx = 0) {
       side,
       rect
     );
-  }
-  if (!isTextOnlyMode) {
-    renderPageShiftArrows(canvas, activeRects, side, size);
   }
 
   const visualBoxes =
@@ -3449,23 +3446,58 @@ function setupBoxColor() {
 }
 
 const BOXES_ENABLED_KEY = "diffanydoc:boxes-enabled";
+const OVERLAY_MODE_KEY = "diffanydoc:overlay-mode";
+const OVERLAY_MODES = ["off", "boxes", "lines"];
+
+function applyOverlayMode(mode) {
+  const activeMode = OVERLAY_MODES.includes(mode) ? mode : "lines";
+  const boxesOff = activeMode === "off";
+  const linesOff = activeMode === "off" || activeMode === "boxes";
+  document.body.classList.toggle("boxes-off", boxesOff);
+  document.body.classList.toggle("lines-off", linesOff);
+  document.body.dataset.overlayMode = activeMode;
+  const toggle = $("#opt-boxes");
+  if (toggle) toggle.checked = !boxesOff;
+  for (const btn of $$("#boxes-wrap .overlay-mode-btn[data-overlay-mode]")) {
+    const isActive = btn.dataset.overlayMode === activeMode;
+    btn.classList.toggle("active", isActive);
+    btn.setAttribute("aria-pressed", String(isActive));
+  }
+}
 
 function applyBoxesEnabled(enabled) {
-  document.body.classList.toggle("boxes-off", !enabled);
-  const toggle = $("#opt-boxes");
-  if (toggle) toggle.checked = enabled;
+  applyOverlayMode(enabled ? "lines" : "off");
 }
 
 function setupBoxesToggle() {
-  const saved = safeStorageGet(BOXES_ENABLED_KEY);
-  const enabled = saved !== "false";
-  applyBoxesEnabled(enabled);
+  const savedMode = safeStorageGet(OVERLAY_MODE_KEY);
+  const legacySaved = safeStorageGet(BOXES_ENABLED_KEY);
+  const initialMode = savedMode
+    ? savedMode
+    : legacySaved === "false"
+      ? "off"
+      : "lines";
+  applyOverlayMode(initialMode);
+
+  for (const btn of $$("#boxes-wrap .overlay-mode-btn[data-overlay-mode]")) {
+    btn.addEventListener("click", () => {
+      const nextMode = btn.dataset.overlayMode || "lines";
+      applyOverlayMode(nextMode);
+      safeStorageSet(OVERLAY_MODE_KEY, nextMode);
+      safeStorageSet(BOXES_ENABLED_KEY, String(nextMode !== "off"));
+      collectChanges();
+    });
+  }
+
   const toggle = $("#opt-boxes");
   if (toggle) {
     toggle.addEventListener("change", (event) => {
       const checked = Boolean(event.target.checked);
-      applyBoxesEnabled(checked);
+      const nextMode = checked ? "lines" : "off";
+      applyOverlayMode(nextMode);
+      safeStorageSet(OVERLAY_MODE_KEY, nextMode);
       safeStorageSet(BOXES_ENABLED_KEY, String(checked));
+      collectChanges();
     });
   }
 }
@@ -4725,34 +4757,87 @@ async function renderAiView() {
   }
 
   const verdictKey = `ai.verdict.${analysis.verdict || "minor_changes"}`;
+  const compStats = (state.comparison && state.comparison.stats) || {};
+  const items = analysis.items || [];
+  const contentCount = items.filter((it) => it.category !== "layout").length;
+  const layoutCount = items.filter((it) => it.category === "layout").length;
+  const simPct = `${((compStats.similarity ?? 1) * 100).toFixed(1)}%`;
+
   const summaryCard = el("div", { class: `ai-summary-card verdict-${analysis.verdict || "minor_changes"}` }, [
     el("div", { class: "ai-summary-top" }, [
       el("span", { class: `ai-verdict-badge verdict-${analysis.verdict || "minor_changes"}`, text: i18n.t(verdictKey) }),
-      el("span", {
-        class: "ai-meta",
-        text: i18n.t("ai.elapsed", {
-          ms: Math.round(analysis.elapsed_ms || 0),
-          model: analysis.model || "Local AI",
-        }),
-      }),
     ]),
     el("p", { class: "ai-summary-text", text: analysis.summary || "" }),
   ]);
   container.appendChild(summaryCard);
 
+  const statsGrid = el("div", { class: "ai-stats-grid" }, [
+    el("div", { class: "ai-stat-box" }, [
+      el("span", { class: "ai-stat-label", text: i18n.t("ai.statSimilarity") }),
+      el("strong", { class: "ai-stat-value", text: simPct }),
+    ]),
+    el("div", { class: "ai-stat-box" }, [
+      el("span", { class: "ai-stat-label", text: i18n.t("ai.statContentChanges") }),
+      el("strong", { class: "ai-stat-value", text: String(contentCount) }),
+    ]),
+    el("div", { class: "ai-stat-box" }, [
+      el("span", { class: "ai-stat-label", text: i18n.t("ai.statLayoutShifts") }),
+      el("strong", { class: "ai-stat-value", text: String(layoutCount) }),
+    ]),
+    el("div", { class: "ai-stat-box" }, [
+      el("span", { class: "ai-stat-label", text: i18n.t("ai.statAddedRemoved") }),
+      el("strong", {
+        class: "ai-stat-value",
+        text: `+${compStats.added || 0} / −${compStats.removed || 0}`,
+      }),
+    ]),
+  ]);
+  container.appendChild(statsGrid);
+
   const list = el("div", { class: "ai-findings-list" });
   const canPages = state.comparison && (state.comparison.renderable.left || state.comparison.renderable.right);
-  for (const item of analysis.items || []) {
+  for (const item of items) {
     const cat = item.category || "content";
     const catLabel = i18n.t(`ai.cat.${cat}`);
+    const leftVal = String(item.left_text || item.left_snippet || "").trim();
+    const rightVal = String(item.right_text || item.right_snippet || "").trim();
+    const isSameText = leftVal && rightVal && leftVal.toLowerCase() === rightVal.toLowerCase();
+
+    let snippetBlock = null;
+    if (leftVal || rightVal) {
+      if (isSameText && cat === "layout") {
+        snippetBlock = el("div", { class: "ai-finding-snippets single" }, [
+          el("div", { class: "ai-snip ai-snip-same" }, [
+            el("span", { class: "ai-snip-tag", text: `${i18n.t("ai.sameText")} ` }),
+            el("span", { text: rightVal }),
+          ]),
+        ]);
+      } else {
+        snippetBlock = el("div", { class: "ai-finding-snippets" }, [
+          leftVal
+            ? el("div", { class: "ai-snip ai-snip-left" }, [
+                el("span", { class: "ai-snip-tag", text: `${i18n.t("ai.docA")} ` }),
+                el("span", { text: leftVal }),
+              ])
+            : null,
+          rightVal
+            ? el("div", { class: "ai-snip ai-snip-right" }, [
+                el("span", { class: "ai-snip-tag", text: `${i18n.t("ai.docB")} ` }),
+                el("span", { text: rightVal }),
+              ])
+            : null,
+        ]);
+      }
+    }
+
     const card = el("div", { class: `ai-finding-card cat-${cat}` }, [
       el("div", { class: "ai-finding-head" }, [
         el("span", { class: "ai-finding-num", text: `#${item.id}` }),
         el("span", { class: `ai-cat-badge cat-${cat}`, text: catLabel }),
-        el("strong", { class: "ai-finding-title", text: item.title || "" }),
-        item.shift_label
-          ? el("span", { class: "page-tag shift-tag", text: `\u2194 ${item.shift_label}` })
+        item.page
+          ? el("span", { class: "page-tag", text: i18n.t("page.label", { n: item.page }) })
           : null,
+        el("strong", { class: "ai-finding-title", text: item.title || "" }),
         el("div", { class: "ai-finding-jumps" }, [
           el("button", {
             class: "flat",
@@ -4771,16 +4856,7 @@ async function renderAiView() {
         ]),
       ]),
       el("p", { class: "ai-finding-exp", text: item.explanation || "" }),
-      item.left_text || item.right_text || item.left_snippet || item.right_snippet
-        ? el("div", { class: "ai-finding-snippets" }, [
-            item.left_text || item.left_snippet
-              ? el("div", { class: "ai-snip ai-snip-left", text: `A: ${item.left_text || item.left_snippet}` })
-              : null,
-            item.right_text || item.right_snippet
-              ? el("div", { class: "ai-snip ai-snip-right", text: `B: ${item.right_text || item.right_snippet}` })
-              : null,
-          ])
-        : null,
+      snippetBlock,
     ]);
     list.appendChild(card);
   }

@@ -2585,6 +2585,48 @@ mark.search-match.active {
   pointer-events: none;
 }
 
+.rect-shift-dismiss {
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--error-color, #e01b24);
+  color: #ffffff;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.32);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, transform 120ms ease;
+  z-index: 7;
+}
+
+.rect.shift:hover .rect-shift-dismiss,
+.rect.shift.is-shift-active .rect-shift-dismiss {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.rect-shift-dismiss:hover {
+  transform: scale(1.12);
+}
+
+.cross-shift-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
 .page-shift-svg {
   position: absolute;
   inset: 0;
@@ -2650,8 +2692,88 @@ mark.search-match.active {
 }
 
 body.boxes-off .page-shift-svg,
-body.boxes-off .cross-page-svg {
+body.boxes-off .cross-page-svg,
+body.lines-off .cross-page-svg {
   display: none;
+}
+
+.overlay-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  gap: 1px;
+  border-radius: 7px;
+  background: var(--view-bg-color);
+  border: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.overlay-mode-switch[hidden] {
+  display: none;
+}
+
+.overlay-mode-btn {
+  height: 24px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dim-label-color);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.overlay-mode-btn:hover {
+  color: var(--window-fg-color);
+  background: var(--headerbar-shade-color);
+}
+
+.overlay-mode-btn.active {
+  background: var(--accent-bg-color);
+  color: var(--accent-fg-color);
+  font-weight: 600;
+}
+
+.ai-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+
+.ai-stat-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 9px;
+  background: var(--card-bg-color);
+  border: 1px solid var(--border-color);
+}
+
+.ai-stat-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--dim-label-color);
+}
+
+.ai-stat-value {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--window-fg-color);
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-finding-snippets.single {
+  grid-template-columns: 1fr;
+}
+
+.ai-snip-tag {
+  font-family: var(--font-ui);
+  font-weight: 600;
+  color: var(--dim-label-color);
 }
 
 /* ---------- Local AI Semantic View (libadwaita flat cards) ---------- */

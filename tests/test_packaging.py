@@ -92,6 +92,16 @@ def test_missing_build_tool_fails_with_hint(monkeypatch: pytest.MonkeyPatch) -> 
 def test_version_matches_pyproject() -> None:
     text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert re.search(r'^version = "([^"]+)"', text, re.M).group(1) == __version__
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert f"## [{__version__}]" in changelog
+
+
+def test_copy_legal_files_into_bundle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    build = _build()
+    monkeypatch.setattr(build, "APP", tmp_path)
+    build.copy_legal_files()
+    for name in build.LEGAL_FILES:
+        assert (tmp_path / name).is_file()
 
 
 def test_installer_script_takes_values_from_build() -> None:

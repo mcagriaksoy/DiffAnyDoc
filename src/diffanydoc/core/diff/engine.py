@@ -707,10 +707,18 @@ def _refine_replacement(
             line_similarity(a, right[j + 1]) if j + 1 < len(right) else -1.0
         )
         if ahead_left < threshold and ahead_right < threshold and sim >= 0.18:
-            rows.append(_replace_row(a, b, tolerance=tolerance))
-            i += 1
-            j += 1
-            continue
+            small_block = len(left) <= 3 and len(right) <= 3
+            if not small_block:
+                a_words = {w for w in a.norm.casefold().split() if len(w) >= 4}
+                b_words = {w for w in b.norm.casefold().split() if len(w) >= 4}
+                has_shared_word = bool(a_words & b_words)
+            else:
+                has_shared_word = True
+            if small_block or has_shared_word or sim >= 0.38:
+                rows.append(_replace_row(a, b, tolerance=tolerance))
+                i += 1
+                j += 1
+                continue
         if ahead_right >= ahead_left:
             rows.append(_single_row(a, None, "delete"))
             i += 1
@@ -863,14 +871,29 @@ def _mark_moved_rows(rows: list[Row]) -> None:
             if not any(len(w) >= 4 for w in shared):
                 continue
             jaccard = len(shared) / len(d_toks | i_toks)
-            if jaccard >= 0.50:
-                score = jaccard
+            min_tok_count = min(len(d_toks), len(i_toks))
+            containment = len(shared) / min_tok_count if min_tok_count else 0.0
+            strong_containment = (
+                containment * 0.85
+                if (
+                    len(shared) >= 2
+                    or (
+                        len(shared) == 1
+                        and min_tok_count == 1
+                        and len(next(iter(shared))) >= 6
+                    )
+                )
+                else 0.0
+            )
+            base_score = max(jaccard, strong_containment)
+            if base_score >= 0.50:
+                score = base_score
             else:
                 matcher = SequenceMatcher(None, d_norm, i_norm)
                 if matcher.quick_ratio() < 0.50:
                     continue
                 seq_ratio = matcher.ratio()
-                score = max(jaccard, seq_ratio)
+                score = max(base_score, seq_ratio)
             if score >= 0.50:
                 candidates.append((score, di, ii))
 
@@ -962,7 +985,7 @@ def _collapse_moved_to_equal(
     return out
 
 
-_SHIFT_THRESHOLD_PT = 4.5
+_SHIFT_THRESHOLD_PT = 10.0
 
 
 def _format_shift_label(dx: float, dy: float, *, reordered: bool = False) -> str:
@@ -997,33 +1020,84 @@ def _detect_position_shifts(
         return
     is_text_only = options.compare_mode == "text_only"
     prev_bottom: dict[tuple[int, int], tuple[float, float]] = {}
+    flow_broken: set[tuple[int, int]] = set()
     shift_seq = 0
     block_seq = 0
+
+    import re
 
     for row in rows:
         a = row.left
         b = row.right
         if a is None or b is None or a.bbox is None or b.bbox is None:
+            # An insertion or deletion changes the vertical y-offset of subsequent
+            # unchanged lines; mark vertical flow as broken so the next unchanged
+            # line is not falsely flagged for vertical shift.
+            if a is not None:
+                for pk in list(prev_bottom.keys()):
+                    if pk[0] == a.page:
+                        flow_broken.add(pk)
+            if b is not None:
+                for pk in list(prev_bottom.keys()):
+                    if pk[1] == b.page:
+                        flow_broken.add(pk)
             continue
-        block_seq += 1
-        was_reordered = bool(row.moved)
+
         page_key = (a.page, b.page)
+        was_reordered = bool(row.moved)
+        a_cf = a.norm.strip().casefold()
+        b_cf = b.norm.strip().casefold()
+        is_same_text = a_cf == b_cf
+
+        if row.kind != "equal" and not was_reordered and not is_same_text:
+            a_w = {w for w in re.findall(r"\w+", a_cf) if len(w) >= 3}
+            b_w = {w for w in re.findall(r"\w+", b_cf) if len(w) >= 3}
+            shared_w = a_w & b_w
+            has_sig = any(len(w) >= 4 for w in shared_w)
+            min_w = min(len(a_w), len(b_w))
+            contain = (len(shared_w) / min_w) if min_w else 0.0
+            dx_check = abs(b.bbox[0] - a.bbox[0])
+            dy_check = abs(b.bbox[1] - a.bbox[1])
+            if not (
+                has_sig
+                and contain >= 0.60
+                and (dx_check >= 18.0 or dy_check >= 45.0 or a.page != b.page)
+            ):
+                prev_bottom[page_key] = (a.bbox[3], b.bbox[3])
+                flow_broken.discard(page_key)
+                continue
+
+        block_seq += 1
         dx = b.bbox[0] - a.bbox[0]
         raw_dy = b.bbox[1] - a.bbox[1]
-        if page_key in prev_bottom:
+        if was_reordered or (row.kind != "equal" and not is_same_text and abs(raw_dy) >= 45.0):
+            eff_dy = raw_dy
+            flow_broken.add(page_key)
+        elif page_key in prev_bottom and page_key not in flow_broken:
             prev_a_bot, prev_b_bot = prev_bottom[page_key]
             eff_dy = (b.bbox[1] - prev_b_bot) - (a.bbox[1] - prev_a_bot)
-        else:
+        elif page_key not in prev_bottom and not flow_broken:
             eff_dy = raw_dy
-        prev_bottom[page_key] = (a.bbox[3], b.bbox[3])
+        else:
+            eff_dy = 0.0
 
-        if abs(dx) < _SHIFT_THRESHOLD_PT and a.spans and b.spans and len(a.spans) == len(b.spans):
+        if not was_reordered:
+            prev_bottom[page_key] = (a.bbox[3], b.bbox[3])
+            flow_broken.discard(page_key)
+
+        if (
+            is_same_text
+            and abs(dx) < _SHIFT_THRESHOLD_PT
+            and a.spans
+            and b.spans
+            and len(a.spans) == len(b.spans)
+        ):
             best_span_dx = 0.0
             for sa, sb in zip(a.spans, b.spans):
                 sdx = sb.bbox[0] - sa.bbox[0]
                 if abs(sdx) > abs(best_span_dx):
                     best_span_dx = sdx
-            if abs(best_span_dx) >= _SHIFT_THRESHOLD_PT:
+            if abs(best_span_dx) >= 18.0:
                 dx = best_span_dx
 
         is_shifted = (

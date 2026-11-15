@@ -118,6 +118,26 @@ def write_version_info() -> Path:
     return path
 
 
+LEGAL_FILES = (
+    "LICENSE",
+    "EULA.md",
+    "PRIVACY.md",
+    "NOTICE",
+    "THIRD_PARTY_NOTICES.md",
+    "THIRD_PARTY_LICENSES.md",
+)
+
+
+def copy_legal_files() -> None:
+    """Copy commercial license and attribution files into the bundled app directory."""
+    if not APP.is_dir():
+        return
+    for name in LEGAL_FILES:
+        src = ROOT / name
+        if src.is_file():
+            shutil.copy2(src, APP / name)
+
+
 def run_pyinstaller() -> None:
     write_version_info()
     subprocess.run(
@@ -136,6 +156,7 @@ def run_pyinstaller() -> None:
         check=True,
         cwd=ROOT,
     )
+    copy_legal_files()
 
 
 def smoke_test() -> None:
