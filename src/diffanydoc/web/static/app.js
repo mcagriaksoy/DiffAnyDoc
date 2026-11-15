@@ -795,6 +795,11 @@ async function comparisonRequest() {
   const compareFormatting = Boolean(formatCheckbox && formatCheckbox.checked);
   const headersCheckbox = $("#opt-headers");
   const ignoreHeadersFooters = Boolean(headersCheckbox && headersCheckbox.checked);
+  const modeSelect = $("#opt-compare-mode");
+  const textOnlyToggle = $("#opt-text-only-mode");
+  const compareMode = (textOnlyToggle && textOnlyToggle.checked)
+    ? "text_only"
+    : ((modeSelect && modeSelect.value) || "strict");
   const ocrCheckbox = $("#opt-ocr");
   const ocr = ocrCheckbox ? Boolean(ocrCheckbox.checked) : true;
   const ocrLangSelect = $("#opt-ocr-lang");
@@ -826,6 +831,7 @@ async function comparisonRequest() {
         ocr_language: ocrLanguage,
         numeric_tolerance: numericTolerance,
         ignore_headers_footers: ignoreHeadersFooters,
+        compare_mode: compareMode,
       }),
     });
   }
@@ -855,6 +861,7 @@ async function comparisonRequest() {
     form.append("numeric_tolerance", String(numericTolerance));
   }
   form.append("ignore_headers_footers", String(ignoreHeadersFooters));
+  form.append("compare_mode", compareMode);
   return postFormWithProgress("/api/compare", form, (fraction) => {
     const pct = Math.round(fraction * 35);
     setCompareProgress(pct, "progress.uploading");
@@ -2823,6 +2830,7 @@ function setMode(mode) {
   const stickyHeader = $(".result-sticky-header");
   if (stickyHeader) stickyHeader.hidden = isFolderMode;
   $("#only-diff-wrap").hidden = mode !== "text";
+  if ($("#text-only-mode-wrap")) $("#text-only-mode-wrap").hidden = mode !== "text";
   $("#zoom-wrap").hidden = !isPageMode;
   if ($("#boxes-wrap")) $("#boxes-wrap").hidden = !isPageMode;
   $("#box-color-wrap").hidden = !isPageMode;
@@ -2873,6 +2881,7 @@ function renderFolderDiff(folderData) {
   $("#tab-pages").disabled = true;
   if ($("#tab-xray")) $("#tab-xray").disabled = true;
   $("#only-diff-wrap").hidden = true;
+  if ($("#text-only-mode-wrap")) $("#text-only-mode-wrap").hidden = true;
   $("#zoom-wrap").hidden = true;
   if ($("#boxes-wrap")) $("#boxes-wrap").hidden = true;
   $("#box-color-wrap").hidden = true;
@@ -3312,6 +3321,7 @@ function showUploadView() {
   $("#upload-view").hidden = false;
   $("#view-tabs").hidden = true;
   $("#only-diff-wrap").hidden = true;
+  if ($("#text-only-mode-wrap")) $("#text-only-mode-wrap").hidden = true;
   $("#visual-wrap").hidden = true;
   $("#zoom-wrap").hidden = true;
   if ($("#boxes-wrap")) $("#boxes-wrap").hidden = true;
@@ -3868,3 +3878,17 @@ async function init() {
 }
 
 init();
+
+$("#opt-text-only-mode")?.addEventListener("change", (e) => {
+  const mode = e.target.checked ? "text_only" : "strict";
+  const select = $("#opt-compare-mode");
+  if (select) select.value = mode;
+  if (state.comparison && canReload()) {
+    reloadComparison();
+  }
+});
+
+$("#opt-compare-mode")?.addEventListener("change", (e) => {
+  const toggle = $("#opt-text-only-mode");
+  if (toggle) toggle.checked = e.target.value === "text_only";
+});

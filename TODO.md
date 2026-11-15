@@ -15,3 +15,4 @@
 - [ ] **TASK-26 — İşaretlenen Alanları (`Mark on page`) PDF Raporuna Aktarma:** Kullanıcının çizdiği kutucuk ve notları resmi PDF raporuna dahil etmek.
 - [x] **TASK-27 — Toplu (Batch) Klasör Karşılaştırma Çıktısı:** `/api/compare-directories/csv` uç noktası ile klasör farklarını tek tıkla CSV olarak dışa aktarma desteği.
 - [ ] **TASK-28 — macOS Paketleme Desteği (`.app` / `.dmg`):** `tools/build.py` ve CI iş akışına macOS dağıtım hedefi eklemek.
+- [ ] **TASK-29 — Karşılaştırma Modları (UI/Düzen vs. Sadece Metin) ve Sayfa Kutusu UI İyileştirmesi:** Sayfa görünümündeki ortak/farklı kutuların daha okunaklı hale getirilmesi ve UI/Düzen ile Sadece Metin (sıra/düzen bağımsız) karşılaştırma modlarının UI tasarımının iyileştirilmesi.

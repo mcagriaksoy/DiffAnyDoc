@@ -384,6 +384,7 @@ a {
   background: transparent;
   color: var(--dim-label-color);
   font-size: 14px;
+  white-space: nowrap;
   cursor: pointer;
 }
 

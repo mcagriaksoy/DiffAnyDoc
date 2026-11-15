@@ -184,6 +184,7 @@ def create_app() -> FastAPI:
         ocr_language: str = Form("tur+eng"),
         numeric_tolerance: float | None = Form(None),
         ignore_headers_footers: bool = Form(False),
+        compare_mode: str = Form("strict"),
     ) -> JSONResponse:
         directory = Path(tempfile.mkdtemp(prefix="diffanydoc-pre-"))
         try:
@@ -242,6 +243,7 @@ def create_app() -> FastAPI:
         ocr_language: str = Form("tur+eng"),
         numeric_tolerance: float | None = Form(None),
         ignore_headers_footers: bool = Form(False),
+        compare_mode: str = Form("strict"),
     ) -> JSONResponse:
         directory = Path(tempfile.mkdtemp(prefix="diffanydoc-"))
         try:
@@ -273,6 +275,7 @@ def create_app() -> FastAPI:
                 compare_formatting,
                 numeric_tolerance,
                 ignore_headers_footers,
+                compare_mode,
             )
         except Exception:
             shutil.rmtree(directory, ignore_errors=True)
@@ -299,6 +302,7 @@ def create_app() -> FastAPI:
             bool(body.get("compare_formatting", False)),
             float(body["numeric_tolerance"]) if body.get("numeric_tolerance") is not None else None,
             bool(body.get("ignore_headers_footers", False)),
+            str(body.get("compare_mode", "strict")),
         )
         return JSONResponse(_summary(comparison))
 
@@ -485,6 +489,7 @@ def _run_compare(
     compare_formatting: bool = False,
     numeric_tolerance: float | None = None,
     ignore_headers_footers: bool = False,
+    compare_mode: str = "strict",
 ) -> Comparison:
     effective_ocr = bool(ocr and ocr_available())
     options = DiffOptions(
@@ -498,6 +503,7 @@ def _run_compare(
         ocr_language=ocr_language,
         numeric_tolerance=numeric_tolerance,
         ignore_headers_footers=ignore_headers_footers,
+        compare_mode=compare_mode,
     )
     try:
         result = compare(left_path, right_path, options)
@@ -513,6 +519,7 @@ def _run_compare(
             ocr_language=ocr_language,
             numeric_tolerance=numeric_tolerance,
             ignore_headers_footers=ignore_headers_footers,
+            compare_mode=compare_mode,
         )
         result = compare(left_path, right_path, options)
 

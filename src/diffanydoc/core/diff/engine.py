@@ -50,6 +50,8 @@ class DiffOptions:
     ocr_max_pages: int = 60
     #: None = per-user cache directory (``DIFFANYDOC_CACHE_DIR`` overrides).
     ocr_cache_dir: str | None = None
+    #: Comparison mode: "strict" (layout/order-aware) or "text_only" (content-only, order-independent).
+    compare_mode: str = "strict"
     #: Numeric difference tolerance: numbers differing by <= this amount are treated as equal.
     numeric_tolerance: float | None = None
     #: Skip repeating headers, footers, and page numbers in top/bottom 7% bands.
@@ -267,25 +269,28 @@ def compare(
             continue
         ocr = page_stats if ocr is None else ocr.merged(page_stats)
 
+    is_text_only = options.compare_mode == "text_only"
     left_lines = document_lines(
         left_doc,
-        case_sensitive=options.case_sensitive,
-        collapse_whitespace=options.collapse_whitespace,
-        compare_formatting=options.compare_formatting,
-        reflow=options.reflow,
+        case_sensitive=False if is_text_only else options.case_sensitive,
+        collapse_whitespace=True if is_text_only else options.collapse_whitespace,
+        compare_formatting=False if is_text_only else options.compare_formatting,
+        reflow=True if is_text_only else options.reflow,
         ignore_headers_footers=options.ignore_headers_footers,
     )
     right_lines = document_lines(
         right_doc,
-        case_sensitive=options.case_sensitive,
-        collapse_whitespace=options.collapse_whitespace,
-        compare_formatting=options.compare_formatting,
-        reflow=options.reflow,
+        case_sensitive=False if is_text_only else options.case_sensitive,
+        collapse_whitespace=True if is_text_only else options.collapse_whitespace,
+        compare_formatting=False if is_text_only else options.compare_formatting,
+        reflow=True if is_text_only else options.reflow,
         ignore_headers_footers=options.ignore_headers_footers,
     )
 
     rows = _build_rows(left_lines, right_lines, options)
     _mark_moved_rows(rows)
+    if is_text_only:
+        rows = _collapse_moved_to_equal(rows)
     stats = _stats(left_lines, right_lines, rows)
     if options.fold_equal or len(rows) > _AUTO_FOLD_LINE_THRESHOLD:
         rows = _fold_equal_runs(rows, max(options.context, 3))
@@ -587,6 +592,32 @@ def _mark_moved_rows(rows: list[Row]) -> None:
                     partner = bucket.pop(0)
                     row.moved = True
                     partner.moved = True
+
+
+def _collapse_moved_to_equal(rows: list[Row]) -> list[Row]:
+    """In text_only mode, pair identical delete/insert rows regardless of position or length."""
+    inserts_by_text: dict[str, list[Row]] = {}
+    for row in rows:
+        if row.kind == "insert" and row.right is not None:
+            key = row.right.norm.strip()
+            if key:
+                inserts_by_text.setdefault(key, []).append(row)
+
+    consumed: set[int] = set()
+    out: list[Row] = []
+    for row in rows:
+        if id(row) in consumed:
+            continue
+        if row.kind == "delete" and row.left is not None:
+            key = row.left.norm.strip()
+            bucket = inserts_by_text.get(key) if key else None
+            if bucket:
+                partner = bucket.pop(0)
+                consumed.add(id(partner))
+                out.append(Row(kind="equal", left=row.left, right=partner.right))
+                continue
+        out.append(row)
+    return out
 
 
 def fold_equal_runs(rows: Sequence[Row], context: int) -> list[Row]:
