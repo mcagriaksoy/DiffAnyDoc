@@ -375,5 +375,58 @@ def test_ignore_headers_footers_filters_repeating_bands() -> None:
     assert [line.text for line in kept] == ["Body line 1", "Body line 2"]
 
 
+def test_pdf_shifted_text_strict_vs_text_only_mode(tmp_path: Path) -> None:
+    from diffanydoc.core.diff.geometry import change_rects
+
+    lines = ["Invoice 2026-001", "Customer: Acme Corp", "Total: 1000 EUR"]
+    left_pdf = write_pdf(tmp_path / "shift-left.pdf", [lines])
+    # Shift the second line ("Customer: Acme Corp") 50pt to the right
+    right_pdf = write_pdf(
+        tmp_path / "shift-right.pdf",
+        [lines],
+        line_offsets={1: (50.0, 0.0)},
+    )
+
+    # 1. Strict (Full PDF / Visual & Position) mode flags the shifted line as a change
+    strict_res = compare(
+        left_pdf,
+        right_pdf,
+        DiffOptions(compare_mode="strict", fold_equal=False),
+    )
+    assert strict_res.identical is False
+    assert strict_res.stats.changed == 1
+    shifted_rows = [r for r in strict_res.rows if r.kind == "replace"]
+    assert len(shifted_rows) == 1
+    assert shifted_rows[0].moved is True
+    assert shifted_rows[0].right is not None
+    shift_meta = shifted_rows[0].right.style.get("position_shift")
+    assert shift_meta is not None
+    assert shift_meta["dx"] >= 45.0
+
+    strict_rects = change_rects(strict_res)
+    assert len(strict_rects["left"].get("0", [])) == 1
+    assert len(strict_rects["right"].get("0", [])) == 1
+    assert strict_rects["right"]["0"][0]["kind"] == "shift"
+
+    # 2. Content / OCR-Only (text_only) mode ignores the positional shift as a diff
+    text_only_res = compare(
+        left_pdf,
+        right_pdf,
+        DiffOptions(compare_mode="text_only", fold_equal=False),
+    )
+    assert text_only_res.identical is True
+    assert text_only_res.stats.changed == 0
+    assert text_only_res.stats.similarity == 1.0
+    assert all(r.kind == "equal" for r in text_only_res.rows)
+    # Still preserves position_shift metadata for subtle non-error UI display
+    assert text_only_res.rows[1].right is not None
+    assert text_only_res.rows[1].right.style.get("position_shift") is not None
+
+    text_only_rects = change_rects(text_only_res)
+    assert text_only_rects["left"] == {}
+    assert text_only_rects["right"] == {}
+
+
+
 
 

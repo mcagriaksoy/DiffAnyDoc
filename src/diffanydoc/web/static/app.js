@@ -770,7 +770,7 @@ function isReady() {
 }
 
 function canReload() {
-  return isReady();
+  return isReady() || Boolean(state.comparison && state.comparison.id);
 }
 
 function updateCompareButton() {
@@ -788,7 +788,7 @@ function hideError() {
 }
 
 /* ---------- comparison ---------- */
-async function comparisonRequest() {
+async function comparisonRequest(useExistingId = false) {
   const caseSensitive = $("#opt-case") ? !$("#opt-case").checked : true;
   const collapseWhitespace = $("#opt-space") ? $("#opt-space").checked : true;
   const formatCheckbox = $("#opt-format");
@@ -809,6 +809,27 @@ async function comparisonRequest() {
   if (tolInput && tolInput.value && tolInput.value.trim() !== "") {
     const parsed = parseFloat(tolInput.value);
     if (Number.isFinite(parsed) && parsed >= 0) numericTolerance = parsed;
+  }
+
+  if (useExistingId && state.comparison && state.comparison.id) {
+    const resp = await fetch(`/api/compare/${state.comparison.id}/recompare`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        case_sensitive: caseSensitive,
+        collapse_whitespace: collapseWhitespace,
+        compare_formatting: compareFormatting,
+        fold_equal: false,
+        context: 3,
+        visual: true,
+        ocr,
+        ocr_language: ocrLanguage,
+        numeric_tolerance: numericTolerance,
+        ignore_headers_footers: ignoreHeadersFooters,
+        compare_mode: compareMode,
+      }),
+    });
+    if (resp.ok || !isReady()) return resp;
   }
 
   if (desktop.available && desktop.paths.left && desktop.paths.right) {
@@ -1015,21 +1036,23 @@ async function reloadComparison() {
   const mode = state.mode;
   const reload = $("#reload");
   state.comparing = true;
+  state._reloading = true;
   reload.disabled = true;
   reload.classList.add("busy");
 
   try {
-    const response = await comparisonRequest();
+    const response = await comparisonRequest(true);
     if (!response.ok) throw new Error(await readError(response));
     state.comparison = await response.json();
     renderResult();
-    if (!$("#tab-pages").disabled) setMode(mode);
+    if (!$("#tab-pages").disabled || mode === "text") setMode(mode);
     window.scrollTo({ top: scroll });
     showToast(i18n.t("reload.done"));
   } catch (error) {
     showToast(error.message || i18n.t("error.generic"), true);
   } finally {
     state.comparing = false;
+    state._reloading = false;
     reload.disabled = false;
     reload.classList.remove("busy");
     updateCompareButton();
@@ -1513,11 +1536,20 @@ function renderResult() {
   const preferPagesTab =
     isNonTextDoc || data.left.kind === "pdf" || data.right.kind === "pdf";
 
+  const compareMode = (data.options && data.options.compare_mode) || "strict";
+  const isTextOnlyMode = compareMode === "text_only";
+  if ($("#opt-text-only-mode")) {
+    $("#opt-text-only-mode").checked = isTextOnlyMode;
+  }
+  if ($("#opt-compare-mode")) {
+    $("#opt-compare-mode").value = compareMode;
+  }
+
   $("#visual-wrap").hidden = !state.visual;
   if (state.visual) {
-    document.body.classList.toggle("visual-off", !isNonTextDoc);
+    document.body.classList.toggle("visual-off", isTextOnlyMode);
   }
-  if (canRender && preferPagesTab && state.mode === "text") {
+  if (canRender && preferPagesTab && state.mode === "text" && !state._reloading) {
     state.mode = "pages";
   }
   $("#opt-visual").checked = !document.body.classList.contains("visual-off");
@@ -1783,7 +1815,22 @@ function buildCell(
   } else {
     text.textContent = line.text;
   }
-  if (line.style && line.style.style_change) {
+  if (line.style && line.style.position_shift) {
+    const shift = line.style.position_shift;
+    const isTextOnly =
+      state.comparison &&
+      state.comparison.options &&
+      state.comparison.options.compare_mode === "text_only";
+    text.append(
+      el("span", {
+        class: `page-tag shift-tag${isTextOnly ? " shift-muted" : ""}`,
+        title: i18n.t(isTextOnly ? "shift.ignoredHint" : "shift.detectedHint", {
+          shift: shift.label,
+        }),
+        text: `\u2194 ${shift.label}`,
+      })
+    );
+  } else if (line.style && line.style.style_change) {
     text.append(
       el("span", {
         class: "page-tag",
@@ -2080,18 +2127,34 @@ function buildXrayCard(pair, pairIdx, visualPage) {
   const activeXrayRects = combinedRects.filter(
     (r) => !(r.level === "line" && xrayRowsWithWords.has(r.row))
   );
+  const isTextOnlyMode =
+    data.options && data.options.compare_mode === "text_only";
   for (const rect of activeXrayRects) {
+    const rKind =
+      rect.kind === "insert"
+        ? "insert"
+        : rect.kind === "delete"
+          ? "delete"
+          : rect.kind === "shift"
+            ? "shift"
+            : "replace";
+    const rTitle =
+      rect.kind === "shift"
+        ? `${i18n.t("shift.badge")}: ${rect.text}`
+        : `${rect.kind}: ${rect.text}`;
     addRect(
       canvas,
       [rect.x0, rect.top, rect.x1, rect.bottom],
-      rect.kind === "insert" ? "insert" : rect.kind === "delete" ? "delete" : "replace",
-      `${rect.kind}: ${rect.text}`,
+      rKind,
+      rTitle,
       size.width,
       size.height
     );
   }
-  for (const box of (visualPage && visualPage.left_regions) || []) {
-    addRect(canvas, box, "visual", i18n.t("visual.region"), size.width, size.height);
+  if (!isTextOnlyMode) {
+    for (const box of (visualPage && visualPage.left_regions) || []) {
+      addRect(canvas, box, "visual", i18n.t("visual.region"), size.width, size.height);
+    }
   }
 
   renderManualAnnotations(canvas, pairIdx, "xray");
@@ -2206,12 +2269,26 @@ function buildPageCard(side, index, visualPage, pairIdx = 0) {
   const activeRects = rects.filter(
     (r) => !(r.level === "line" && rowsWithWords.has(r.row))
   );
+  const isTextOnlyMode =
+    data.options && data.options.compare_mode === "text_only";
   for (const rect of activeRects) {
+    const rKind =
+      rect.kind === "insert"
+        ? "insert"
+        : rect.kind === "delete"
+          ? "delete"
+          : rect.kind === "shift"
+            ? "shift"
+            : "replace";
+    const rTitle =
+      rect.kind === "shift"
+        ? `${i18n.t("shift.badge")}: ${rect.text}`
+        : `${rect.kind}: ${rect.text}`;
     addRect(
       canvas,
       [rect.x0, rect.top, rect.x1, rect.bottom],
-      rect.kind === "insert" ? "insert" : rect.kind === "delete" ? "delete" : "replace",
-      `${rect.kind}: ${rect.text}`,
+      rKind,
+      rTitle,
       size.width,
       size.height,
       rect.row,
@@ -2220,9 +2297,9 @@ function buildPageCard(side, index, visualPage, pairIdx = 0) {
   }
 
   const visualBoxes =
-    visualPage && side === "left"
+    !isTextOnlyMode && visualPage && side === "left"
       ? visualPage.left_regions
-      : visualPage
+      : !isTextOnlyMode && visualPage
         ? visualPage.right_regions
         : [];
   for (const box of visualBoxes || []) {
@@ -2830,7 +2907,7 @@ function setMode(mode) {
   const stickyHeader = $(".result-sticky-header");
   if (stickyHeader) stickyHeader.hidden = isFolderMode;
   $("#only-diff-wrap").hidden = mode !== "text";
-  if ($("#text-only-mode-wrap")) $("#text-only-mode-wrap").hidden = mode !== "text";
+  if ($("#text-only-mode-wrap")) $("#text-only-mode-wrap").hidden = isFolderMode;
   $("#zoom-wrap").hidden = !isPageMode;
   if ($("#boxes-wrap")) $("#boxes-wrap").hidden = !isPageMode;
   $("#box-color-wrap").hidden = !isPageMode;

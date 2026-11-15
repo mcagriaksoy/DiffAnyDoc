@@ -113,8 +113,8 @@ def build_parser() -> argparse.ArgumentParser:
         "desktop", help="open the native desktop window (pywebview)"
     )
     desktop.add_argument("files", nargs="*", type=Path, help="1-2 files to open on start")
-    desktop.add_argument("--width", type=int, default=1280)
-    desktop.add_argument("--height", type=int, default=860)
+    desktop.add_argument("--width", type=int, default=1160)
+    desktop.add_argument("--height", type=int, default=700)
     desktop.add_argument("--debug", action="store_true", help="webview developer tools")
 
     select = subparsers.add_parser(

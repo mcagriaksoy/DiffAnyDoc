@@ -51,9 +51,9 @@
       <span data-i18n="filter.onlyDiff">Differences only</span>
     </label>
 
-    <label class="switch" id="text-only-mode-wrap" hidden>
+    <label class="switch" id="text-only-mode-wrap" data-i18n-title="opt.textOnlySwitchHint" hidden>
       <input type="checkbox" id="opt-text-only-mode">
-      <span data-i18n="opt.textOnlySwitch">Content only</span>
+      <span data-i18n="opt.textOnlySwitch">Ignore layout shifts (Text only)</span>
     </label>
 
     <label class="switch" id="visual-wrap" hidden>
@@ -388,9 +388,11 @@
       <p data-i18n="help.start.drop">Drop two files on the window, or click A and B to choose them. Two files dropped at once fill both sides.</p>
       <p data-i18n="help.start.preload">Reading starts as soon as you pick the first file, so the comparison is ready faster. Identical files are detected at once by checksum.</p>
       <p data-i18n="help.start.ocr">Scanned pages and images are read with built-in OCR. Nothing leaves your machine.</p>
+      <p data-i18n="help.start.compareMode">Use 'Ignore layout shifts (Text only)' in the top bar (or Compare mode in Advanced options) to switch between Visual &amp; Position mode—which flags text that moved left/right or up/down on the page—and Text/OCR-only mode, which ignores layout shifts when the wording is identical.</p>
     </section>
     <section class="help-panel" data-help-panel="modes" role="tabpanel" hidden>
       <p class="help-hint" data-i18n="help.previewHint">Click any preview image to enlarge or shrink it.</p>
+      <p data-i18n="help.modes.compareMode">Layout Shifts vs. Text-Only: By default, moved paragraphs or columns are marked with a position-shift badge (⇄ Δx/Δy) and outlined on the page. Turn on 'Ignore layout shifts (Text only)' to compare strictly the extracted text/OCR content without flagging shifted positions.</p>
       <div class="help-gallery">
         <article class="help-card">
           <p data-i18n="help.modes.text">Text: both documents side by side, line by line. Only the changed words are highlighted.</p>

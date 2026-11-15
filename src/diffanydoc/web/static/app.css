@@ -538,33 +538,33 @@ a {
 
 /* ---------- upload / empty state ---------- */
 .upload-view {
-  max-width: 960px;
+  max-width: 900px;
   margin: 0 auto;
-  padding: var(--space-5) var(--space-3) 64px;
+  padding: var(--space-3) var(--space-3) var(--space-4);
 }
 
 .status {
   text-align: center;
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-3);
 }
 
 .status-icon {
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   color: var(--dim-label-color);
 }
 
 .status-title {
-  margin: var(--space-2) 0 var(--space-1);
+  margin: var(--space-1) 0 4px;
   font-size: var(--font-size-title);
   font-weight: 700;
 }
 
 .status-body {
   margin: 0 auto;
-  max-width: 48ch;
+  max-width: 52ch;
   color: var(--dim-label-color);
-  font-size: 14px;
+  font-size: 13.5px;
 }
 
 .drops {
@@ -578,15 +578,47 @@ a {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-1);
-  min-height: 200px;
-  padding: var(--space-4);
+  gap: 6px;
+  min-height: 152px;
+  padding: var(--space-3);
   border: 1.5px dashed var(--border-color);
   border-radius: var(--radius-md);
   background: var(--view-bg-color);
   text-align: center;
   cursor: pointer;
   transition: background-color 120ms ease-out, border-color 120ms ease-out;
+}
+
+@media (max-height: 800px) {
+  .upload-view {
+    padding: var(--space-2) var(--space-3) var(--space-2);
+  }
+  .status {
+    margin-bottom: var(--space-2);
+  }
+  .status-icon {
+    width: 34px;
+    height: 34px;
+  }
+  .status-title {
+    margin: 4px 0 2px;
+    font-size: 18px;
+  }
+  .status-body {
+    font-size: 13px;
+  }
+  .drop {
+    min-height: 128px;
+    padding: var(--space-2) var(--space-3);
+    gap: 4px;
+  }
+  .advanced-expander {
+    margin: 6px 0;
+  }
+  .actions {
+    margin-top: 6px;
+    gap: 6px;
+  }
 }
 
 .drop:hover {
@@ -1111,6 +1143,22 @@ a {
   background: color-mix(in srgb, var(--accent-color) 10%, var(--window-bg-color));
 }
 
+.shift-tag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-color) 14%, transparent);
+  color: var(--accent-color);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.shift-tag.shift-muted {
+  background: color-mix(in srgb, var(--dim-label-color) 12%, transparent);
+  color: var(--dim-label-color);
+  font-weight: 500;
+}
+
 .seg-del {
   padding: 1px 2px;
   background: var(--diff-del-strong);
@@ -1355,6 +1403,13 @@ body[data-box-color="contrast"] {
 .rect.replace {
   background: var(--diff-mod-bg);
   outline: var(--box-outline, 1.5px) solid var(--box-color);
+  padding: var(--box-pad, 1px);
+  margin: calc(var(--box-pad, 1px) * -1);
+}
+
+.rect.shift {
+  background: color-mix(in srgb, var(--accent-color) 16%, transparent);
+  outline: var(--box-outline, 1.5px) solid var(--accent-color);
   padding: var(--box-pad, 1px);
   margin: calc(var(--box-pad, 1px) * -1);
 }

@@ -220,14 +220,30 @@ def _estimate_shift(
 
     best = (0, 0)
     best_score = base
-    for dy in range(-radius, radius + 1):
-        for dx in range(-radius, radius + 1):
-            if dx == 0 and dy == 0:
+    step = 2 if radius >= 3 else 1
+    checked: set[tuple[int, int]] = {(0, 0)}
+
+    for dy in range(-radius, radius + 1, step):
+        for dx in range(-radius, radius + 1, step):
+            if (dx, dy) in checked:
                 continue
+            checked.add((dx, dy))
             score = _overlap_score(left, right, dx, dy)
             if score < best_score - 0.02:
                 best_score = score
                 best = (dx, dy)
+
+    if step > 1:
+        cx, cy = best
+        for dy in range(max(-radius, cy - 1), min(radius, cy + 1) + 1):
+            for dx in range(max(-radius, cx - 1), min(radius, cx + 1) + 1):
+                if (dx, dy) in checked:
+                    continue
+                checked.add((dx, dy))
+                score = _overlap_score(left, right, dx, dy)
+                if score < best_score - 0.02:
+                    best_score = score
+                    best = (dx, dy)
 
     if best_score > base - 0.05:
         return (0, 0)
@@ -445,7 +461,7 @@ def render_xray_page_png(
         )
 
     buf = io.BytesIO()
-    out.save(buf, format="PNG")
+    out.save(buf, format="PNG", compress_level=1)
     return buf.getvalue()
 
 

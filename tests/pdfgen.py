@@ -18,15 +18,23 @@ def _content_stream(
     first_baseline: float,
     leading: float,
     tables: list[tuple[float, float, list[float], float, list[list[str]]]] | None = None,
+    line_offsets: dict[int, tuple[float, float]] | None = None,
 ) -> str:
     parts: list[str] = []
     if lines:
-        parts.extend(["BT", "/F1 12 Tf", f"{leading} TL", f"72 {first_baseline} Td"])
-        for index, line in enumerate(lines):
-            if index:
-                parts.append("T*")
-            parts.append(f"({_escape(line)}) Tj")
-        parts.append("ET")
+        if line_offsets:
+            for index, line in enumerate(lines):
+                dx, dy = line_offsets.get(index, (0.0, 0.0))
+                x = 72.0 + dx
+                y = first_baseline - index * leading - dy
+                parts.append(f"BT /F1 12 Tf {x:.1f} {y:.1f} Td ({_escape(line)}) Tj ET")
+        else:
+            parts.extend(["BT", "/F1 12 Tf", f"{leading} TL", f"72 {first_baseline} Td"])
+            for index, line in enumerate(lines):
+                if index:
+                    parts.append("T*")
+                parts.append(f"({_escape(line)}) Tj")
+            parts.append("ET")
 
     for x0, top_y, col_widths, row_h, rows in tables or ():
         n_rows = len(rows)
@@ -63,6 +71,7 @@ def build_pdf(
     height: float = 842,
     *,
     tables: list[list[tuple[float, float, list[float], float, list[list[str]]]]] | None = None,
+    line_offsets: dict[int, tuple[float, float]] | None = None,
 ) -> bytes:
     objects: list[bytes] = []
 
@@ -81,7 +90,11 @@ def build_pdf(
     for page_idx, lines in enumerate(pages):
         page_tables = tables[page_idx] if tables and page_idx < len(tables) else None
         stream = _content_stream(
-            lines, first_baseline=height - 72, leading=16, tables=page_tables
+            lines,
+            first_baseline=height - 72,
+            leading=16,
+            tables=page_tables,
+            line_offsets=line_offsets,
         ).encode("cp1252", errors="replace")
         content_id = add(
             b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"endstream"
@@ -138,6 +151,9 @@ def write_pdf(
     width: float = 595,
     height: float = 842,
     tables: list[list[tuple[float, float, list[float], float, list[list[str]]]]] | None = None,
+    line_offsets: dict[int, tuple[float, float]] | None = None,
 ) -> Path:
-    path.write_bytes(build_pdf(pages, width=width, height=height, tables=tables))
+    path.write_bytes(
+        build_pdf(pages, width=width, height=height, tables=tables, line_offsets=line_offsets)
+    )
     return path

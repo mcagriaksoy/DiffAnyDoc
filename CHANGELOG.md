@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.0] - 2026-11-15
+
+### Added
+- **Switchable Full-PDF Visual/Position Mode vs. Ignore Layout Shifts (Text-Only) Mode**: Added coordinate shift detection (`_detect_position_shifts` in `engine.py` and `"shift"` overlay boxes in `geometry.py`) alongside an instant topbar switch (`#opt-text-only-mode`, labeled `"Ignore layout shifts (Text only)"` / `"Kaymaları yok say (Sadece metin)"` with tooltip and Help documentation in `#help-dialog`) backed by `/api/compare/{id}/recompare`:
+  - **Visual & Position Mode (`strict`)**: Detects and highlights horizontally or vertically shifted lines/spans (`>= 4.5 pt`) even when the text words are 100% identical, drawing `.rect.shift` boxes on the PDF pages and marking the row with a directional shift pill (`↔ → Δx +50pt`).
+  - **Ignore Layout Shifts / Text-Only Mode (`text_only`)**: Compares only the extracted text / OCR content, ignoring layout and coordinate shifts so shifted identical text is not flagged as a change (`0` changes, `100%` similarity, no page error boxes) while displaying a subtle muted position note on the unchanged row.
+
+### Changed
+- **Compact Initial Window & `1366x768` Screen Fit**: Reduced default desktop window dimensions (`1160x700`, minimum `860x560`) and compacted initial upload screen spacing (`.upload-view`, `.status`, `.drop`, plus `@media (max-height: 800px)` rules) so the entire welcome/upload screen fits cleanly on `1366x768` displays without vertical clipping or scrolling.
+- **Windows 10/11 Startup, Rendering & OCR Performance Optimizations**:
+  - Replaced heavy `import rapidocr_onnxruntime` on startup (`/api/ocr/status`) with zero-import `importlib.util.find_spec("rapidocr_onnxruntime")`, deferring ONNX Runtime / OpenCV DLL loading until OCR actually runs.
+  - Added `subprocess.CREATE_NO_WINDOW` on Windows for all Tesseract subprocess calls and skipped redundant `tesseract --list-langs` process creation when embedded RapidOCR is active.
+  - Cached in-memory `pypdfium2.PdfDocument` instances and paginated office sheets in `render.py`, added `@lru_cache` to `_get_font` with native Windows fonts (`arial.ttf`, `segoeui.ttf`) prioritized on `win32`, and switched localhost PNG encoding (`render_page_png`, `render_xray_page_png`) to `compress_level=1` (~4.5x faster).
+  - Optimized visual page registration (`_estimate_shift` in `visual.py`) with a coarse-to-fine grid search (~3.7x fewer full-page pixel comparisons) and bypassed Windows Registry proxy lookups for `127.0.0.1` health checks in `desktop/app.py`.
+
 ## [0.6.0] - 2026-11-13
 
 ### Added

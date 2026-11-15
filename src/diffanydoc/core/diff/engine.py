@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from ..adapters import adapter_for, adapters, load
-from ..model import DiffResult, Document, Line, OcrStats, PagePair, Row, Stats, VisualDiff
+from ..model import DiffResult, Document, Line, OcrStats, PagePair, Row, Segment, Stats, VisualDiff
 from ..ocr import OcrOptions, apply_ocr
 from ..visual import VisualOptions, compare_pdf_pages
 from .align import align_pages
@@ -291,6 +291,10 @@ def compare(
     _mark_moved_rows(rows)
     if is_text_only:
         rows = _collapse_moved_to_equal(rows)
+    has_real_geometry = (
+        left_doc.kind in ("pdf", "image") and right_doc.kind in ("pdf", "image")
+    )
+    _detect_position_shifts(rows, options, has_real_geometry=has_real_geometry)
     stats = _stats(left_lines, right_lines, rows)
     if options.fold_equal or len(rows) > _AUTO_FOLD_LINE_THRESHOLD:
         rows = _fold_equal_runs(rows, max(options.context, 3))
@@ -618,6 +622,95 @@ def _collapse_moved_to_equal(rows: list[Row]) -> list[Row]:
                 continue
         out.append(row)
     return out
+
+
+_SHIFT_THRESHOLD_PT = 4.5
+
+
+def _format_shift_label(dx: float, dy: float) -> str:
+    parts: list[str] = []
+    if abs(dx) >= _SHIFT_THRESHOLD_PT:
+        arrow = "→" if dx > 0 else "←"
+        parts.append(f"{arrow} Δx {dx:+.0f}pt")
+    if abs(dy) >= _SHIFT_THRESHOLD_PT:
+        arrow = "↓" if dy > 0 else "↑"
+        parts.append(f"{arrow} Δy {dy:+.0f}pt")
+    return " · ".join(parts) if parts else f"Δx {dx:+.0f}pt"
+
+
+def _detect_position_shifts(
+    rows: list[Row],
+    options: DiffOptions,
+    *,
+    has_real_geometry: bool,
+) -> None:
+    """Detect coordinate shifts on matched equal lines in PDF/image comparisons.
+
+    In ``strict`` (Full PDF / Layout) mode, lines whose text is identical but
+    whose bounding box shifted horizontally or vertically on the page are
+    flagged as positional changes (``kind="replace"``, ``moved=True``).
+    In ``text_only`` (Content / OCR) mode, they remain ``kind="equal"`` (not
+    counted as changes), while carrying ``position_shift`` metadata so the UI
+    can show a subtle non-error layout note.
+    """
+    if not has_real_geometry:
+        return
+    is_text_only = options.compare_mode == "text_only"
+    prev_bottom: dict[tuple[int, int], tuple[float, float]] = {}
+
+    for row in rows:
+        a = row.left
+        b = row.right
+        if a is None or b is None or a.bbox is None or b.bbox is None:
+            continue
+        page_key = (a.page, b.page)
+        dx = b.bbox[0] - a.bbox[0]
+        raw_dy = b.bbox[1] - a.bbox[1]
+        if page_key in prev_bottom:
+            prev_a_bot, prev_b_bot = prev_bottom[page_key]
+            eff_dy = (b.bbox[1] - prev_b_bot) - (a.bbox[1] - prev_a_bot)
+        else:
+            eff_dy = raw_dy
+        prev_bottom[page_key] = (a.bbox[3], b.bbox[3])
+
+        if abs(dx) < _SHIFT_THRESHOLD_PT and a.spans and b.spans and len(a.spans) == len(b.spans):
+            best_span_dx = 0.0
+            for sa, sb in zip(a.spans, b.spans):
+                sdx = sb.bbox[0] - sa.bbox[0]
+                if abs(sdx) > abs(best_span_dx):
+                    best_span_dx = sdx
+            if abs(best_span_dx) >= _SHIFT_THRESHOLD_PT:
+                dx = best_span_dx
+
+        if row.kind != "equal":
+            continue
+        if abs(dx) < _SHIFT_THRESHOLD_PT and abs(eff_dy) < _SHIFT_THRESHOLD_PT:
+            continue
+
+        label = _format_shift_label(
+            dx,
+            raw_dy if abs(eff_dy) >= _SHIFT_THRESHOLD_PT else 0.0,
+        )
+        shift_meta = {
+            "dx": round(dx, 1),
+            "dy": round(raw_dy, 1),
+            "eff_dy": round(eff_dy, 1),
+            "label": label,
+        }
+        a.style = {**(a.style or {}), "position_shift": shift_meta}
+        b.style = {**(b.style or {}), "position_shift": shift_meta}
+
+        if not is_text_only:
+            row.kind = "replace"
+            row.moved = True
+            if label not in row.format_changes:
+                row.format_changes.append(label)
+            a.style["style_change"] = label
+            a.style["summary"] = label
+            b.style["style_change"] = label
+            b.style["summary"] = label
+            row.left_inline = [Segment(kind="equal", text=a.text)]
+            row.right_inline = [Segment(kind="equal", text=b.text)]
 
 
 def fold_equal_runs(rows: Sequence[Row], context: int) -> list[Row]:

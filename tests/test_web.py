@@ -278,6 +278,46 @@ def test_stats_detail_dialog_markup_and_scripts() -> None:
     assert "openStatsDetails" in js
 
 
+def test_recompare_toggles_between_strict_and_text_only_for_shifted_pdf(
+    tmp_path: Path,
+) -> None:
+    client = _client()
+    lines = ["Header Line", "Shifted Paragraph Text", "Footer Line"]
+    left_pdf = write_pdf(tmp_path / "l-shift.pdf", [lines])
+    right_pdf = write_pdf(
+        tmp_path / "r-shift.pdf",
+        [lines],
+        line_offsets={1: (48.0, 0.0)},
+    )
+
+    resp = client.post(
+        "/api/compare",
+        files={
+            "left": ("l-shift.pdf", left_pdf.read_bytes(), "application/pdf"),
+            "right": ("r-shift.pdf", right_pdf.read_bytes(), "application/pdf"),
+        },
+        data={"compare_mode": "strict", "visual": "false", "ocr": "false"},
+    )
+    assert resp.status_code == 200
+    strict_payload = resp.json()
+    comp_id = strict_payload["id"]
+    assert strict_payload["stats"]["changed"] == 1
+    assert len(strict_payload["rects"]["right"].get("0", [])) == 1
+
+    # Instant switch to text_only mode via /recompare
+    re_resp = client.post(
+        f"/api/compare/{comp_id}/recompare",
+        json={"compare_mode": "text_only", "visual": False, "ocr": False},
+    )
+    assert re_resp.status_code == 200
+    text_only_payload = re_resp.json()
+    assert text_only_payload["id"] == comp_id
+    assert text_only_payload["stats"]["changed"] == 0
+    assert text_only_payload["identical"] is True
+    assert text_only_payload["rects"]["right"] == {}
+
+
+
 
 
 

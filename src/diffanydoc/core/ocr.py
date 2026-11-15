@@ -13,6 +13,7 @@ dependency; everything else in DiffAnyDoc works without it.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import io
 import json
 import os
@@ -181,12 +182,17 @@ def apply_ocr(
             blocks = [_block_from_dict(item) for item in cached]
             stats.cached += 1
         else:
-            image = render_page(document.path, page.index, options.dpi)
+            render_dpi = (
+                min(options.dpi, 200)
+                if (use_rapidocr and document.kind == "pdf")
+                else options.dpi
+            )
+            image = render_page(document.path, page.index, render_dpi)
             if page.width <= 0 or page.height <= 0:
-                page.width = image.width * 72.0 / options.dpi
-                page.height = image.height * 72.0 / options.dpi
+                page.width = image.width * 72.0 / render_dpi
+                page.height = image.height * 72.0 / render_dpi
             if use_rapidocr:
-                blocks = _run_rapidocr(image, options.dpi)
+                blocks = _run_rapidocr(image, render_dpi)
             else:
                 assert binary is not None
                 blocks = _run_tesseract(_png_bytes(image), options, binary)
@@ -221,10 +227,8 @@ _RAPIDOCR_INSTANCE: Any = None
 
 def _rapidocr_available() -> bool:
     try:
-        import rapidocr_onnxruntime  # noqa: F401
-
-        return True
-    except ImportError:
+        return importlib.util.find_spec("rapidocr_onnxruntime") is not None
+    except (ImportError, ValueError):
         return False
 
 
@@ -322,8 +326,22 @@ def _run_rapidocr(image: Any, dpi: int) -> list[Block]:
     return _words_to_blocks(lines_out)
 
 
+def _subprocess_flags() -> int:
+    """Avoid spawning transient console windows on Windows 10/11."""
+    if sys.platform == "win32":
+        return int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return 0
+
+
 def installed_languages(options: OcrOptions | None = None) -> list[str]:
     """Return Tesseract language codes installed on the system, plus combos."""
+    if (
+        (options is None or options.binary is None)
+        and not os.environ.get("DIFFANYDOC_TESSERACT")
+        and _tesseract_binary is _DEFAULT_TESSERACT_BINARY
+        and _rapidocr_available()
+    ):
+        return list(_DEFAULT_LANGUAGES)
     try:
         binary = _tesseract_binary(options or OcrOptions())
         completed = subprocess.run(
@@ -332,6 +350,7 @@ def installed_languages(options: OcrOptions | None = None) -> list[str]:
             stderr=subprocess.PIPE,
             timeout=5.0,
             check=False,
+            creationflags=_subprocess_flags(),
         )
     except (OcrUnavailable, OSError, subprocess.SubprocessError):
         return list(_DEFAULT_LANGUAGES)
@@ -433,6 +452,7 @@ def _run_tesseract(
             stderr=subprocess.PIPE,
             timeout=max(options.timeout, 1.0),
             check=False,
+            creationflags=_subprocess_flags(),
         )
     except FileNotFoundError as exc:
         raise OcrUnavailable(_INSTALL_HINT) from exc

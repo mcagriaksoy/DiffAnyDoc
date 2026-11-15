@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 from urllib.error import URLError
 from urllib.parse import unquote, urlparse
-from urllib.request import url2pathname, urlopen
+from urllib.request import ProxyHandler, build_opener, url2pathname
 
 from .. import __version__
 from ..i18n import resolve_language, t
@@ -30,7 +30,7 @@ from ..session import SessionServer
 from ..web import STATIC_DIR
 
 HOST = "127.0.0.1"
-_WINDOW_MIN = (900, 620)
+_WINDOW_MIN = (860, 560)
 
 
 # --------------------------------------------------------------------------- #
@@ -83,14 +83,16 @@ class ServerThread(threading.Thread):
 
 def wait_until_ready(url: str, timeout: float = 20.0) -> bool:
     """Poll the health endpoint until the API answers."""
+    # Bypass system proxy lookup (e.g. Windows Registry Internet Settings) for 127.0.0.1.
+    opener = build_opener(ProxyHandler({}))
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
-            with urlopen(f"{url}/api/health", timeout=1.0) as response:
+            with opener.open(f"{url}/api/health", timeout=1.0) as response:
                 if response.status == 200:
                     return True
         except (URLError, OSError):
-            time.sleep(0.08)
+            time.sleep(0.05)
     return False
 
 
@@ -304,8 +306,8 @@ def window_icon() -> str | None:
 
 def run_desktop(
     paths: Iterable[str | Path] = (),
-    width: int = 1280,
-    height: int = 860,
+    width: int = 1160,
+    height: int = 700,
     debug: bool = False,
     language: str | None = None,
     slots: Sequence[str | None] | None = None,

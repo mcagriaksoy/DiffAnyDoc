@@ -351,6 +351,34 @@ def create_app() -> FastAPI:
     def get_comparison(comparison_id: str) -> JSONResponse:
         return JSONResponse(_get(comparison_id).payload)
 
+    @app.post("/api/compare/{comparison_id}/recompare")
+    async def recompare_existing(comparison_id: str, body: dict[str, Any]) -> JSONResponse:
+        existing = _get(comparison_id)
+        if not existing.left.is_file() or not existing.right.is_file():
+            raise HTTPException(status_code=404, detail="source files no longer available")
+        prev_opts = existing.result.options or {}
+        tol_raw = body.get("numeric_tolerance", prev_opts.get("numeric_tolerance"))
+        numeric_tolerance = float(tol_raw) if tol_raw is not None else None
+        updated = _run_compare(
+            existing.left,
+            existing.right,
+            None,
+            int(body.get("context", prev_opts.get("context", 3))),
+            bool(body.get("case_sensitive", prev_opts.get("case_sensitive", True))),
+            bool(body.get("fold_equal", prev_opts.get("fold_equal", False))),
+            bool(body.get("collapse_whitespace", prev_opts.get("collapse_whitespace", True))),
+            bool(body.get("visual", prev_opts.get("visual", True))),
+            bool(body.get("ocr", prev_opts.get("ocr", True))),
+            str(body.get("ocr_language") or prev_opts.get("ocr_language") or "tur+eng"),
+            bool(body.get("compare_formatting", prev_opts.get("compare_formatting", False))),
+            numeric_tolerance,
+            bool(body.get("ignore_headers_footers", prev_opts.get("ignore_headers_footers", False))),
+            str(body.get("compare_mode", prev_opts.get("compare_mode", "strict"))),
+            existing_id=existing.id,
+            existing_dir=existing.directory,
+        )
+        return JSONResponse(_summary(updated))
+
     @app.get("/api/compare/{comparison_id}/report", response_class=HTMLResponse)
     def get_report(comparison_id: str, lang: str | None = None) -> HTMLResponse:
         return HTMLResponse(render_html(_get(comparison_id).result, language=lang))
@@ -490,6 +518,8 @@ def _run_compare(
     numeric_tolerance: float | None = None,
     ignore_headers_footers: bool = False,
     compare_mode: str = "strict",
+    existing_id: str | None = None,
+    existing_dir: Path | None = None,
 ) -> Comparison:
     effective_ocr = bool(ocr and ocr_available())
     options = DiffOptions(
@@ -535,9 +565,10 @@ def _run_compare(
     }
     payload["rects"] = change_rects(result)
 
+    comp_id = existing_id or (uuid.uuid4().hex if directory else uuid.uuid4().hex)
     comparison = Comparison(
-        id=payload["id"] or uuid.uuid4().hex,
-        directory=directory or Path(tempfile.gettempdir()),
+        id=comp_id,
+        directory=existing_dir or directory or Path(tempfile.gettempdir()),
         left=left_path,
         right=right_path,
         result=result,
