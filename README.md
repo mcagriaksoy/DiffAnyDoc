@@ -10,11 +10,13 @@ It shows text differences and marks changed lines with boxes on PDF pages.
 - **Cross-Format Semantic Comparison**: PDF, DOCX, DOC/ODT/RTF, XLSX/XLSM, CSV/TSV, images (PNG/JPG/TIFF/WEBP/BMP), and plain text / source code
 - **Fast SHA-256 Checksum & Preloading**: Byte-identical files short-circuit immediately; background preloading starts as soon as the first file is selected
 - **Word-Level & Cell-Aware Diff**: Line alignment with word-level inline highlights, table row/cell matching, merged-cell expansion, and optional numeric tolerance
+- **Numbered Layout Shift Matching (`#1, #2, #3…`)**: Reordered or shifted text blocks across pages/columns are paired and sequentially numbered (`#1`, `#2`, `#3…`) with position-shift badges (`⇄ Δx/Δy`) and connecting vector arrows instead of false delete/insert pairs, plus a one-click **Ignore layout shifts (Text only)** switch
+- **Local AI Semantic Analysis (`✨ AI`)**: 100% offline CPU-based semantic diffing powered by **llamafile** and compact Apache-2.0 GGUF models (**Qwen2.5-0.5B Instruct Q2_K · ~215 MB** by default, plus `SmolLM2`, `Qwen3`, `Qwen2.5-1.5B`, or any custom `.gguf` / local URL) — separates pure layout shifts from real wording/value changes and explains individual rows inline
 - **Page & Visual (Pixel) Diff**: Side-by-side rendered pages with pixel-registered bounding boxes, noise tolerance, and changed-region navigation
 - **X-Ray Vision Overlay**: Pixel-registered composite overlay highlighting removed ink in red and added ink in green, plus interactive bounding-box annotations
 - **Zero-Config Embedded OCR**: Automatic OCR for scanned/hybrid PDFs and images via **RapidOCR** (`rapidocr-onnxruntime`, Apache-2.0) with SHA-256 disk caching
 - **Folder & Directory Comparison**: Recursive directory tree comparison with status filters and one-click file diff tabs
-- **Interactive Merging & Reports**: Multi-tab sessions, side-to-side line/document merge (`A → B`, `B → A`), and offline HTML / printable PDF reports
+- **Interactive Merging & Reports**: Multi-tab sessions, side-to-side line/document merge (`A → B`, `B → A`), and offline HTML / printable PDF reports (including AI semantic summaries)
 - **Native Desktop & CLI**: Native desktop window (`pywebview` / GTK), file manager context menu integration, and `diff`, `info`, `formats`, `serve`, `desktop`, `select`, `integrate` commands
 
 ## Screenshots
@@ -170,6 +172,8 @@ real content changes.
 ```bash
 diffanydoc diff a.pdf b.pdf                       # summary in the terminal
 diffanydoc diff a.pdf b.pdf --visual              # also compare rendered pixels
+diffanydoc diff a.pdf b.pdf --compare-mode text_only  # ignore layout/position shifts
+diffanydoc diff a.pdf b.pdf --ai                  # include offline Local AI semantic summary
 diffanydoc diff scan_a.pdf scan_b.pdf --ocr       # OCR pages without text
 diffanydoc diff scan_a.pdf scan_b.pdf --ocr --ocr-lang tur+eng
 diffanydoc diff a.pdf b.pdf -o report.html        # HTML report
@@ -201,13 +205,14 @@ src/diffanydoc/
   core/
     model.py          # Document / Page / Block + DiffResult / Row
     normalize.py      # NFKC, typography, soft hyphen, whitespace normalisation
-    adapters/         # base.py (registry), pdf.py, docx.py, xlsx.py, text.py,
+    ai.py             # Local AI semantic analysis (llamafile + GGUF model manager)
+    adapters/         # base.py (registry), pdf.py, docx.py, doc.py, xlsx.py, image.py, text.py,
                       # ooxml.py (shared ZIP/XML helpers, no third-party parser)
-    diff/             # align.py (pages), lines.py (lines + inline), engine.py
-    render.py         # pdfium page rasterisation (shared, cached, locked)
-    ocr.py            # Tesseract fallback for scanned pages + on-disk cache
-    visual.py         # pixel comparison, registration, region boxes
-    report/           # html.py, json.py
+    diff/             # align.py (pages), lines.py (lines + inline), engine.py, geometry.py
+    render.py         # pdfium & sheet page rasterisation (shared, cached, locked)
+    ocr.py            # Embedded RapidOCR + Tesseract fallback + on-disk cache
+    visual.py         # pixel comparison, registration, region boxes, X-Ray overlay
+    report/           # html.py, pdf.py, json.py
   cli.py              # reference consumer of every feature
   web/                # FastAPI + build-free SPA
   desktop/            # pywebview shell (local API + native window)
@@ -223,6 +228,8 @@ desktop share the same code and the engine is tested separately.
 | Byte (sha256) | **done** | fast path for identical files (skips parsing) |
 | Structure (docx/xlsx XML, table cells) | **done** | M3, stdlib `zipfile` + `ElementTree` + merged cells |
 | Text (line + word) | **done** | M0 |
+| Layout Shift Matching (`#1, #2…`) | **done** | Reordered/shifted block pairing, `Δx/Δy` badges & connecting vector arrows |
+| Local AI Semantic (`✨ AI`) | **done** | Offline CPU inference (`llamafile` + `Qwen2.5-0.5B Q2_K` default) |
 | Page mapping | **done** | LCS + similarity for leftover pages |
 | Visual (pixel) | **done** | M2, opt-in in the engine, on by default in the UI (PDF + image) |
 | OCR layer | **done** | M4, opt-in, scanned/hybrid PDFs and images |
@@ -250,34 +257,35 @@ install hint.
 
 ## Licensing strategy
 
-Because the target is a commercial release, dependencies were chosen from
-**permissive** licences:
+Because DiffAnyDoc is distributed as a commercial product, all third-party
+dependencies are chosen strictly from **permissive** open-source licences:
 
 | Package | Licence | Use |
 |---|---|---|
 | `pdfplumber` / `pdfminer.six` | MIT | PDF text + coordinates |
-| `pypdfium2` | Apache-2.0 / BSD-3 | PDF rendering |
-| `Pillow` | MIT-CMU | images |
+| `pypdfium2` | Apache-2.0 / BSD-3 | PDF rendering & PDF report output |
+| `Pillow` | MIT-CMU | images, pixel diff & X-Ray overlay |
 | `rapidocr-onnxruntime` | Apache-2.0 | Embedded ONNX OCR engine |
-| `fastapi` / `uvicorn` | MIT / BSD-3 | API |
-| `pywebview` | BSD-3 | desktop shell |
-| GTK / WebKit2GTK | LGPL | system webview (dynamic linking) |
+| `llamafile` / `llama.cpp` | Apache-2.0 / MIT | On-demand portable local LLM runtime |
+| `Qwen2.5` / `Qwen3` / `SmolLM2` (GGUF) | Apache-2.0 | Optional downloadable local AI models |
+| `fastapi` / `uvicorn` | MIT / BSD-3 | Local API server |
+| `pywebview` | BSD-3 | Native desktop shell |
+| GTK / WebKit2GTK / WebView2 | LGPL / System | OS-provided webview (dynamic linking) |
 
-Deliberately **not used**: PyMuPDF (AGPL), PyQt6 (GPL), parts of reportlab.
-These would require extra licensing for a closed-source commercial release.
+Deliberately **not used**: PyMuPDF (AGPL), PyQt6 (GPL), Ghostscript (AGPL), or
+copyleft wrappers. These would require extra licensing for a closed-source
+commercial release.
 
-> **License**: DiffAnyDoc is distributed under a proprietary Commercial End User License Agreement (EULA). All bundled third-party libraries use approved permissive open-source licenses (MIT, Apache-2.0, BSD-3, PSF). See [`LICENSE`](LICENSE), [`EULA.md`](EULA.md), and [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+> **Commercial License**: DiffAnyDoc is Copyright (c) 2026 Mehmet Cagri Aksoy (`mcagriaksoy`) and distributed under a proprietary Commercial End User License Agreement (EULA). All bundled or optionally downloaded third-party components use approved permissive open-source licenses (MIT, Apache-2.0, BSD-3, ISC, PSF). See [`LICENSE`](LICENSE), [`EULA.md`](EULA.md), [`PRIVACY.md`](PRIVACY.md), [`NOTICE`](NOTICE), and [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 ## Roadmap
 
 - **M0 — engine + CLI** ✅ IR, PDF/text adapters, line + inline diff, HTML/JSON report
 - **M1 — viewer** ✅ web UI + native window, change boxes on PDF pages
-- **M2 — visual diff** ✅ page-render comparison, tolerance, registration
-- **M3 — DOCX/XLSX** ✅ structural diff, table-cell alignment
-- **M4 — OCR** ✅ fallback layer for scanned PDFs + cache
-- **M5 — distribution** 🚧 PyInstaller builds (Windows zip + installer, Linux
-  tar.gz + AppImage, PyPI) and the update check are in; the commercial licence
-  and EULA are still open (`TODO.md` TASK-04)
+- **M2 — visual diff** ✅ page-render comparison, tolerance, registration, X-Ray overlay
+- **M3 — DOCX/XLSX/Legacy** ✅ structural diff, table-cell alignment, `.doc`/`.odt`/`.rtf`
+- **M4 — OCR & Local AI** ✅ embedded RapidOCR + offline Local AI semantic analysis (`llamafile` + GGUF)
+- **M5 — distribution & commercial readiness** ✅ PyInstaller builds (Windows `.zip` + installer, Linux `.tar.gz` + AppImage), update check, Commercial EULA, Privacy Policy, and Third-Party Notices
 
 ## Tests
 

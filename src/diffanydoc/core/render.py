@@ -122,6 +122,15 @@ def render_sheet_page(path: str | Path, index: int, dpi: int = 96) -> Image.Imag
 
         if block.kind == "image":
             img_data = block.source_ref.get("data")
+            zip_target = block.source_ref.get("zip_target")
+            if not img_data and zip_target and target.is_file():
+                try:
+                    import zipfile
+
+                    with zipfile.ZipFile(target) as zf:
+                        img_data = zf.read(str(zip_target))
+                except Exception:
+                    img_data = None
             pic_w = max(1, round((bx1 - bx0) * scale))
             pic_h = max(1, round((block.bbox[3] - btop) * scale))
             pasted = False

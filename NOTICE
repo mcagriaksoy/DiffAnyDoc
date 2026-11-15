@@ -1,14 +1,15 @@
 DiffAnyDoc
-Copyright (c) 2026 Mehmet Cagri Aksoy (mcagriaksoy)
+Copyright (c) 2026 Mehmet Cagri Aksoy (mcagriaksoy). All rights reserved.
 https://github.com/mcagriaksoy/DiffAnyDoc
 
-This product includes software developed by third parties under permissive
-open-source licenses (MIT, Apache-2.0, BSD-3-Clause, HPND/MIT-CMU).
-See THIRD_PARTY_LICENSES.md for the full component inventory and license links.
+This commercial software product incorporates third-party open-source software
+components under permissive licenses (MIT, Apache-2.0, BSD-3-Clause, ISC,
+HPND/MIT-CMU, PSF). No copyleft (GPL/AGPL) dependencies are included.
+See THIRD_PARTY_NOTICES.md and THIRD_PARTY_LICENSES.md for complete attributions.
 
 Core & Runtime Components:
 - pdfplumber — MIT License
-- pypdfium2 / PDFium — Apache-2.0 / BSD-3-Clause
+- pypdfium2 / PDFium — Apache-2.0 / BSD-3-Clause License
 - Pillow — HPND / MIT-CMU License
 - RapidOCR (rapidocr-onnxruntime) — Apache-2.0 License
 - ONNX Runtime — MIT License
@@ -18,3 +19,7 @@ Core & Runtime Components:
 - python-multipart — Apache-2.0 License
 - pywebview — BSD-3-Clause License
 
+Optional Local AI Runtime & Downloadable Model Presets:
+- llamafile (Mozilla Ocho / Justine Tunney) & llama.cpp — Apache-2.0 / MIT / ISC License
+- Qwen2.5-0.5B-Instruct / Qwen2.5-1.5B-Instruct / Qwen3-0.6B (Alibaba Cloud Qwen Team) — Apache-2.0 License
+- SmolLM2-135M-Instruct / SmolLM2-360M-Instruct (Hugging Face) — Apache-2.0 License

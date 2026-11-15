@@ -190,3 +190,51 @@ def test_ai_web_endpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     pdf_resp = client.get(f"/api/compare/{cid}/report.pdf?lang=en")
     assert pdf_resp.status_code == 200
     assert pdf_resp.content.startswith(b"%PDF")
+
+
+def test_large_200_page_docx_compare_and_ai_digest_fast(tmp_path: Path) -> None:
+    import time
+    from tests.docxgen import write_docx
+
+    blocks_a: list[tuple[str, object]] = []
+    blocks_b: list[tuple[str, object]] = []
+    for p in range(200):
+        blocks_a.append(("p", f"Section {p + 1}: Master Service Agreement Clause", "Heading1"))
+        blocks_b.append(("p", f"Section {p + 1}: Master Service Agreement Clause", "Heading1"))
+        for k in range(8):
+            line_a = f"Page {p + 1} paragraph {k + 1}: Standard obligation text for enterprise contract review."
+            line_b = (
+                f"Page {p + 1} paragraph {k + 1}: Updated obligation text for enterprise contract review."
+                if (p % 25 == 0 and k == 3)
+                else line_a
+            )
+            blocks_a.append(("p", line_a))
+            blocks_b.append(("p", line_b))
+        if p < 199:
+            blocks_a.append(("pagebreak", None))
+            blocks_b.append(("pagebreak", None))
+
+    # Include a >300 KB embedded media payload to exercise lazy media handling
+    big_media = b"\x89PNG\r\n\x1a\n" + (b"\x00" * (320 * 1024))
+    blocks_a.insert(2, ("image", "rIdImg1", "diagram.png", 1905000, 1428750))
+    blocks_b.insert(2, ("image", "rIdImg1", "diagram.png", 1905000, 1428750))
+
+    left_docx = write_docx(
+        tmp_path / "large_a.docx",
+        blocks_a,
+        images=[("rIdImg1", "diagram.png", big_media)],
+    )
+    right_docx = write_docx(
+        tmp_path / "large_b.docx",
+        blocks_b,
+        images=[("rIdImg1", "diagram.png", big_media)],
+    )
+
+    t0 = time.monotonic()
+    res = compare(left_docx, right_docx)
+    digest = build_comparison_digest(res)
+    elapsed = time.monotonic() - t0
+
+    assert elapsed < 3.0
+    assert len(digest) == 8
+

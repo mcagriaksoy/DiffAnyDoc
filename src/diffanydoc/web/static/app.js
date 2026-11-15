@@ -1563,8 +1563,9 @@ function renderResult() {
   }
 
   syncActiveTab();
-  renderText();
-  renderPages();
+  state._pagesRenderedForId = null;
+  state._pagesRenderedMode = null;
+  state._textDirty = true;
   setMode(canRender ? state.mode : "text");
   window.scrollTo({ top: 0 });
 }
@@ -2132,6 +2133,9 @@ function renderPages() {
     _pageObserver = null;
   }
   container.replaceChildren();
+  if (!data) return;
+  state._pagesRenderedForId = data.id || "__local__";
+  state._pagesRenderedMode = state.mode;
 
   const visualPages = { left: {}, right: {} };
   if (state.visual) {
@@ -2765,21 +2769,24 @@ function attachManualAnnotationDrawing(canvas, pairIdx, side) {
 
 /* ---------- change navigation (n / p, F3 / Shift+F3) ---------- */
 function collectChanges() {
-  if (!state.comparison) {
+  if (!state.comparison || state.mode === "ai" || state.mode === "folder") {
     state.changes = [];
     state.changeIndex = -1;
     updateChangeNav();
+    const minimap = $("#diff-minimap");
+    if (minimap) minimap.hidden = true;
     return;
   }
 
   if (state.mode === "pages" || state.mode === "xray") {
-    state.changes = $$("#page-view .page-row").filter((row) =>
-      Array.from(row.querySelectorAll(".rect")).some((rect) => rect.offsetParent !== null)
-    );
+    const boxesOff = document.body.classList.contains("boxes-off");
+    state.changes = boxesOff
+      ? []
+      : $$("#page-view .page-row").filter((row) => row.querySelector(".rect") !== null);
   } else {
     state.changes = $$(
       "#text-view .row.add, #text-view .row.del, #text-view .row.mod, #text-view .row.shifted"
-    ).filter((row) => row.offsetParent !== null);
+    ).filter((row) => row.style.display !== "none");
   }
   state.changeIndex = -1;
   updateChangeNav();
@@ -2858,10 +2865,13 @@ function renderMinimap() {
   );
   const trackHeight = track.clientHeight || (window.innerHeight - 48);
 
-  const nodes =
+  const rawNodes =
     state.mode === "pages" || state.mode === "xray"
-      ? $$("#page-view .rect:not(.search-hit)").filter((r) => r.offsetParent !== null)
+      ? $$("#page-view .rect:not(.search-hit)")
       : state.changes;
+  const maxMarks = 240;
+  const step = Math.max(1, Math.ceil(rawNodes.length / maxMarks));
+  const nodes = step === 1 ? rawNodes : rawNodes.filter((_, idx) => idx % step === 0);
 
   const fragment = document.createDocumentFragment();
   for (const node of nodes) {
@@ -3227,17 +3237,26 @@ function setMode(mode) {
   if ($("#annotate-clear")) {
     $("#annotate-clear").hidden = !isPageMode || !(state.annotations && state.annotations.length);
   }
-  if (state.comparison && (prevMode !== mode) && isPageMode) {
-    renderPages();
+  if (state.comparison && mode === "text" && state._textDirty) {
+    state._textDirty = false;
+    renderText();
+  }
+  if (state.comparison && isPageMode) {
+    const compKey = state.comparison.id || "__local__";
+    if (state._pagesRenderedForId !== compKey || state._pagesRenderedMode !== mode) {
+      renderPages();
+    }
   }
   if (isAiMode) {
     renderAiView();
   }
   const searchBar = $("#search-bar");
-  if (searchBar && !searchBar.hidden && state.search && state.search.query) {
+  if (searchBar && !searchBar.hidden && state.search && state.search.query && !isAiMode && !isFolderMode) {
     performSearch(state.search.query);
   }
-  applyZoom();
+  if (isPageMode) {
+    applyZoom();
+  }
   collectChanges();
   syncActiveTab();
 
@@ -4436,7 +4455,12 @@ async function runAiAnalysis() {
     if (!resp.ok) throw new Error(await readError(resp));
     const result = await resp.json();
     state.comparison.ai_analysis = result;
-    renderText();
+    if (state.mode === "text") {
+      renderText();
+      state._textDirty = false;
+    } else {
+      state._textDirty = true;
+    }
     syncActiveTab();
   } catch (err) {
     state.aiError = err.message || i18n.t("error.generic");
@@ -4451,8 +4475,9 @@ function findAiItemForRow(rowIndex, effectiveNum) {
   if (state.comparison.row_ai_map && state.comparison.row_ai_map[rowIndex]) {
     return state.comparison.row_ai_map[rowIndex];
   }
-  const items =
-    (state.comparison.ai_analysis && state.comparison.ai_analysis.items) || [];
+  const analysis = state.comparison.ai_analysis;
+  if (!analysis || !analysis.items || !analysis.items.length) return null;
+  const items = analysis.items;
   return (
     items.find((it) => it.row === rowIndex) ||
     (effectiveNum > 0 ? items.find((it) => it.id === effectiveNum) : null) ||

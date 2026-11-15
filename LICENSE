@@ -1,60 +1,84 @@
-DiffAnyDoc End-User License Agreement (EULA)
+DiffAnyDoc Commercial End-User License Agreement (EULA)
 Copyright (c) 2026 Mehmet Cagri Aksoy (mcagriaksoy). All rights reserved.
 
-IMPORTANT — READ CAREFULLY BEFORE INSTALLING OR USING THIS SOFTWARE.
+IMPORTANT — READ CAREFULLY BEFORE INSTALLING, COPYING, OR USING THIS SOFTWARE.
 
-This End-User License Agreement ("Agreement") is a legal agreement between you
-(either an individual or a single entity, "Licensee") and Mehmet Cagri Aksoy
-("Licensor") for the DiffAnyDoc software application, including its executable
-binaries, user interface, documentation, and associated media ("Software").
+This End-User License Agreement ("Agreement") is a binding legal agreement
+between you (either an individual or a legal entity, "Licensee") and
+Mehmet Cagri Aksoy ("Licensor") governing your use of the DiffAnyDoc software
+application, including its executable binaries, source modules, user interface,
+visual and semantic comparison algorithms, documentation, and associated media
+(collectively, the "Software").
 
-By installing, copying, or otherwise using the Software, you agree to be bound
-by the terms of this Agreement.
+By downloading, installing, copying, accessing, or otherwise using the Software,
+you agree to be bound by the terms of this Agreement.
 
-1. LICENSE GRANT
-Licensor grants you a non-exclusive, non-transferable, revocable, limited
-license to install and run the Software on compatible devices solely for your
-personal or internal business document comparison purposes.
+1. COMMERCIAL & PERSONAL LICENSE GRANT
+Subject to the terms of this Agreement and applicable license tier or purchase
+agreement, Licensor grants Licensee a non-exclusive, non-transferable,
+non-sublicensable, revocable license to install and run the Software on
+compatible devices owned or controlled by Licensee solely for Licensee's
+personal or internal business document comparison operations.
 
-2. INTELLECTUAL PROPERTY & OWNERSHIP
-The Software is licensed, not sold. All title, copyrights, trade secrets,
-source code, visual comparison algorithms, user interfaces, branding, icons,
-and documentation remain the exclusive property of Mehmet Cagri Aksoy.
+2. INTELLECTUAL PROPERTY & EXCLUSIVE OWNERSHIP
+The Software is licensed, not sold. All title, ownership rights, copyrights,
+trademarks, trade secrets, visual registration algorithms, numbered layout-shift
+matching algorithms, intermediate document representations, user interfaces,
+branding, icons, and documentation in and to the Software remain the exclusive
+property of Mehmet Cagri Aksoy. All rights not expressly granted in this
+Agreement are reserved by Licensor.
 
-3. RESTRICTIONS
-Except as expressly permitted by applicable law or written agreement with the
-Licensor, you may not:
-  a) Reverse engineer, decompile, disassemble, or attempt to derive the source
-     code of compiled distributions of the Software;
-  b) Rent, lease, lend, sell, redistribute, sublicense, or commercially host
-     the Software (including as a SaaS or web-hosted service) without prior
-     written authorization from the Licensor;
-  c) Remove or alter any copyright, trademark, or proprietary notices in the
-     Software.
+3. COMMERCIAL RESTRICTIONS
+Except as expressly permitted by applicable mandatory law or a separate written
+commercial agreement signed by Licensor, you may not:
+  a) Sell, resell, rent, lease, lend, sublicense, distribute, or commercially
+     exploit the Software or any standalone build thereof to third parties;
+  b) Host, offer, or provide the Software as a managed service, cloud service,
+     Software-as-a-Service (SaaS), API endpoint, or time-sharing bureau;
+  c) Reverse engineer, decompile, disassemble, or attempt to derive the source
+     code or underlying trade secrets of compiled distributions of the Software;
+  d) Rebrand, white-label, or remove/alter any copyright, trademark, license,
+     or proprietary notices contained within the Software or its reports.
 
-4. PRIVACY & LOCAL-ONLY PROCESSING
-All document parsing, text extraction, OCR, and visual overlay diffing execute
-locally on your device. No document contents or personal data are transmitted
-by the Software. Optional update checks run only when explicitly triggered by
-the user and contact public GitHub Releases without sending document or device
-identifiers. See PRIVACY.md for details.
+4. PRIVACY & 100% LOCAL-ONLY PROCESSING
+All document parsing, text extraction, Optical Character Recognition (OCR),
+pixel registration, X-Ray overlay rendering, and Local AI semantic inference
+execute 100% locally on your device. No document contents, filenames, excerpts,
+or personal data are ever transmitted to Licensor or any external server.
+Optional update checks and one-time local AI model downloads occur only when
+explicitly initiated by the user. See PRIVACY.md for full details.
 
-5. THIRD-PARTY OPEN SOURCE COMPONENTS
-The Software incorporates third-party open-source libraries under permissive
-licenses (MIT, Apache-2.0, BSD-3-Clause, HPND/MIT-CMU). Those components
-remain subject to their respective license terms, which are listed in
-NOTICE and THIRD_PARTY_LICENSES.md.
+5. LOCAL AI SEMANTIC ANALYSIS DISCLAIMER
+The Software includes an optional local AI analysis feature powered by local
+CPU inference (llamafile and permissively licensed GGUF models such as Qwen2.5,
+Qwen3, or SmolLM2). AI-generated summaries, verdicts, and explanations are
+provided strictly as automated assistive aids and may contain inaccuracies or
+omissions. They do not constitute legal, financial, compliance, or professional
+advice; Licensee remains solely responsible for verifying all document changes.
 
-6. DISCLAIMER OF WARRANTIES
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+6. THIRD-PARTY OPEN SOURCE COMPONENTS
+The Software incorporates third-party open-source components licensed under
+commercial-friendly permissive licenses (MIT, Apache-2.0, BSD-3-Clause, ISC,
+HPND/MIT-CMU, PSF). No copyleft (GPL/AGPL) components are bundled. Attributions
+and license notices are provided in NOTICE, THIRD_PARTY_NOTICES.md, and
+THIRD_PARTY_LICENSES.md.
 
-7. LIMITATION OF LIABILITY
+7. DISCLAIMER OF WARRANTIES
+THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT WARRANTY OF ANY
+KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, ACCURACY, AND
+NONINFRINGEMENT.
+
+8. LIMITATION OF LIABILITY
 TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL THE
-LICENSOR BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL
-DAMAGES WHATSOEVER ARISING OUT OF THE USE OF OR INABILITY TO USE THE SOFTWARE.
+LICENSOR BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, PUNITIVE, OR
+CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING LOSS OF PROFITS, BUSINESS
+INTERRUPTION, OR LOSS OF DATA) ARISING OUT OF THE USE OF OR INABILITY TO USE
+THE SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES. LICENSOR'S
+CUMULATIVE LIABILITY SHALL NOT EXCEED THE LICENSE FEES ACTUALLY PAID BY
+LICENSEE FOR THE SOFTWARE DURING THE TWELVE (12) MONTHS PRECEDING THE CLAIM.
 
-8. CONTACT & SUPPORT
+9. CONTACT & COMMERCIAL INQUIRIES
+Copyright Holder & Author: Mehmet Cagri Aksoy (mcagriaksoy)
 Project Homepage: https://github.com/mcagriaksoy/DiffAnyDoc
-Questions & Issues: https://github.com/mcagriaksoy/DiffAnyDoc/issues
+Commercial Licensing & Support: https://github.com/mcagriaksoy/DiffAnyDoc/issues

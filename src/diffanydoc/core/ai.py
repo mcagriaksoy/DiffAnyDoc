@@ -498,6 +498,7 @@ def ensure_server_running(
 
     with _SERVER_LOCK:
         port = _free_port()
+        cpu_threads = max(1, min((os.cpu_count() or 4) - 1, 6))
         cmd = [
             *cmd_prefix,
             "--server",
@@ -507,7 +508,9 @@ def ensure_server_running(
             "--port",
             str(port),
             "-c",
-            "4096",
+            "2048",
+            "-t",
+            str(cpu_threads),
         ]
         # On Unix, llamafile is an APE polyglot that can be invoked via sh if binfmt_misc blocks direct exec
         try:
@@ -595,7 +598,7 @@ def get_status(ai_dir: Path | None = None) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 
-def build_comparison_digest(result: DiffResult, max_items: int = 28) -> list[dict[str, Any]]:
+def build_comparison_digest(result: DiffResult, max_items: int = 12) -> list[dict[str, Any]]:
     """Extract a compact, numbered list of changed or shifted blocks from ``result``."""
     digest: list[dict[str, Any]] = []
     seq = 1
@@ -616,8 +619,8 @@ def build_comparison_digest(result: DiffResult, max_items: int = 28) -> list[dic
             continue
 
         page_num = (b.page + 1) if b is not None else ((a.page + 1) if a is not None else 1)
-        left_txt = (a.text.strip()[:220] if a and a.text else "")
-        right_txt = (b.text.strip()[:220] if b and b.text else "")
+        left_txt = (a.text.strip()[:150] if a and a.text else "")
+        right_txt = (b.text.strip()[:150] if b and b.text else "")
         if not left_txt and not right_txt:
             continue
 
@@ -777,13 +780,14 @@ def analyze_comparison(
         base_url,
         cfg.custom_model or model_label,
         messages,
-        max_tokens=cfg.max_tokens,
+        max_tokens=min(cfg.max_tokens, 512),
         timeout=cfg.timeout,
     )
 
     by_id = {int(d["id"]): d for d in digest}
     parsed = _extract_json_object(raw_reply)
     findings: list[AiFinding] = []
+    seen_fids: set[int] = set()
 
     if parsed:
         summary = str(parsed.get("summary") or "").strip()
@@ -796,6 +800,7 @@ def analyze_comparison(
                 if not isinstance(item, dict):
                     continue
                 fid = int(item.get("id") or idx)
+                seen_fids.add(fid)
                 src = by_id.get(fid) or (digest[idx - 1] if idx - 1 < len(digest) else {})
                 cat = str(item.get("category") or "").strip().lower()
                 if cat not in ("content", "rewording", "layout"):
@@ -817,43 +822,44 @@ def analyze_comparison(
         all_shifts = all(d.get("type") == "position_shift_only" for d in digest)
         verdict = "layout_only" if all_shifts else "minor_changes"
 
-    if not findings:
-        for d in digest:
-            is_shift = d.get("type") == "position_shift_only"
-            fid = int(d["id"])
-            shift_str = d.get("shift") or ""
-            if is_shift:
-                title = (
-                    f"#{fid} Konum Kayması ({shift_str})"
-                    if is_tr
-                    else f"#{fid} Position Shift ({shift_str})"
-                )
-                expl = (
-                    f"Metin her iki belgede de birebir aynıdır, yalnızca sayfadaki konumu değişmiştir ({shift_str})."
-                    if is_tr
-                    else f"The text is identical in both documents; only its position on the page shifted ({shift_str})."
-                )
-                cat = "layout"
-            else:
-                title = f"#{fid} İçerik Farkı" if is_tr else f"#{fid} Content Difference"
-                expl = (
-                    f"Sol: '{d.get('left')}' → Sağ: '{d.get('right')}'"
-                    if is_tr
-                    else f"Left: '{d.get('left')}' → Right: '{d.get('right')}'"
-                )
-                cat = "content"
-            findings.append(
-                AiFinding(
-                    id=fid,
-                    category=cat,
-                    title=title,
-                    explanation=expl,
-                    page=int(d.get("page") or 1),
-                    row=int(d.get("row") if d.get("row") is not None else -1),
-                    left_text=str(d.get("left") or ""),
-                    right_text=str(d.get("right") or ""),
-                )
+    for d in digest:
+        fid = int(d["id"])
+        if fid in seen_fids:
+            continue
+        is_shift = d.get("type") == "position_shift_only"
+        shift_str = d.get("shift") or ""
+        if is_shift:
+            title = (
+                f"#{fid} Konum Kayması ({shift_str})"
+                if is_tr
+                else f"#{fid} Position Shift ({shift_str})"
             )
+            expl = (
+                f"Metin her iki belgede de birebir aynıdır, yalnızca sayfadaki konumu değişmiştir ({shift_str})."
+                if is_tr
+                else f"The text is identical in both documents; only its position on the page shifted ({shift_str})."
+            )
+            cat = "layout"
+        else:
+            title = f"#{fid} İçerik Farkı" if is_tr else f"#{fid} Content Difference"
+            expl = (
+                f"Sol: '{d.get('left')}' → Sağ: '{d.get('right')}'"
+                if is_tr
+                else f"Left: '{d.get('left')}' → Right: '{d.get('right')}'"
+            )
+            cat = "content"
+        findings.append(
+            AiFinding(
+                id=fid,
+                category=cat,
+                title=title,
+                explanation=expl,
+                page=int(d.get("page") or 1),
+                row=int(d.get("row") if d.get("row") is not None else -1),
+                left_text=str(d.get("left") or ""),
+                right_text=str(d.get("right") or ""),
+            )
+        )
 
     if not summary:
         only_layout = all(f.category == "layout" for f in findings)
