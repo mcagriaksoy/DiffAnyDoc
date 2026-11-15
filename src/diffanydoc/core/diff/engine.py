@@ -572,30 +572,87 @@ def _is_change(row: Row) -> bool:
     return row.kind != "equal" or bool(getattr(row, "format_changes", None))
 
 
-_MIN_MOVE_LEN = 12
+_MIN_MOVE_LEN = 4
 
 
 def _mark_moved_rows(rows: list[Row]) -> None:
-    """Flag deleted/inserted rows whose normalized text appears identically on the other side."""
+    """Flag deleted/inserted rows whose text appears identically or similarly on the other side."""
+    from difflib import SequenceMatcher
+    import re
+
     inserts_by_text: dict[str, list[Row]] = {}
+    unmatched_inserts: list[Row] = []
     for row in rows:
         if row.kind == "insert" and row.right is not None:
-            key = row.right.norm.strip()
+            key = row.right.norm.strip().casefold()
             if len(key) >= _MIN_MOVE_LEN:
                 inserts_by_text.setdefault(key, []).append(row)
 
-    if not inserts_by_text:
-        return
-
+    next_move_id = 1
+    unmatched_deletes: list[Row] = []
     for row in rows:
         if row.kind == "delete" and row.left is not None:
-            key = row.left.norm.strip()
+            key = row.left.norm.strip().casefold()
             if len(key) >= _MIN_MOVE_LEN:
                 bucket = inserts_by_text.get(key)
                 if bucket:
                     partner = bucket.pop(0)
                     row.moved = True
                     partner.moved = True
+                    row.move_id = next_move_id
+                    partner.move_id = next_move_id
+                    next_move_id += 1
+                else:
+                    unmatched_deletes.append(row)
+
+    for bucket in inserts_by_text.values():
+        unmatched_inserts.extend(bucket)
+
+    if not unmatched_deletes or not unmatched_inserts:
+        return
+
+    def _tokens(text: str) -> set[str]:
+        return {w for w in re.findall(r"\w+", text.casefold()) if len(w) >= 3}
+
+    candidates: list[tuple[float, int, int]] = []
+    ins_tokens = [
+        (_tokens(r.right.norm), r.right.norm.strip().casefold())
+        for r in unmatched_inserts
+        if r.right is not None
+    ]
+    for di, d_row in enumerate(unmatched_deletes):
+        assert d_row.left is not None
+        d_norm = d_row.left.norm.strip().casefold()
+        d_toks = _tokens(d_norm)
+        if not d_toks or len(d_norm) < 6:
+            continue
+        for ii, (i_toks, i_norm) in enumerate(ins_tokens):
+            if not i_toks or len(i_norm) < 6:
+                continue
+            shared = d_toks & i_toks
+            if not any(len(w) >= 4 for w in shared):
+                continue
+            jaccard = len(shared) / len(d_toks | i_toks)
+            seq_ratio = SequenceMatcher(None, d_norm, i_norm).ratio()
+            score = max(jaccard, seq_ratio)
+            if score >= 0.50:
+                candidates.append((score, di, ii))
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    used_d: set[int] = set()
+    used_i: set[int] = set()
+    for _score, di, ii in candidates:
+        if di in used_d or ii in used_i:
+            continue
+        used_d.add(di)
+        used_i.add(ii)
+        d_row = unmatched_deletes[di]
+        i_row = unmatched_inserts[ii]
+        d_row.moved = True
+        i_row.moved = True
+        d_row.move_id = next_move_id
+        i_row.move_id = next_move_id
+        next_move_id += 1
 
 
 def _collapse_moved_to_equal(rows: list[Row]) -> list[Row]:

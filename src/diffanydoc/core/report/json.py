@@ -43,6 +43,7 @@ def result_to_dict(result: DiffResult, *, include_pages: bool = False) -> dict[s
             {
                 "kind": row.kind,
                 "moved": row.moved,
+                "move_id": row.move_id,
                 "hidden_before": row.hidden_before,
                 "left": left,
                 "right": right,

@@ -1737,6 +1737,40 @@ function renderText() {
       )
     );
   }
+  const movePairNumbers = new Map();
+  const pendingMoveDeletes = new Map();
+  const pendingMoveInserts = new Map();
+  let nextMoveNum = 1;
+  const moveKey = (text) => String(text || "").trim().toLowerCase().replace(/\s+/g, " ");
+  for (let i = 0; i < data.rows.length; i++) {
+    const r = data.rows[i];
+    if (!r.moved) continue;
+    if (r.kind === "delete" && r.left) {
+      const k = moveKey(r.left.text);
+      const q = pendingMoveInserts.get(k);
+      if (q && q.length) {
+        const pairIdx = q.shift();
+        const num = nextMoveNum++;
+        movePairNumbers.set(i, num);
+        movePairNumbers.set(pairIdx, num);
+      } else {
+        if (!pendingMoveDeletes.has(k)) pendingMoveDeletes.set(k, []);
+        pendingMoveDeletes.get(k).push(i);
+      }
+    } else if (r.kind === "insert" && r.right) {
+      const k = moveKey(r.right.text);
+      const q = pendingMoveDeletes.get(k);
+      if (q && q.length) {
+        const pairIdx = q.shift();
+        const num = nextMoveNum++;
+        movePairNumbers.set(pairIdx, num);
+        movePairNumbers.set(i, num);
+      } else {
+        if (!pendingMoveInserts.has(k)) pendingMoveInserts.set(k, []);
+        pendingMoveInserts.get(k).push(i);
+      }
+    }
+  }
   const lastPage = { left: -1, right: -1 };
   for (let rowIndex = 0; rowIndex < data.rows.length; rowIndex++) {
     const row = data.rows[rowIndex];
@@ -1767,7 +1801,8 @@ function renderText() {
             lastPage.left,
             "left",
             row.kind !== "equal",
-            rowIndex
+            rowIndex,
+            row.move_id || movePairNumbers.get(rowIndex) || 0
           ),
           buildCell(
             row.right,
@@ -1775,7 +1810,8 @@ function renderText() {
             lastPage.right,
             "right",
             row.kind !== "equal",
-            rowIndex
+            rowIndex,
+            row.move_id || movePairNumbers.get(rowIndex) || 0
           ),
         ]
       )
@@ -1793,7 +1829,8 @@ function buildCell(
   previousPage = -1,
   side = "left",
   copyable = false,
-  rowIndex = -1
+  rowIndex = -1,
+  moveNum = 0
 ) {
   if (!line) return el("div", { class: "cell" });
   const text = el("span", { class: "text" });
@@ -1814,6 +1851,15 @@ function buildCell(
     }
   } else {
     text.textContent = line.text;
+  }
+  if (moveNum > 0) {
+    text.append(
+      el("span", {
+        class: "move-badge",
+        title: `Moved / matched at another position (#${moveNum})`,
+        text: `(${moveNum})`,
+      })
+    );
   }
   if (line.style && line.style.position_shift) {
     const shift = line.style.position_shift;
