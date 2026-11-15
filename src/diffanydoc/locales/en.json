@@ -204,6 +204,7 @@
   "opt.modeStrict": "Visual & Position (Detect layout shifts)",
   "opt.modeTextOnly": "Ignore Layout Shifts (Text / OCR content only)",
   "shift.badge": "Position shift",
+  "shift.dismissHint": "Hide this shift arrow & box",
   "shift.detectedHint": "Same text exists on both sides at a different position ({shift})",
   "shift.ignoredHint": "Position shift ignored in Text-only mode — text is identical ({shift})",
   "shift.leftTag": "#{id} · Present on right ({shift})",

@@ -170,3 +170,43 @@ def test_pdf_position_shifts_have_unbroken_sequential_ids_and_no_false_pairs() -
     # Unrelated "EDUCATION" must NOT be paired or assigned a shift_id with the Agile bullet point
     for r in left_shifts:
         assert "EDUCATION" not in r["text"]
+
+
+def test_unchanged_lines_after_insertion_or_deletion_are_not_flagged_as_shifts() -> None:
+    from diffanydoc.core.diff.geometry import change_rects
+
+    left = Document(
+        path=Path("doc_a.pdf"),
+        kind="pdf",
+        pages=[
+            Page(
+                index=0,
+                width=595,
+                height=842,
+                blocks=[
+                    Block(text="Header Clause", bbox=(50.0, 50.0, 250.0, 66.0)),
+                    Block(text="Temporary paragraph removed in B.", bbox=(50.0, 80.0, 320.0, 96.0)),
+                    Block(text="Footer Clause Remains Unchanged", bbox=(50.0, 110.0, 300.0, 126.0)),
+                ],
+            )
+        ],
+    )
+    right = Document(
+        path=Path("doc_b.pdf"),
+        kind="pdf",
+        pages=[
+            Page(
+                index=0,
+                width=595,
+                height=842,
+                blocks=[
+                    Block(text="Header Clause", bbox=(50.0, 50.0, 250.0, 66.0)),
+                    Block(text="Footer Clause Remains Unchanged", bbox=(50.0, 80.0, 300.0, 96.0)),
+                ],
+            )
+        ],
+    )
+    result = compare(left, right, DiffOptions(fold_equal=False))
+    rects = change_rects(result)
+    assert [r for r in rects["left"].get("0", []) if r.get("kind") == "shift"] == []
+    assert [r for r in rects["right"].get("0", []) if r.get("kind") == "shift"] == []

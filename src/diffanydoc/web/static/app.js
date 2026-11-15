@@ -1563,6 +1563,7 @@ function renderResult() {
   }
 
   syncActiveTab();
+  state.dismissedShifts = new Set();
   state._pagesRenderedForId = null;
   state._pagesRenderedMode = null;
   state._textDirty = true;
@@ -2316,11 +2317,58 @@ function _boxCoveredByRects(box, rects) {
   return false;
 }
 
+const _shiftHoverTimers = new Map();
+
 function setShiftHover(shiftId, active) {
   if (!shiftId) return;
-  for (const node of $$(`[data-shift-id="${shiftId}"]`)) {
-    node.classList.toggle("is-shift-active", active);
+  const key = String(shiftId);
+  if (_shiftHoverTimers.has(key)) {
+    clearTimeout(_shiftHoverTimers.get(key));
+    _shiftHoverTimers.delete(key);
   }
+  const apply = () => {
+    for (const node of $$(`[data-shift-id="${key}"]`)) {
+      node.classList.toggle("is-shift-active", active);
+    }
+  };
+  if (active) {
+    apply();
+  } else {
+    _shiftHoverTimers.set(
+      key,
+      setTimeout(() => {
+        _shiftHoverTimers.delete(key);
+        apply();
+      }, 180)
+    );
+  }
+}
+
+function dismissShift(shiftId) {
+  const numId = Number(shiftId);
+  if (!numId) return;
+  if (!state.dismissedShifts) state.dismissedShifts = new Set();
+  state.dismissedShifts.add(numId);
+  for (const node of $$(`#page-view [data-shift-id="${numId}"]`)) {
+    node.remove();
+  }
+  // Renumber remaining shift badges sequentially (1, 2, 3...) without gaps
+  const remainingIds = [];
+  const seenIds = new Set();
+  for (const rect of $$('#page-view .page-card[data-side="left"] .rect.shift[data-shift-id]')) {
+    const sid = rect.getAttribute("data-shift-id");
+    if (sid && !seenIds.has(sid)) {
+      seenIds.add(sid);
+      remainingIds.push(sid);
+    }
+  }
+  remainingIds.forEach((sid, idx) => {
+    const displayNum = String(idx + 1);
+    for (const badge of $$(`#page-view .rect.shift[data-shift-id="${sid}"] .rect-shift-badge`)) {
+      badge.textContent = displayNum;
+    }
+  });
+  collectChanges();
 }
 
 function addRect(
@@ -2338,6 +2386,9 @@ function addRect(
   const width = Math.max(x1 - x0, 0.5);
   const height = Math.max(bottom - top, 0.5);
   const shiftId = meta && meta.shift_id ? Number(meta.shift_id) : 0;
+  if (kind === "shift" && shiftId > 0 && state.dismissedShifts && state.dismissedShifts.has(shiftId)) {
+    return;
+  }
   const attrs = {
     class: `rect ${kind}`,
     title,
@@ -2366,6 +2417,17 @@ function addRect(
       el("span", {
         class: "rect-shift-badge",
         text: String(shiftId),
+      }),
+      el("button", {
+        class: "rect-shift-dismiss",
+        type: "button",
+        title: i18n.t("shift.dismissHint"),
+        "aria-label": i18n.t("shift.dismissHint"),
+        text: "\u00d7",
+        onclick: (e) => {
+          e.stopPropagation();
+          dismissShift(shiftId);
+        },
       })
     );
   }
@@ -2373,19 +2435,22 @@ function addRect(
 }
 
 function attachCrossPageShiftArrows(rowEl) {
-  const leftShiftRects = rowEl.querySelectorAll('.page-card[data-side="left"] .rect.shift[data-shift-id]');
-  const rightShiftRects = rowEl.querySelectorAll('.page-card[data-side="right"] .rect.shift[data-shift-id]');
-  if (!leftShiftRects.length || !rightShiftRects.length) return;
+  const initLeft = rowEl.querySelectorAll('.page-card[data-side="left"] .rect.shift[data-shift-id]');
+  const initRight = rowEl.querySelectorAll('.page-card[data-side="right"] .rect.shift[data-shift-id]');
+  if (!initLeft.length || !initRight.length) return;
 
   const ns = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(ns, "svg");
   svg.setAttribute("class", "cross-page-svg");
 
   const update = () => {
+    const leftShiftRects = rowEl.querySelectorAll('.page-card[data-side="left"] .rect.shift[data-shift-id]');
+    const rightShiftRects = rowEl.querySelectorAll('.page-card[data-side="right"] .rect.shift[data-shift-id]');
     const rowBounds = rowEl.getBoundingClientRect();
     if (!rowBounds.width || !rowBounds.height) return;
     svg.setAttribute("viewBox", `0 0 ${rowBounds.width} ${rowBounds.height}`);
     svg.replaceChildren();
+    if (!leftShiftRects.length || !rightShiftRects.length) return;
 
     const defs = document.createElementNS(ns, "defs");
     const marker = document.createElementNS(ns, "marker");
@@ -2413,6 +2478,7 @@ function attachCrossPageShiftArrows(rowEl) {
     for (const lEl of leftShiftRects) {
       const id = lEl.getAttribute("data-shift-id");
       if (!id || seen.has(id) || !rightMap.has(id)) continue;
+      if (state.dismissedShifts && state.dismissedShifts.has(Number(id))) continue;
       seen.add(id);
       const rEl = rightMap.get(id);
       const lb = lEl.getBoundingClientRect();
@@ -2424,6 +2490,21 @@ function attachCrossPageShiftArrows(rowEl) {
       const x2 = rb.left - rowBounds.left;
       const y2 = (rb.top + rb.bottom) / 2 - rowBounds.top;
       const spanX = Math.max(40, (x2 - x1) * 0.42);
+      const dAttr = `M ${x1} ${y1} C ${x1 + spanX} ${y1}, ${x2 - spanX} ${y2}, ${x2} ${y2}`;
+
+      const grp = document.createElementNS(ns, "g");
+      grp.setAttribute("class", "cross-shift-group");
+      grp.setAttribute("data-shift-id", id);
+      if (lEl.classList.contains("is-shift-active")) {
+        grp.classList.add("is-shift-active");
+      }
+      grp.addEventListener("mouseenter", () => setShiftHover(id, true));
+      grp.addEventListener("mouseleave", () => setShiftHover(id, false));
+
+      const hitPath = document.createElementNS(ns, "path");
+      hitPath.setAttribute("class", "cross-shift-hit");
+      hitPath.setAttribute("d", dAttr);
+      grp.appendChild(hitPath);
 
       const path = document.createElementNS(ns, "path");
       path.setAttribute("class", "cross-shift-path");
@@ -2431,13 +2512,12 @@ function attachCrossPageShiftArrows(rowEl) {
       if (lEl.classList.contains("is-shift-active")) {
         path.classList.add("is-shift-active");
       }
-      path.setAttribute(
-        "d",
-        `M ${x1} ${y1} C ${x1 + spanX} ${y1}, ${x2 - spanX} ${y2}, ${x2} ${y2}`
-      );
+      path.setAttribute("d", dAttr);
       path.setAttribute("marker-start", "url(#cross-shift-arrowhead)");
       path.setAttribute("marker-end", "url(#cross-shift-arrowhead)");
-      svg.appendChild(path);
+      grp.appendChild(path);
+
+      svg.appendChild(grp);
     }
   };
 

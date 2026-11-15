@@ -204,6 +204,7 @@
   "opt.modeStrict": "Görsel ve Konum Odaklı (Kaymaları algıla)",
   "opt.modeTextOnly": "Kaymaları Yok Say (Sadece Metin / OCR içeriği)",
   "shift.badge": "Konum kayması",
+  "shift.dismissHint": "Bu oku ve kutuyu gizle",
   "shift.detectedHint": "Bu metin her iki tarafta da mevcut, yalnızca konumu farklı ({shift})",
   "shift.ignoredHint": "Sadece Metin modunda konum kayması yok sayıldı — içerik aynı ({shift})",
   "shift.leftTag": "#{id} · Sağda mevcut ({shift})",
