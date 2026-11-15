@@ -64,7 +64,7 @@ def align_pages(left: Document, right: Document) -> list[PagePair]:
                 PagePair(left=i, right=i, similarity=1.0)
                 for i in range(left.page_count)
             ]
-        if left.page_count * right.page_count <= 250_000:
+        if left.page_count * right.page_count <= 1_600:
             return _align_block(
                 list(range(left.page_count)),
                 list(range(right.page_count)),
@@ -106,9 +106,21 @@ def _align_block(
         ]
 
     n, m = len(left), len(right)
-    similarity = [
-        [_jaccard(left_words[i], right_words[j]) for j in right] for i in left
-    ]
+    if n * m > 2_500:
+        band = max(14, abs(n - m) + 10)
+        similarity = [
+            [
+                _jaccard(left_words[left[ii]], right_words[right[jj]])
+                if abs(ii - jj) <= band
+                else 0.0
+                for jj in range(m)
+            ]
+            for ii in range(n)
+        ]
+    else:
+        similarity = [
+            [_jaccard(left_words[i], right_words[j]) for j in right] for i in left
+        ]
     # score[i][j]: best total for left[:i] vs right[:j]. A match earns
     # (similarity - threshold), so only pages that really correspond pair up.
     score = [[0.0] * (m + 1) for _ in range(n + 1)]

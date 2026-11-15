@@ -207,7 +207,11 @@ def document_lines(
                     collapse_whitespace=collapse_whitespace,
                 )
             ]
-        if reflow and any(b.bbox is not None for b in blocks):
+        if (
+            reflow
+            and document.kind in ("pdf", "image")
+            and any(b.bbox is not None for b in blocks)
+        ):
             blocks = reflow_blocks(blocks, page.width)
         for block in blocks:
             if block.kind == "text":

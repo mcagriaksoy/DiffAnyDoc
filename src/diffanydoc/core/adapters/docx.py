@@ -61,20 +61,22 @@ class DocxAdapter:
                     ) from exc
                 core_xml = read_optional(package, "docProps/core.xml")
                 rels_xml = read_optional(package, "word/_rels/document.xml.rels")
+                all_names = package.namelist()
+                all_names_set = set(all_names)
                 header_parts = sorted(
                     name
-                    for name in package.namelist()
+                    for name in all_names
                     if name.startswith("word/header") and name.endswith(".xml")
                 )
                 footer_parts = sorted(
                     name
-                    for name in package.namelist()
+                    for name in all_names
                     if name.startswith("word/footer") and name.endswith(".xml")
                 )
                 note_parts = [
                     name
                     for name in ("word/footnotes.xml", "word/endnotes.xml")
-                    if name in package.namelist()
+                    if name in all_names_set
                 ]
                 headers_xml = [package.read(name) for name in header_parts]
                 footers_xml = [package.read(name) for name in footer_parts]
@@ -183,20 +185,39 @@ def _extract_images_from_container(
                         pass
                 break
         img_bytes = None
+        resolved_zip_target: str | None = None
         if package is not None:
             zip_target = target if target.startswith("word/") else f"word/{target}"
             if zip_target.startswith("/"):
                 zip_target = zip_target.lstrip("/")
+            info = None
             try:
-                img_bytes = package.read(zip_target)
+                info = package.getinfo(zip_target)
+                resolved_zip_target = zip_target
             except KeyError:
                 for name_in_zip in package.namelist():
                     if name_in_zip.endswith(name):
                         try:
-                            img_bytes = package.read(name_in_zip)
+                            info = package.getinfo(name_in_zip)
+                            resolved_zip_target = name_in_zip
                             break
                         except Exception:
                             pass
+            if info is not None and resolved_zip_target is not None:
+                if info.file_size <= 256 * 1024:
+                    try:
+                        img_bytes = package.read(resolved_zip_target)
+                    except Exception:
+                        img_bytes = None
+                elif w_pt <= 0 or h_pt <= 0:
+                    try:
+                        from PIL import Image
+
+                        with package.open(resolved_zip_target) as zf, Image.open(zf) as pil_img:
+                            w_pt = round(pil_img.width * 72.0 / 96.0, 1)
+                            h_pt = round(pil_img.height * 72.0 / 96.0, 1)
+                    except Exception:
+                        pass
         if img_bytes and (w_pt <= 0 or h_pt <= 0):
             try:
                 import io
@@ -219,6 +240,7 @@ def _extract_images_from_container(
                 source_ref={
                     "name": name,
                     "data": img_bytes,
+                    "zip_target": resolved_zip_target,
                     "width_pt": w_pt,
                     "height_pt": h_pt,
                 },

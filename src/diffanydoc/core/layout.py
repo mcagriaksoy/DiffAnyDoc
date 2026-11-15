@@ -276,6 +276,7 @@ def paginate_document(
     for p in doc.pages:
         all_blocks.extend(p.blocks)
 
+    build_word_spans = len(all_blocks) <= 600
     pages: list[Page] = []
     current_page_idx = 0
     current_blocks: list[Block] = []
@@ -368,26 +369,27 @@ def paginate_document(
             )
         block.bbox = b_box
 
-        # Generate per-word spans so changed words can be boxed accurately
-        words = block.text.split()
-        spans: list[Span] = []
-        cur_x = margin
-        cur_y = y
-        char_idx = 0
-        for w in words:
-            w_idx = block.text.find(w, char_idx)
-            if w_idx != -1:
-                char_idx = w_idx
-            w_len_pt = max(len(w) * avg_char_w, 4.0)
-            if cur_x + w_len_pt > page_width - margin and cur_x > margin:
-                cur_x = margin
-                cur_y += line_h
-            w_box: BBox = (cur_x, cur_y, cur_x + w_len_pt, cur_y + line_h)
-            spans.append(Span(start=char_idx, end=char_idx + len(w), page=current_page_idx, bbox=w_box))
-            cur_x += w_len_pt + avg_char_w
-            char_idx += len(w)
+        if build_word_spans:
+            # Generate per-word spans so changed words can be boxed accurately
+            words = block.text.split()
+            spans: list[Span] = []
+            cur_x = margin
+            cur_y = y
+            char_idx = 0
+            for w in words:
+                w_idx = block.text.find(w, char_idx)
+                if w_idx != -1:
+                    char_idx = w_idx
+                w_len_pt = max(len(w) * avg_char_w, 4.0)
+                if cur_x + w_len_pt > page_width - margin and cur_x > margin:
+                    cur_x = margin
+                    cur_y += line_h
+                w_box: BBox = (cur_x, cur_y, cur_x + w_len_pt, cur_y + line_h)
+                spans.append(Span(start=char_idx, end=char_idx + len(w), page=current_page_idx, bbox=w_box))
+                cur_x += w_len_pt + avg_char_w
+                char_idx += len(w)
+            block.spans = spans
 
-        block.spans = spans
         current_blocks.append(block)
         y += b_height + (8.0 if is_heading else 4.0)
 

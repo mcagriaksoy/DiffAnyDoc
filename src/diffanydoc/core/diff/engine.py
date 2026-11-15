@@ -664,6 +664,14 @@ def _refine_replacement(
     as a moved block are preserved as single rows so move-pairing can match them.
     """
     rows: list[Row] = []
+    if len(left) * len(right) > 25_000:
+        for a, b in zip(left, right):
+            rows.append(_replace_row(a, b, tolerance=tolerance))
+        if len(left) > len(right):
+            rows.extend(_single_row(a, None, "delete") for a in left[len(right) :])
+        elif len(right) > len(left):
+            rows.extend(_single_row(None, b, "insert") for b in right[len(left) :])
+        return rows
     i = j = 0
     while i < len(left) and j < len(right):
         a, b = left[i], right[j]
@@ -830,6 +838,8 @@ def _mark_moved_rows(rows: list[Row]) -> None:
 
     if not unmatched_deletes or not unmatched_inserts:
         return
+    if len(unmatched_deletes) * len(unmatched_inserts) > 15_000:
+        return
 
     def _tokens(text: str) -> set[str]:
         return {w for w in re.findall(r"\w+", text.casefold()) if len(w) >= 3}
@@ -853,8 +863,14 @@ def _mark_moved_rows(rows: list[Row]) -> None:
             if not any(len(w) >= 4 for w in shared):
                 continue
             jaccard = len(shared) / len(d_toks | i_toks)
-            seq_ratio = SequenceMatcher(None, d_norm, i_norm).ratio()
-            score = max(jaccard, seq_ratio)
+            if jaccard >= 0.50:
+                score = jaccard
+            else:
+                matcher = SequenceMatcher(None, d_norm, i_norm)
+                if matcher.quick_ratio() < 0.50:
+                    continue
+                seq_ratio = matcher.ratio()
+                score = max(jaccard, seq_ratio)
             if score >= 0.50:
                 candidates.append((score, di, ii))
 

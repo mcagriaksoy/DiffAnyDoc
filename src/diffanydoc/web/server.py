@@ -101,12 +101,12 @@ def create_app() -> FastAPI:
         return get_status()
 
     @app.post("/api/ai/config")
-    async def ai_config_endpoint(body: dict[str, Any]) -> dict[str, Any]:
+    def ai_config_endpoint(body: dict[str, Any]) -> dict[str, Any]:
         from ..core.ai import get_status, load_config, save_config, stop_server
 
         cfg = load_config()
         if "preset" in body:
-            cfg.preset = str(body["preset"] or "qwen-0.5b")
+            cfg.preset = str(body["preset"] or "qwen-0.5b-q2")
         if "custom_endpoint" in body or "custom_endpoint_url" in body:
             cfg.custom_endpoint = str(
                 body.get("custom_endpoint") or body.get("custom_endpoint_url") or ""
@@ -123,14 +123,14 @@ def create_app() -> FastAPI:
         return get_status()
 
     @app.post("/api/ai/download")
-    async def ai_download_endpoint(body: dict[str, Any]) -> dict[str, Any]:
+    def ai_download_endpoint(body: dict[str, Any]) -> dict[str, Any]:
         from ..core.ai import AiError, cancel_download, get_status, start_download
 
         action = str(body.get("action") or "start")
         if action == "cancel":
             cancel_download()
             return get_status()
-        preset = str(body.get("preset") or "qwen-0.5b")
+        preset = str(body.get("preset") or "qwen-0.5b-q2")
         try:
             start_download(preset=preset)
             return get_status()
@@ -176,7 +176,7 @@ def create_app() -> FastAPI:
             return {"success": False, "error": str(exc), "installed": integrate.is_installed()}
 
     @app.post("/api/checksum")
-    async def checksum_paths(body: dict[str, Any]) -> JSONResponse:
+    def checksum_paths(body: dict[str, Any]) -> JSONResponse:
         left_path = Path(str(body.get("left", ""))).expanduser()
         right_path = Path(str(body.get("right", ""))).expanduser()
         if not left_path.is_file() or not right_path.is_file():
@@ -192,7 +192,7 @@ def create_app() -> FastAPI:
         )
 
     @app.post("/api/preload-path")
-    async def preload_path_endpoint(body: dict[str, Any]) -> JSONResponse:
+    def preload_path_endpoint(body: dict[str, Any]) -> JSONResponse:
         path = Path(str(body.get("path", ""))).expanduser()
         if not path.is_file():
             raise HTTPException(status_code=400, detail="file must exist")
@@ -220,7 +220,7 @@ def create_app() -> FastAPI:
         )
 
     @app.post("/api/preload")
-    async def preload_upload_endpoint(
+    def preload_upload_endpoint(
         file: UploadFile = File(...),
         other_sha256: str = Form(""),
         ocr: bool = Form(True),
@@ -271,7 +271,7 @@ def create_app() -> FastAPI:
         return {"language": lang, "strings": strings(lang)}
 
     @app.post("/api/compare")
-    async def compare_uploads(
+    def compare_uploads(
         left: UploadFile | None = File(None),
         right: UploadFile | None = File(None),
         left_path: str | None = Form(None),
@@ -326,7 +326,7 @@ def create_app() -> FastAPI:
         return JSONResponse(_summary(comparison))
 
     @app.post("/api/compare-paths")
-    async def compare_paths(body: dict[str, Any]) -> JSONResponse:
+    def compare_paths(body: dict[str, Any]) -> JSONResponse:
         left_path = Path(str(body.get("left", ""))).expanduser()
         right_path = Path(str(body.get("right", ""))).expanduser()
         if not left_path.is_file() or not right_path.is_file():
@@ -350,7 +350,7 @@ def create_app() -> FastAPI:
         return JSONResponse(_summary(comparison))
 
     @app.post("/api/compare-directories")
-    async def compare_directories_endpoint(body: dict[str, Any]) -> JSONResponse:
+    def compare_directories_endpoint(body: dict[str, Any]) -> JSONResponse:
         left = str(body.get("left", "")).strip()
         right = str(body.get("right", "")).strip()
         if not left or not right:
@@ -366,7 +366,7 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=500, detail=str(exc))
 
     @app.post("/api/compare-directories/csv")
-    async def compare_directories_csv_endpoint(body: dict[str, Any]) -> Response:
+    def compare_directories_csv_endpoint(body: dict[str, Any]) -> Response:
         import csv
         import io
 
@@ -395,7 +395,7 @@ def create_app() -> FastAPI:
         return JSONResponse(_get(comparison_id).payload)
 
     @app.post("/api/compare/{comparison_id}/recompare")
-    async def recompare_existing(comparison_id: str, body: dict[str, Any]) -> JSONResponse:
+    def recompare_existing(comparison_id: str, body: dict[str, Any]) -> JSONResponse:
         existing = _get(comparison_id)
         if not existing.left.is_file() or not existing.right.is_file():
             raise HTTPException(status_code=404, detail="source files no longer available")
@@ -423,7 +423,7 @@ def create_app() -> FastAPI:
         return JSONResponse(_summary(updated))
 
     @app.post("/api/compare/{comparison_id}/ai")
-    async def analyze_with_ai(comparison_id: str, body: dict[str, Any] | None = None) -> JSONResponse:
+    def analyze_with_ai(comparison_id: str, body: dict[str, Any] | None = None) -> JSONResponse:
         from ..core.ai import AiError, analyze_comparison
 
         comparison = _get(comparison_id)
@@ -436,7 +436,7 @@ def create_app() -> FastAPI:
         return JSONResponse(analysis.as_dict())
 
     @app.post("/api/compare/{comparison_id}/ai/row")
-    async def explain_row_ai_endpoint(
+    def explain_row_ai_endpoint(
         comparison_id: str, body: dict[str, Any]
     ) -> JSONResponse:
         from ..core.ai import AiError, explain_row_with_ai
