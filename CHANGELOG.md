@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.2] - 2026-11-15
+
+### Added
+- **3-Way Page Overlay Selector (`Off` / `Show boxes` / `Show lines`)**: Replaced the binary `Show boxes` switch in the headerbar with a 3-state segmented control (`#boxes-wrap`) allowing users to switch between `Off` (no boxes or lines), `Show boxes` (highlight boxes only), and `Show lines` (highlight boxes + cross-document connecting shift arrows).
+
+### Changed
+- **Clearer, User-Friendly Local AI Summary (`src/diffanydoc/core/ai.py`, `src/diffanydoc/web/static/app.js`)**: Removed technical coordinate deltas (`Δx/Δy pt`), raw millisecond timings, and GGUF quantization strings from the `✨ AI` view, replacing them with plain-language explanations, a 4-card visual metric overview (Similarity, Content Changes, Layout Shifts, Added/Removed), and clean Document A vs. Document B comparison snippets.
+- **Cross-Document Shift Arrows Only (`Pages` View) & Unbroken Sequential Numbering (`1..N`)**: Removed same-page and X-Ray shift arrows so connecting arrows only appear between Left Document A and Right Document B in `Pages` view, and ensured shifted blocks that also contain case or word edits always emit sequential `1, 2, 3...` shift badges on both pages.
+
 ## [0.7.0] - 2026-11-15
 
 ### Added

@@ -598,6 +598,49 @@ def get_status(ai_dir: Path | None = None) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 
+def _humanize_shift(shift_meta: dict[str, Any] | None, *, is_tr: bool) -> str:
+    """Convert raw dx/dy coordinate shift metadata into a friendly human description."""
+    if not shift_meta:
+        return ""
+    lp = shift_meta.get("left_page")
+    rp = shift_meta.get("right_page")
+    if lp is not None and rp is not None and lp != rp:
+        return (
+            f"Sayfa {int(lp) + 1} → Sayfa {int(rp) + 1}'e taşındı"
+            if is_tr
+            else f"Moved from Page {int(lp) + 1} to Page {int(rp) + 1}"
+        )
+    dx = float(shift_meta.get("dx") or 0.0)
+    dy = float(shift_meta.get("dy") or 0.0)
+    dirs_tr: list[str] = []
+    dirs_en: list[str] = []
+    if abs(dy) >= 12.0:
+        dirs_tr.append("aşağı" if dy > 0 else "yukarı")
+        dirs_en.append("down" if dy > 0 else "up")
+    if abs(dx) >= 12.0:
+        dirs_tr.append("sağa" if dx > 0 else "sola")
+        dirs_en.append("to the right" if dx > 0 else "to the left")
+    if dirs_tr:
+        return (
+            f"Sayfa içinde {' ve '.join(dirs_tr)} taşındı"
+            if is_tr
+            else f"Moved {' and '.join(dirs_en)} on the page"
+        )
+    return (
+        "Sayfa düzenindeki konumu değişti"
+        if is_tr
+        else "Repositioned on the page"
+    )
+
+
+def _strip_technical_jargon(text: str) -> str:
+    """Remove raw coordinate tokens like Δx/Δy/+80pt from LLM or fallback output."""
+    cleaned = re.sub(r"[←→↑↓↕]?\s*Δ[xy]\s*[+-]?\d+(?:\.\d+)?\s*pt", "", text)
+    cleaned = re.sub(r"\(\s*[·,\s]*\)", "", cleaned)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" ·-")
+    return cleaned
+
+
 def build_comparison_digest(result: DiffResult, max_items: int = 12) -> list[dict[str, Any]]:
     """Extract a compact, numbered list of changed or shifted blocks from ``result``."""
     digest: list[dict[str, Any]] = []
@@ -613,16 +656,17 @@ def build_comparison_digest(result: DiffResult, max_items: int = 12) -> list[dic
             (row.left_inline and any(s.kind != "equal" for s in row.left_inline))
             or (row.right_inline and any(s.kind != "equal" for s in row.right_inline))
         )
-        is_shift_only = bool(shift_meta and not has_inline_diff and a and b)
+        left_txt = (a.text.strip()[:160] if a and a.text else "")
+        right_txt = (b.text.strip()[:160] if b and b.text else "")
+        if not left_txt and not right_txt:
+            continue
+        is_case_only = bool(left_txt and right_txt and left_txt.casefold() == right_txt.casefold())
+        is_shift_only = bool(shift_meta and (not has_inline_diff or is_case_only) and a and b)
 
         if row.kind == "equal" and not shift_meta and not row.format_changes:
             continue
 
         page_num = (b.page + 1) if b is not None else ((a.page + 1) if a is not None else 1)
-        left_txt = (a.text.strip()[:150] if a and a.text else "")
-        right_txt = (b.text.strip()[:150] if b and b.text else "")
-        if not left_txt and not right_txt:
-            continue
 
         kind_tag = (
             "position_shift_only"
@@ -641,7 +685,9 @@ def build_comparison_digest(result: DiffResult, max_items: int = 12) -> list[dic
             "right": right_txt,
         }
         if shift_meta:
-            entry["shift"] = shift_meta.get("label", "")
+            entry["moved_on_page"] = True
+            entry["shift_tr"] = _humanize_shift(shift_meta, is_tr=True)
+            entry["shift_en"] = _humanize_shift(shift_meta, is_tr=False)
         digest.append(entry)
         if len(digest) >= max_items:
             break
@@ -740,36 +786,50 @@ def analyze_comparison(
     base_url, model_label = ensure_server_running(cfg, ai_dir)
 
     lang_instruction = (
-        "Yanıtını tamamen TÜRKÇE olarak ver."
+        "Yanıtını tamamen TÜRKÇE, sade ve kullanıcı dostu bir dille ver. Asla Δx, Δy, pt, koordinat veya teknik terim kullanma."
         if is_tr
-        else "Respond entirely in ENGLISH."
+        else "Respond entirely in plain, user-friendly ENGLISH. Never mention technical coordinates like Δx, Δy, pt, or JSON keys."
     )
     system_prompt = (
-        "You are a precise document comparison analyst. "
-        "Given a structured list of differences and position shifts between Document A (Left) and Document B (Right), "
-        "distinguish between pure layout/position shifts (where the text is identical but moved on the page) "
-        "and real content/value changes. "
+        "You are a clear, user-friendly document comparison assistant. "
+        "Explain what actually changed between Document A (Left) and Document B (Right) in plain everyday language so a non-technical reader understands immediately. "
+        "Clearly separate items whose text stayed the same and only moved on the page from real wording, title, date, or content edits. "
         f"{lang_instruction} "
         "Return ONLY valid JSON matching this schema:\n"
         "{\n"
-        '  "summary": "2-3 sentence executive summary of what changed",\n'
+        '  "summary": "2-3 sentence clear summary of the main differences",\n'
         '  "verdict": "layout_only | minor_changes | major_changes | identical_meaning",\n'
         '  "items": [\n'
         "    {\n"
         '      "id": 1,\n'
         '      "category": "content | rewording | layout",\n'
-        '      "title": "Short title",\n'
-        '      "explanation": "Clear explanation of the difference or shift"\n'
+        '      "title": "Short user-friendly title",\n'
+        '      "explanation": "1-2 plain sentences explaining what changed"\n'
         "    }\n"
         "  ]\n"
         "}"
     )
 
+    llm_digest = [
+        {
+            "id": d["id"],
+            "page": d["page"],
+            "type": d["type"],
+            "left": d["left"],
+            "right": d["right"],
+            **(
+                {"movement": d["shift_tr" if is_tr else "shift_en"]}
+                if d.get("moved_on_page")
+                else {}
+            ),
+        }
+        for d in digest
+    ]
     user_payload = {
         "document_a": Path(result.left_path).name,
         "document_b": Path(result.right_path).name,
         "similarity_pct": round(result.stats.similarity * 100, 1),
-        "differences": digest,
+        "differences": llm_digest,
     }
     messages = [
         {"role": "system", "content": system_prompt},
@@ -790,7 +850,7 @@ def analyze_comparison(
     seen_fids: set[int] = set()
 
     if parsed:
-        summary = str(parsed.get("summary") or "").strip()
+        summary = _strip_technical_jargon(str(parsed.get("summary") or "").strip())
         verdict = str(parsed.get("verdict") or "minor_changes").strip()
         if verdict not in ("identical_meaning", "layout_only", "minor_changes", "major_changes"):
             verdict = "minor_changes"
@@ -805,12 +865,14 @@ def analyze_comparison(
                 cat = str(item.get("category") or "").strip().lower()
                 if cat not in ("content", "rewording", "layout"):
                     cat = "layout" if src.get("type") == "position_shift_only" else "content"
+                clean_title = _strip_technical_jargon(str(item.get("title") or f"#{fid}"))
+                clean_expl = _strip_technical_jargon(str(item.get("explanation") or ""))
                 findings.append(
                     AiFinding(
                         id=fid,
                         category=cat,
-                        title=str(item.get("title") or f"#{fid}"),
-                        explanation=str(item.get("explanation") or ""),
+                        title=clean_title or f"#{fid}",
+                        explanation=clean_expl,
                         page=int(src.get("page") or 1),
                         row=int(src.get("row") if src.get("row") is not None else -1),
                         left_text=str(src.get("left") or ""),
@@ -818,7 +880,7 @@ def analyze_comparison(
                     )
                 )
     else:
-        summary = raw_reply[:600]
+        summary = _strip_technical_jargon(raw_reply[:600])
         all_shifts = all(d.get("type") == "position_shift_only" for d in digest)
         verdict = "layout_only" if all_shifts else "minor_changes"
 
@@ -826,28 +888,84 @@ def analyze_comparison(
         fid = int(d["id"])
         if fid in seen_fids:
             continue
-        is_shift = d.get("type") == "position_shift_only"
-        shift_str = d.get("shift") or ""
-        if is_shift:
+        dtype = d.get("type")
+        l_txt = str(d.get("left") or "").strip()
+        r_txt = str(d.get("right") or "").strip()
+        move_desc = str(d.get("shift_tr" if is_tr else "shift_en") or "")
+        preview = (r_txt or l_txt)[:42]
+        if len(r_txt or l_txt) > 42:
+            preview += "…"
+
+        if dtype == "position_shift_only":
             title = (
-                f"#{fid} Konum Kayması ({shift_str})"
+                f"Konumu Değişen Bölüm: {preview}"
                 if is_tr
-                else f"#{fid} Position Shift ({shift_str})"
+                else f"Moved Section: {preview}"
             )
-            expl = (
-                f"Metin her iki belgede de birebir aynıdır, yalnızca sayfadaki konumu değişmiştir ({shift_str})."
-                if is_tr
-                else f"The text is identical in both documents; only its position on the page shifted ({shift_str})."
-            )
+            if l_txt and r_txt and l_txt != r_txt and l_txt.casefold() == r_txt.casefold():
+                expl = (
+                    f"Metin içeriği korundu (yalnızca büyük/küçük harf biçimi değişti). {move_desc}."
+                    if is_tr
+                    else f"Text content is preserved (only letter case changed). {move_desc}."
+                )
+            else:
+                expl = (
+                    f"Metin her iki belgede de birebir aynı; yalnızca sayfa düzenindeki yeri değişti ({move_desc.lower()})."
+                    if is_tr
+                    else f"The text is identical in both documents; only its placement on the page changed ({move_desc.lower()})."
+                )
             cat = "layout"
-        else:
-            title = f"#{fid} İçerik Farkı" if is_tr else f"#{fid} Content Difference"
-            expl = (
-                f"Sol: '{d.get('left')}' → Sağ: '{d.get('right')}'"
+        elif dtype == "added":
+            title = (
+                f"Yeni Eklenen: {preview}"
                 if is_tr
-                else f"Left: '{d.get('left')}' → Right: '{d.get('right')}'"
+                else f"Newly Added: {preview}"
+            )
+            expl = (
+                "Sol belgede (A) bulunmayan bu bilgi sağ belgeye (B) yeni eklenmiş."
+                if is_tr
+                else "This content was added in Document B and does not appear in Document A."
             )
             cat = "content"
+        elif dtype == "removed":
+            title = (
+                f"Çıkarılan Bölüm: {preview}"
+                if is_tr
+                else f"Removed Section: {preview}"
+            )
+            expl = (
+                "Sol belgede (A) yer alan bu metin sağ belgede (B) kaldırılmış."
+                if is_tr
+                else "This text was present in Document A but removed from Document B."
+            )
+            cat = "content"
+        else:
+            if l_txt.casefold() == r_txt.casefold():
+                title = (
+                    f"Yazım Biçimi Güncellendi: {preview}"
+                    if is_tr
+                    else f"Formatting / Case Updated: {preview}"
+                )
+                expl = (
+                    "Metin içeriği aynı kalmış, yalnızca büyük/küçük harf yazılışı değiştirilmiş."
+                    if is_tr
+                    else "The wording is the same; only the capitalization changed."
+                )
+                cat = "rewording"
+            else:
+                title = (
+                    f"Güncellenen Metin: {preview}"
+                    if is_tr
+                    else f"Updated Text: {preview}"
+                )
+                expl = (
+                    "Bu satırdaki ifade veya bilgiler güncellenmiş."
+                    + (f" Ayrıca sayfadaki konumu değişmiş ({move_desc.lower()})." if move_desc else "")
+                    if is_tr
+                    else "The wording or details in this section were updated."
+                    + (f" Its position on the page also shifted ({move_desc.lower()})." if move_desc else "")
+                )
+                cat = "content"
         findings.append(
             AiFinding(
                 id=fid,
@@ -856,26 +974,26 @@ def analyze_comparison(
                 explanation=expl,
                 page=int(d.get("page") or 1),
                 row=int(d.get("row") if d.get("row") is not None else -1),
-                left_text=str(d.get("left") or ""),
-                right_text=str(d.get("right") or ""),
+                left_text=l_txt,
+                right_text=r_txt,
             )
         )
 
     if not summary:
-        only_layout = all(f.category == "layout" for f in findings)
-        summary = (
-            "İki belgedeki tüm metinler eşleşmektedir; tespit edilen farklar yalnızca sayfa düzeni ve konum kaymalarından ibarettir."
-            if (only_layout and is_tr)
-            else (
-                "All texts match across both documents; the detected differences are purely layout and position shifts."
-                if only_layout
-                else (
-                    f"Toplam {len(findings)} maddede fark veya konum değişimi incelendi."
-                    if is_tr
-                    else f"Analyzed {len(findings)} differences and layout shifts across the documents."
-                )
+        content_cnt = sum(1 for f in findings if f.category != "layout")
+        layout_cnt = sum(1 for f in findings if f.category == "layout")
+        if content_cnt == 0 and layout_cnt > 0:
+            summary = (
+                f"İki belgedeki metinler eşleşmektedir; incelenen {layout_cnt} noktada yalnızca sayfa düzeni ve konum değişikliği tespit edildi."
+                if is_tr
+                else f"The text across both documents matches; all {layout_cnt} highlighted items are layout or position changes only."
             )
-        )
+        else:
+            summary = (
+                f"Öne çıkan farklar incelendi: {content_cnt} içerik/ifade değişikliği ve {layout_cnt} konum değişikliği aşağıda özetlenmiştir."
+                if is_tr
+                else f"Key differences analyzed: {content_cnt} content/wording updates and {layout_cnt} layout movements are summarized below."
+            )
 
     elapsed_ms = int((time.monotonic() - started) * 1000)
     analysis_res = AiAnalysisResult(
@@ -917,29 +1035,28 @@ def explain_row_with_ai(
     base_url, model_label = ensure_server_running(cfg, ai_dir)
     is_tr = str(language).lower().startswith("tr")
     lang_instruction = (
-        "Yanıtını tamamen TÜRKÇE olarak ver."
+        "Yanıtını tamamen TÜRKÇE, sade ve anlaşılır bir dille ver. Asla Δx, Δy, pt veya teknik koordinat yazma."
         if is_tr
-        else "Respond entirely in ENGLISH."
+        else "Respond entirely in plain, user-friendly ENGLISH. Never mention technical coordinates like Δx, Δy, or pt."
     )
 
     system_prompt = (
-        "You are a precise document comparison assistant. "
-        "Explain the difference or layout shift for this single row in 1-2 concise sentences. "
+        "You are a clear document comparison assistant. "
+        "Explain what changed in this single line in 1-2 simple sentences for an everyday user. "
         f"{lang_instruction} "
         "Return ONLY valid JSON:\n"
         "{\n"
         '  "category": "content | rewording | layout",\n'
         '  "title": "Short title",\n'
-        '  "explanation": "1-2 sentence explanation"\n'
+        '  "explanation": "1-2 sentence plain explanation"\n'
         "}"
     )
     user_payload = {
-        "row": row_index,
         "page": page_num,
         "kind": row.kind,
         "left": left_txt[:400],
         "right": right_txt[:400],
-        "position_shift": shift_meta.get("label") if shift_meta else None,
+        "movement": _humanize_shift(shift_meta, is_tr=is_tr) if shift_meta else None,
     }
     raw_reply = _chat_completion(
         base_url,
@@ -955,13 +1072,13 @@ def explain_row_with_ai(
     if parsed:
         cat = str(parsed.get("category") or "").strip().lower()
         if cat not in ("content", "rewording", "layout"):
-            cat = "layout" if (shift_meta and left_txt == right_txt) else "content"
-        title = str(parsed.get("title") or f"#{item_id}").strip()
-        explanation = str(parsed.get("explanation") or raw_reply[:240]).strip()
+            cat = "layout" if (shift_meta and left_txt.casefold() == right_txt.casefold()) else "content"
+        title = _strip_technical_jargon(str(parsed.get("title") or f"#{item_id}").strip())
+        explanation = _strip_technical_jargon(str(parsed.get("explanation") or raw_reply[:240]).strip())
     else:
-        cat = "layout" if (shift_meta and left_txt == right_txt) else "content"
+        cat = "layout" if (shift_meta and left_txt.casefold() == right_txt.casefold()) else "content"
         title = f"#{item_id}"
-        explanation = raw_reply.strip()[:280]
+        explanation = _strip_technical_jargon(raw_reply.strip()[:280])
 
     finding = AiFinding(
         id=item_id,

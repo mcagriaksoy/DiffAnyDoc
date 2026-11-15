@@ -2650,8 +2650,88 @@ mark.search-match.active {
 }
 
 body.boxes-off .page-shift-svg,
-body.boxes-off .cross-page-svg {
+body.boxes-off .cross-page-svg,
+body.lines-off .cross-page-svg {
   display: none;
+}
+
+.overlay-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  gap: 1px;
+  border-radius: 7px;
+  background: var(--view-bg-color);
+  border: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.overlay-mode-switch[hidden] {
+  display: none;
+}
+
+.overlay-mode-btn {
+  height: 24px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dim-label-color);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.overlay-mode-btn:hover {
+  color: var(--window-fg-color);
+  background: var(--headerbar-shade-color);
+}
+
+.overlay-mode-btn.active {
+  background: var(--accent-bg-color);
+  color: var(--accent-fg-color);
+  font-weight: 600;
+}
+
+.ai-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+
+.ai-stat-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 9px;
+  background: var(--card-bg-color);
+  border: 1px solid var(--border-color);
+}
+
+.ai-stat-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--dim-label-color);
+}
+
+.ai-stat-value {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--window-fg-color);
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-finding-snippets.single {
+  grid-template-columns: 1fr;
+}
+
+.ai-snip-tag {
+  font-family: var(--font-ui);
+  font-weight: 600;
+  color: var(--dim-label-color);
 }
 
 /* ---------- Local AI Semantic View (libadwaita flat cards) ---------- */
